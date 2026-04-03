@@ -17,6 +17,22 @@ export interface AuthResponse {
   redirectTo: string
 }
 
+export interface ConnectedAccountResponse {
+  accounts: Array<{
+    id: string
+    platform: string
+    connected: boolean
+    status: string
+    username: string | null
+    externalId: string | null
+    expiresAt: string | null
+  }>
+}
+
+export interface PlatformConnectionResponse {
+  authorizationUrl: string
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -115,7 +131,7 @@ async function request<T>(
     token,
     method = "GET",
     body,
-  }: { token: string; method?: "GET" | "POST"; body?: Record<string, unknown> },
+  }: { token: string; method?: "GET" | "POST" | "DELETE"; body?: Record<string, unknown> },
 ) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -159,5 +175,26 @@ export async function loginWithRole(token: string, role: AppRole) {
 export async function getCurrentUserProfile(token: string) {
   return request<AuthResponse>("/api/auth/me", {
     token,
+  })
+}
+
+export async function getConnectedAccounts(token: string) {
+  return request<ConnectedAccountResponse>("/api/integrations/accounts", {
+    token,
+  })
+}
+
+export async function startPlatformConnection(token: string, platform: string, role: AppRole) {
+  return request<PlatformConnectionResponse>("/api/integrations/connect", {
+    token,
+    method: "POST",
+    body: { platform, role },
+  })
+}
+
+export async function disconnectPlatform(token: string, platform: string) {
+  return request<{ success: boolean }>(`/api/integrations/accounts/${platform}`, {
+    token,
+    method: "DELETE",
   })
 }

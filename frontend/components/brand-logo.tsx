@@ -34,7 +34,7 @@ export function BrandLogo({
         <Zap className="h-5 w-5" />
       </div>
       {showText ? (
-        <span className={cn("text-lg font-semibold tracking-tight text-foreground", textClassName)}>
+        <span className={cn("text-lg font-semibold tracking-tight text-foreground")}>
           {text}
         </span>
       ) : null}

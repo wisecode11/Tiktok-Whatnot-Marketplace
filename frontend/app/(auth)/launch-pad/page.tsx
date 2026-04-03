@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, Suspense } from "react"
+import { useAuth } from "@clerk/nextjs"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { BRAND_HANDLE_PREFIX, BRAND_NAME } from "@/lib/brand"
@@ -19,9 +20,17 @@ import {
   Video,
   Users,
   AlertCircle,
-  RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  disconnectPlatform,
+  getClerkErrorMessage,
+  getConnectedAccounts,
+  normalizeRole,
+  startPlatformConnection,
+  waitForSessionToken,
+  type AppRole,
+} from "@/lib/auth"
 
 interface Platform {
   id: string
@@ -32,6 +41,7 @@ interface Platform {
   connecting: boolean
   username?: string
   required?: boolean
+  error?: string
 }
 
 const initialPlatforms: Platform[] = [
@@ -58,49 +68,155 @@ const initialPlatforms: Platform[] = [
 function LaunchPadContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const role = searchParams.get("role") || "streamer"
+  const { getToken, isLoaded } = useAuth()
+  const role = normalizeRole(searchParams.get("role")) || "streamer"
   
   const [platforms, setPlatforms] = useState<Platform[]>(initialPlatforms)
   const [isLaunching, setIsLaunching] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const [feedbackMessage, setFeedbackMessage] = useState("")
+  const [errorMessage, setErrorMessage] = useState("")
+
+  useEffect(() => {
+    const platform = searchParams.get("platform")
+    const status = searchParams.get("status")
+    const message = searchParams.get("message")
+
+    if (!platform || !status) {
+      return
+    }
+
+    if (status === "connected") {
+      setFeedbackMessage(`${platform === "tiktok" ? "TikTok Shop" : platform} connected successfully.`)
+      setErrorMessage("")
+      return
+    }
+
+    if (status === "error") {
+      setFeedbackMessage("")
+      setErrorMessage(message || `Unable to connect ${platform}.`)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadConnections() {
+      if (!isLoaded) {
+        return
+      }
+
+      setIsRefreshing(true)
+
+      try {
+        const token = await waitForSessionToken(getToken)
+        const result = await getConnectedAccounts(token)
+
+        if (cancelled) {
+          return
+        }
+
+        setPlatforms((prev) =>
+          prev.map((platform) => {
+            const connection = result.accounts.find((account) => account.platform === platform.id && account.connected)
+
+            if (!connection) {
+              return { ...platform, connected: false, connecting: false, username: undefined }
+            }
+
+            return {
+              ...platform,
+              connected: true,
+              connecting: false,
+              username: connection.username || `@${BRAND_HANDLE_PREFIX}_${platform.id}`,
+            }
+          }),
+        )
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(getClerkErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) {
+          setIsRefreshing(false)
+        }
+      }
+    }
+
+    void loadConnections()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, isLoaded])
 
   const connectedCount = platforms.filter((p) => p.connected).length
   const hasRequiredPlatform = platforms.some((p) => p.required && p.connected)
   const progress = (connectedCount / platforms.length) * 100
 
   const handleConnect = async (platformId: string) => {
-    // Set connecting state
     setPlatforms((prev) =>
       prev.map((p) =>
         p.id === platformId ? { ...p, connecting: true } : p
       )
     )
 
-    // Simulate OAuth flow
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    setFeedbackMessage("")
+    setErrorMessage("")
 
-    // Update connected state with mock username
-    setPlatforms((prev) =>
-      prev.map((p) =>
-        p.id === platformId
-          ? {
-              ...p,
-              connecting: false,
-              connected: true,
-              username: `@${BRAND_HANDLE_PREFIX}_${platformId}`,
-            }
-          : p
+    try {
+      if (platformId === "tiktok") {
+        const token = await waitForSessionToken(getToken)
+        const result = await startPlatformConnection(token, platformId, role as AppRole)
+        window.location.href = result.authorizationUrl
+        return
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+
+      setPlatforms((prev) =>
+        prev.map((p) =>
+          p.id === platformId
+            ? {
+                ...p,
+                connecting: false,
+                connected: true,
+                username: `@${BRAND_HANDLE_PREFIX}_${platformId}`,
+              }
+            : p,
+        ),
       )
-    )
+    } catch (error) {
+      setPlatforms((prev) =>
+        prev.map((p) =>
+          p.id === platformId ? { ...p, connecting: false } : p,
+        ),
+      )
+      setErrorMessage(getClerkErrorMessage(error))
+    }
   }
 
-  const handleDisconnect = (platformId: string) => {
-    setPlatforms((prev) =>
-      prev.map((p) =>
-        p.id === platformId
-          ? { ...p, connected: false, username: undefined }
-          : p
+  const handleDisconnect = async (platformId: string) => {
+    setErrorMessage("")
+    setFeedbackMessage("")
+
+    try {
+      if (platformId === "tiktok") {
+        const token = await waitForSessionToken(getToken)
+        await disconnectPlatform(token, platformId)
+      }
+
+      setPlatforms((prev) =>
+        prev.map((p) =>
+          p.id === platformId
+            ? { ...p, connected: false, username: undefined }
+            : p,
+        ),
       )
-    )
+      setFeedbackMessage(`${platformId === "tiktok" ? "TikTok Shop" : platformId} disconnected.`)
+    } catch (error) {
+      setErrorMessage(getClerkErrorMessage(error))
+    }
   }
 
   const handleLaunch = async () => {
@@ -150,12 +266,24 @@ function LaunchPadContent() {
               </p>
             </div>
             <StatusBadge variant={hasRequiredPlatform ? "success" : "warning"}>
-              {hasRequiredPlatform ? "Ready to launch" : "Setup required"}
+              {isRefreshing ? "Checking connections" : hasRequiredPlatform ? "Ready to launch" : "Setup required"}
             </StatusBadge>
           </div>
           <Progress value={progress} className="mt-4 h-2" />
         </CardContent>
       </Card>
+
+      {feedbackMessage ? (
+        <Card className="border-success/30 bg-success/10">
+          <CardContent className="p-4 text-sm text-success">{feedbackMessage}</CardContent>
+        </Card>
+      ) : null}
+
+      {errorMessage ? (
+        <Card className="border-destructive/30 bg-destructive/10">
+          <CardContent className="p-4 text-sm text-destructive">{errorMessage}</CardContent>
+        </Card>
+      ) : null}
 
       {/* Platforms Grid */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -206,7 +334,7 @@ function LaunchPadContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleDisconnect(platform.id)}
+                      onClick={() => void handleDisconnect(platform.id)}
                       className="text-muted-foreground hover:text-destructive"
                     >
                       Disconnect
@@ -217,7 +345,7 @@ function LaunchPadContent() {
                     variant="outline"
                     size="sm"
                     className="w-full gap-2"
-                    onClick={() => handleConnect(platform.id)}
+                    onClick={() => void handleConnect(platform.id)}
                     disabled={platform.connecting}
                   >
                     {platform.connecting ? (

@@ -5,6 +5,7 @@ const express = require("express");
 
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const integrationRoutes = require("./routes/integrationRoutes");
 const models = require("./models");
 
 const app = express();
@@ -17,6 +18,7 @@ app.use(
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/integrations", integrationRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, models: Object.keys(models).length });
