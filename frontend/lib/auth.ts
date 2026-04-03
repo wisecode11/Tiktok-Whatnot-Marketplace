@@ -65,6 +65,22 @@ export function normalizeRole(role: string | null | undefined): AppRole | null {
   return null
 }
 
+export function buildPath(
+  path: string,
+  params: Record<string, string | null | undefined> = {},
+) {
+  const searchParams = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      searchParams.set(key, value)
+    }
+  }
+
+  const query = searchParams.toString()
+  return query ? `${path}?${query}` : path
+}
+
 export function getDashboardPath(role: AppRole) {
   if (role === "admin") {
     return "/admin"

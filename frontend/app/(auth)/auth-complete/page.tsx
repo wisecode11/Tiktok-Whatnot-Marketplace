@@ -8,6 +8,7 @@ import { AlertCircle, Loader2 } from "lucide-react"
 
 import {
   AuthApiError,
+  buildPath,
   getClerkErrorMessage,
   getDashboardPath,
   loginWithRole,
@@ -82,14 +83,15 @@ export default function AuthCompletePage() {
   }, [flow, getToken, isLoaded, isSignedIn, metadataRole, requestedRole, router])
 
   useEffect(() => {
-    if (!isLoaded || !hasStartedRef.current || isSignedIn) {
+    if (!isLoaded || isSignedIn) {
       return
     }
 
-    router.replace(flow === "signup" ? "/signup" : "/login")
-  }, [flow, isLoaded, isSignedIn, router])
+    router.replace(buildPath(flow === "signup" ? "/signup" : "/login", { role: requestedRole }))
+  }, [flow, isLoaded, isSignedIn, requestedRole, router])
 
   const fallbackPortal = requestedRole ? getDashboardPath(requestedRole as AppRole) : "/login"
+  const signOutRedirectUrl = buildPath(flow === "signup" ? "/signup" : "/login", { role: requestedRole })
 
   if (!errorMessage) {
     return (
@@ -125,7 +127,7 @@ export default function AuthCompletePage() {
 
         <button
           type="button"
-          onClick={() => signOut({ redirectUrl: flow === "signup" ? "/signup" : "/login" })}
+          onClick={() => signOut({ redirectUrl: signOutRedirectUrl })}
           className="rounded-lg border border-border bg-background px-4 py-3 font-medium text-foreground transition-colors hover:bg-muted"
         >
           Sign out and try another account

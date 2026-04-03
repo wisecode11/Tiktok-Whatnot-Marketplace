@@ -1,12 +1,12 @@
 "use client"
 
 import { Suspense, useMemo, useState } from "react"
-import { SignIn } from "@clerk/nextjs"
+import { SignIn, useAuth, useClerk, useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Shield, Radio, Users, Loader2 } from "lucide-react"
 import { BrandLogo } from "../../../components/brand-logo"
-import { normalizeRole, type AppRole } from "@/lib/auth"
+import { buildPath, getDashboardPath, normalizeRole, type AppRole } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
 const clerkAppearance = {
@@ -39,16 +39,41 @@ type Role = AppRole | null
 
 function LoginContent() {
   const searchParams = useSearchParams()
+  const { isLoaded, isSignedIn } = useAuth()
+  const { signOut } = useClerk()
+  const { user } = useUser()
   const initialRole = normalizeRole(searchParams.get("role"))
   const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
 
   const signUpUrl = useMemo(() => {
-    return selectedRole ? `/signup?role=${selectedRole}` : "/signup"
+    return buildPath("/signup", { role: selectedRole })
   }, [selectedRole])
 
   const completionUrl = useMemo(() => {
-    return selectedRole ? `/auth-complete?flow=login&role=${selectedRole}` : "/auth-complete?flow=login"
+    return buildPath("/auth-complete", {
+      flow: "login",
+      role: selectedRole,
+    })
   }, [selectedRole])
+
+  const currentRole = useMemo(() => {
+    const publicRole = user?.publicMetadata?.role
+    if (typeof publicRole === "string") {
+      return normalizeRole(publicRole)
+    }
+
+    const unsafeRole = user?.unsafeMetadata?.role
+    if (typeof unsafeRole === "string") {
+      return normalizeRole(unsafeRole)
+    }
+
+    return null
+  }, [user?.publicMetadata, user?.unsafeMetadata])
+
+  const currentEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses[0]?.emailAddress || "this account"
+  const continueUrl = currentRole ? getDashboardPath(currentRole) : completionUrl
+  const switchAccountRedirectUrl = buildPath("/login", { role: selectedRole || currentRole })
+  const roleMismatch = Boolean(selectedRole && currentRole && selectedRole !== currentRole)
 
   const roleOptions = [
     {
@@ -124,12 +149,46 @@ function LoginContent() {
           </div>
         </div>
 
-        {selectedRole ? (
+        {isLoaded && isSignedIn ? (
+          <div className="rounded-[1.15rem] border border-border bg-background/90 p-5 shadow-sm">
+            <div className="space-y-2 text-center">
+              <h2 className="text-xl font-semibold text-foreground">You are already signed in</h2>
+              <p className="text-sm text-muted-foreground">
+                {currentEmail}
+                {currentRole ? ` is active in the ${currentRole} portal.` : " already has an active session in this browser."}
+              </p>
+              {roleMismatch ? (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  Sign out first to switch from {currentRole} to {selectedRole}.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <Link
+                href={continueUrl}
+                className="inline-flex h-11 items-center justify-center rounded-lg bg-gradient-to-r from-primary to-accent px-4 text-sm font-semibold text-primary-foreground shadow-[0_18px_35px_-20px_var(--color-primary)] hover:opacity-95"
+              >
+                Continue to your dashboard
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => void signOut({ redirectUrl: switchAccountRedirectUrl })}
+                className="inline-flex h-11 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+              >
+                Sign out and use another account
+              </button>
+            </div>
+          </div>
+        ) : selectedRole ? (
           <div className="w-full">
             <SignIn
               key={`sign-in-${selectedRole}`}
               routing="hash"
               signUpUrl={signUpUrl}
+              signUpFallbackRedirectUrl={completionUrl}
+              signUpForceRedirectUrl={completionUrl}
               fallbackRedirectUrl={completionUrl}
               forceRedirectUrl={completionUrl}
               appearance={clerkAppearance}
