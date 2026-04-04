@@ -7,6 +7,7 @@ const {
   startConnection,
   tiktokCallback,
 } = require("../controllers/integrationController");
+
 const { authenticateRequest } = require("../middleware/authenticate");
 
 const router = express.Router();

@@ -13,7 +13,7 @@ function sendError(res, error) {
   if (error.details) {
     payload.details = error.details;
   }
-
+  
   return res.status(status).json(payload);
 }
 
