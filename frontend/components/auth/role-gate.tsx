@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs"
 import { Loader2 } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
+import { AuthenticatedUserProvider } from "@/components/auth/authenticated-user-context"
 import { getCurrentUserProfile, type AppRole, type AuthUserProfile, AuthApiError } from "@/lib/auth"
 
 type RoleGateProps = {
@@ -87,5 +88,5 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
     )
   }
 
-  return <>{children}</>
+  return <AuthenticatedUserProvider user={authorizedUser}>{children}</AuthenticatedUserProvider>
 }

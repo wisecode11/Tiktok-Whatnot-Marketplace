@@ -206,7 +206,7 @@ function SignupContent() {
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-border/80 bg-background/70 px-4 py-8 text-center text-sm text-muted-foreground dark:bg-background/40">
-            Select a role above to sign up.
+            Select a role above to open Clerk sign up.
           </div>
         )}
 

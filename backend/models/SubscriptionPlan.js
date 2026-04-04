@@ -6,20 +6,34 @@ const SubscriptionPlanSchema = new mongoose.Schema({
   _id: { type: String, default: uuid },
 
   name: String,
+  description: String,
   price: Number,
+  currency: String,
 
-  billing_interval: {
-    type: String,
-    enum: ["monthly", "yearly"],
-  },
+  billing_interval: String,
 
   stripe_price_id: String,
+  stripe_product_id: String,
 
-  features_json: Object,
+  features_json: {
+    type: [String],
+    default: [],
+  },
+
+  metadata_json: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
+
+  display_order: {
+    type: Number,
+    default: 0,
+  },
 
   is_active: Boolean,
 
   created_at: Date,
+  updated_at: Date,
 });
 
 module.exports = mongoose.model(

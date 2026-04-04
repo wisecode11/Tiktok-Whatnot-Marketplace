@@ -15,12 +15,13 @@ const WorkspaceSubscriptionSchema = new mongoose.Schema({
     ref: "SubscriptionPlan",
   },
 
+  stripe_customer_id: String,
   stripe_subscription_id: String,
+  stripe_price_id: String,
+  stripe_latest_invoice_id: String,
+  latest_payment_status: String,
 
-  status: {
-    type: String,
-    enum: ["trial", "active", "past_due", "cancelled", "incomplete"],
-  },
+  status: String,
 
   current_period_start: Date,
   current_period_end: Date,

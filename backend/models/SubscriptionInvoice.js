@@ -11,19 +11,20 @@ const SubscriptionInvoiceSchema = new mongoose.Schema({
   },
 
   stripe_invoice_id: String,
+  stripe_subscription_id: String,
+  stripe_payment_intent_id: String,
 
   amount_due_cents: Number,
   amount_paid_cents: Number,
+  currency: String,
 
-  status: {
-    type: String,
-    enum: ["draft", "open", "paid", "void", "uncollectible"],
-  },
+  status: String,
 
   hosted_invoice_url: String,
   invoice_pdf_url: String,
 
   created_at: Date,
+  updated_at: Date,
 });
 
 module.exports = mongoose.model(

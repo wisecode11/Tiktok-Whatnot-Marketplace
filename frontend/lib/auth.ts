@@ -214,16 +214,3 @@ export async function disconnectPlatform(token: string, platform: string) {
     method: "DELETE",
   })
 }
-
-export interface StripeStatusResponse {
-  connected: boolean
-  chargesEnabled: boolean
-  payoutsEnabled: boolean
-  requirements: string[]
-  detailsSubmitted: boolean
-  stripeAccountId: string
-}
-
-export async function getStripeStatus(token: string) {
-  return request<StripeStatusResponse>("/api/integrations/stripe/status", { token })
-}

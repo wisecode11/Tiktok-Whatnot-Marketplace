@@ -13,6 +13,10 @@ const SellerWorkspaceSchema = new mongoose.Schema({
   business_name: String,
   description: String,
   country: String,
+  billing_email: String,
+  billing_name: String,
+  stripe_customer_id: String,
+  stripe_default_payment_method_id: String,
 
   status: {
     type: String,

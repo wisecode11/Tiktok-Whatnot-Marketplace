@@ -5,6 +5,8 @@ const express = require("express");
 
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const billingRoutes = require("./routes/billingRoutes");
+const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
 const models = require("./models");
 
@@ -15,9 +17,15 @@ app.use(
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
   }),
 );
+app.post(
+  "/api/billing/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  stripeWebhook,
+);
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/billing", billingRoutes);
 app.use("/api/integrations", integrationRoutes);
 
 app.get("/health", (req, res) => {

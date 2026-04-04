@@ -1,6 +1,7 @@
 "use client"
 
 import { RoleGate } from "@/components/auth/role-gate"
+import { SellerSubscriptionAccessProvider } from "@/components/dashboard/seller-subscription-access"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { Topbar } from "@/components/dashboard/topbar"
@@ -24,23 +25,23 @@ const sellerNavigation = [
     items: [
       { title: "Launch Pad", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
-      { title: "Analytics", href: "/seller/analytics", icon: BarChart3 },
+      { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
       { title: "Calendar", href: "/seller/calendar", icon: Calendar },
     ],
   },
   {
     label: "Commerce",
     items: [
-      { title: "Products", href: "/seller/products", icon: Package, badge: 4 },
-      { title: "Team", href: "/seller/team", icon: Users },
+      { title: "Products", href: "/seller/products", icon: Package, badge: 4, requiresSubscription: true },
+      { title: "Team", href: "/seller/team", icon: Users, requiresSubscription: true },
       { title: "Content", href: "/seller/content", icon: FileText },
     ],
   },
   {
     label: "Tools",
     items: [
-      { title: "AI Tools", href: "/seller/ai-tools", icon: Brain },
-      { title: "Find Moderators", href: "/seller/moderators", icon: UserSearch },
+      { title: "AI Tools", href: "/seller/ai-tools", icon: Brain, requiresSubscription: true },
+      { title: "Find Moderators", href: "/seller/moderators", icon: UserSearch, requiresSubscription: true },
     ],
   },
   {
@@ -63,24 +64,26 @@ export default function SellerLayout({
 }) {
   return (
     <RoleGate allowedRoles={["streamer"]} unauthenticatedPath="/login">
-      <SidebarProvider>
-        <AppSidebar
-          navigation={sellerNavigation}
-          user={{
-            name: "Alex Chen",
-            email: "alex@techstyle.com",
-            avatar: "/avatars/alex.jpg",
-          }}
-          logo={{
-            href: "/seller",
-          }}
-          footerItems={footerItems}
-        />
-        <SidebarInset>
-          <Topbar />
-          <main className="flex-1 p-4 md:p-6">{children}</main>
-        </SidebarInset>
-      </SidebarProvider>
+      <SellerSubscriptionAccessProvider>
+        <SidebarProvider>
+          <AppSidebar
+            navigation={sellerNavigation}
+            user={{
+              name: "Alex Chen",
+              email: "alex@techstyle.com",
+              avatar: "/avatars/alex.jpg",
+            }}
+            logo={{
+              href: "/seller",
+            }}
+            footerItems={footerItems}
+          />
+          <SidebarInset>
+            <Topbar />
+            <main className="flex-1 p-4 md:p-6">{children}</main>
+          </SidebarInset>
+        </SidebarProvider>
+      </SellerSubscriptionAccessProvider>
     </RoleGate>
   )
 }

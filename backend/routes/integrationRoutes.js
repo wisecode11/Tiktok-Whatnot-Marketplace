@@ -1,7 +1,6 @@
 const express = require("express");
 
 const {
-  checkStripeStatus,
   listConnections,
   removeConnection,
   startConnection,
@@ -14,7 +13,6 @@ const router = express.Router();
 router.get("/accounts", authenticateRequest, listConnections);
 router.post("/connect", authenticateRequest, startConnection);
 router.delete("/accounts/:platform", authenticateRequest, removeConnection);
-router.get("/stripe/status", authenticateRequest, checkStripeStatus);
 router.get("/tiktok/callback", tiktokCallback);
 
 module.exports = router;
