@@ -1,4 +1,5 @@
 const {
+  checkStripeAccountStatus,
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
@@ -14,6 +15,15 @@ function sendError(res, error) {
   }
   
   return res.status(status).json(payload);
+}
+
+async function checkStripeStatus(req, res) {
+  try {
+    const result = await checkStripeAccountStatus({ clerkUserId: req.auth.userId });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
 }
 
 async function startConnection(req, res) {
@@ -64,6 +74,7 @@ async function tiktokCallback(req, res) {
 }
 
 module.exports = {
+  checkStripeStatus,
   listConnections,
   removeConnection,
   startConnection,

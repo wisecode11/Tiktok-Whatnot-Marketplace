@@ -26,6 +26,7 @@ import {
   disconnectPlatform,
   getClerkErrorMessage,
   getConnectedAccounts,
+  getStripeStatus,
   normalizeRole,
   startPlatformConnection,
   waitForSessionToken,
@@ -44,7 +45,7 @@ interface Platform {
   error?: string
 }
 
-const initialPlatforms: Platform[] = [
+const streamerPlatforms: Platform[] = [
   {
     id: "tiktok",
     name: "TikTok Shop",
@@ -62,7 +63,18 @@ const initialPlatforms: Platform[] = [
     connected: false,
     connecting: false,
   },
-  
+]
+
+const moderatorPlatforms: Platform[] = [
+  {
+    id: "stripe",
+    name: "Stripe Payments",
+    logo: "ST",
+    description: "Connect your Stripe account to receive payouts for moderation work",
+    connected: false,
+    connecting: false,
+    required: true,
+  },
 ]
 
 function LaunchPadContent() {
@@ -70,8 +82,10 @@ function LaunchPadContent() {
   const searchParams = useSearchParams()
   const { getToken, isLoaded } = useAuth()
   const role = normalizeRole(searchParams.get("role")) || "streamer"
-  
-  const [platforms, setPlatforms] = useState<Platform[]>(initialPlatforms)
+
+  const [platforms, setPlatforms] = useState<Platform[]>(() =>
+    role === "moderator" ? moderatorPlatforms : streamerPlatforms
+  )
   const [isLaunching, setIsLaunching] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(true)
   const [feedbackMessage, setFeedbackMessage] = useState("")
@@ -86,6 +100,42 @@ function LaunchPadContent() {
       return
     }
 
+    if (platform === "stripe" && status === "return") {
+      async function verifyStripe() {
+        try {
+          const token = await waitForSessionToken(getToken)
+          const result = await getStripeStatus(token)
+
+          if (result.connected) {
+            setPlatforms((prev) =>
+              prev.map((p) =>
+                p.id === "stripe"
+                  ? { ...p, connected: true, connecting: false, username: result.stripeAccountId }
+                  : p,
+              ),
+            )
+            setFeedbackMessage("Stripe account connected successfully. You are ready to receive payouts.")
+            setErrorMessage("")
+          } else {
+            setFeedbackMessage("")
+            setErrorMessage(
+              "Stripe onboarding is incomplete. Please finish all required steps to enable payouts.",
+            )
+          }
+        } catch (error) {
+          setErrorMessage(getClerkErrorMessage(error))
+        }
+      }
+
+      void verifyStripe()
+      return
+    }
+
+    if (platform === "stripe" && status === "refresh") {
+      setErrorMessage("Stripe onboarding link expired. Click \"Connect Stripe Payments\" to get a new link.")
+      return
+    }
+
     if (status === "connected") {
       setFeedbackMessage(`${platform === "tiktok" ? "TikTok Shop" : platform} connected successfully.`)
       setErrorMessage("")
@@ -96,6 +146,7 @@ function LaunchPadContent() {
       setFeedbackMessage("")
       setErrorMessage(message || `Unable to connect ${platform}.`)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
   useEffect(() => {
@@ -165,7 +216,7 @@ function LaunchPadContent() {
     setErrorMessage("")
 
     try {
-      if (platformId === "tiktok") {
+      if (platformId === "tiktok" || platformId === "stripe") {
         const token = await waitForSessionToken(getToken)
         const result = await startPlatformConnection(token, platformId, role as AppRole)
         window.location.href = result.authorizationUrl
@@ -201,10 +252,12 @@ function LaunchPadContent() {
     setFeedbackMessage("")
 
     try {
-      if (platformId === "tiktok") {
+      if (platformId === "tiktok" || platformId === "stripe") {
         const token = await waitForSessionToken(getToken)
         await disconnectPlatform(token, platformId)
       }
+
+      const label = platformId === "tiktok" ? "TikTok Shop" : platformId === "stripe" ? "Stripe Payments" : platformId
 
       setPlatforms((prev) =>
         prev.map((p) =>
@@ -213,7 +266,7 @@ function LaunchPadContent() {
             : p,
         ),
       )
-      setFeedbackMessage(`${platformId === "tiktok" ? "TikTok Shop" : platformId} disconnected.`)
+      setFeedbackMessage(`${label} disconnected.`)
     } catch (error) {
       setErrorMessage(getClerkErrorMessage(error))
     }
@@ -375,12 +428,30 @@ function LaunchPadContent() {
             <div className="text-sm">
               <p className="font-medium text-warning">Platform Required</p>
               <p className="mt-1 text-warning/80">
-                Please connect at least TikTok Shop to continue. This is required for the core platform functionality.
+                {role === "moderator"
+                  ? "Please connect your Stripe account to enable payouts before launching your dashboard."
+                  : "Please connect at least TikTok Shop to continue. This is required for the core platform functionality."}
               </p>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {role === "streamer" ? (
+        <Card className="border-border/60 bg-card/60">
+          <CardContent className="flex items-start gap-3 p-4 text-sm text-muted-foreground">
+            <AlertCircle className="h-5 w-5 shrink-0 text-primary" />
+            <div>
+              <p className="font-medium text-foreground">TikTok sandbox testing note</p>
+              <p className="mt-1">
+                If your TikTok app is still in sandbox mode, the TikTok account you use for login must be added in the
+                app&apos;s Target Users list inside the TikTok developer portal. Otherwise TikTok can block login before it
+                returns to this app.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Action Buttons */}
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">

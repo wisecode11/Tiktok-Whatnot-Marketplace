@@ -1,11 +1,12 @@
 "use client"
 
+import { Suspense } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { BRAND_NAME } from "@/lib/brand"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Video, Users, Shield, ArrowRight } from "lucide-react"
+import { Video, Users, Shield, ArrowRight, Loader2 } from "lucide-react"
 
 const roles = [
   {
@@ -37,7 +38,7 @@ const roles = [
   },
 ]
 
-export default function GetStartedPage() {
+function GetStartedContent() {
   const searchParams = useSearchParams()
   const preselectedRole = searchParams.get("role")
 
@@ -139,5 +140,13 @@ export default function GetStartedPage() {
         </Link>
       </p>
     </div>
+  )
+}
+
+export default function GetStartedPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+      <GetStartedContent />
+    </Suspense>
   )
 }

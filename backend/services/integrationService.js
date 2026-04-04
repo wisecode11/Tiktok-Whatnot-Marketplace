@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 
+const Stripe = require("stripe");
 const ConnectedAccount = require("../models/ConnectedAccount");
 const User = require("../models/Users");
 const { decryptText, encryptText } = require("../utils/crypto");
@@ -58,7 +59,30 @@ function normalizePlatform(platform) {
     return "whatnot";
   }
 
+  if (normalized === "stripe") {
+    return "stripe";
+  }
+
   return null;
+}
+
+function getStripeClient() {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+
+  if (!secretKey || secretKey.includes("REPLACE_WITH")) {
+    throw createHttpError(500, "Stripe integration is not configured on the server. Add STRIPE_SECRET_KEY to .env");
+  }
+
+  return new Stripe(secretKey, { apiVersion: "2025-03-31.basil" });
+}
+
+function getStripeConfig() {
+  const frontendUrl = getFrontendUrl();
+
+  return {
+    returnUrl: process.env.STRIPE_CONNECT_RETURN_URL || `${frontendUrl}/launch-pad`,
+    refreshUrl: process.env.STRIPE_CONNECT_REFRESH_URL || `${frontendUrl}/launch-pad`,
+  };
 }
 
 function toBase64Url(value) {
@@ -199,8 +223,12 @@ async function createConnectionSession({ clerkUserId, role, platform }) {
     throw createHttpError(400, "Unsupported platform.");
   }
 
+  if (normalizedPlatform === "stripe") {
+    return createStripeConnectSession({ clerkUserId, role });
+  }
+
   if (normalizedPlatform !== "tiktok") {
-    throw createHttpError(400, "Only TikTok connection is implemented right now.");
+    throw createHttpError(400, "Only TikTok and Stripe connections are implemented right now.");
   }
 
   await findLocalUser(clerkUserId);
@@ -228,6 +256,103 @@ async function createConnectionSession({ clerkUserId, role, platform }) {
 
   return {
     authorizationUrl: authorizationUrl.toString(),
+  };
+}
+
+async function createStripeConnectSession({ clerkUserId, role }) {
+  const stripe = getStripeClient();
+  const { returnUrl, refreshUrl } = getStripeConfig();
+  const user = await findLocalUser(clerkUserId);
+
+  const returnUrlWithParams = new URL(returnUrl);
+  returnUrlWithParams.searchParams.set("platform", "stripe");
+  returnUrlWithParams.searchParams.set("status", "return");
+  returnUrlWithParams.searchParams.set("role", role);
+
+  const refreshUrlWithParams = new URL(refreshUrl);
+  refreshUrlWithParams.searchParams.set("platform", "stripe");
+  refreshUrlWithParams.searchParams.set("status", "refresh");
+  refreshUrlWithParams.searchParams.set("role", role);
+
+  const now = new Date();
+
+  let account = await ConnectedAccount.findOne({ user_id: user._id, platform: "stripe" });
+  let stripeAccountId = account && account.account_external_id ? account.account_external_id : null;
+
+  if (!stripeAccountId) {
+    const stripeAccount = await stripe.accounts.create({
+      type: "express",
+      metadata: { clerkUserId, localUserId: user._id.toString() },
+    });
+
+    stripeAccountId = stripeAccount.id;
+
+    if (!account) {
+      account = new ConnectedAccount({
+        user_id: user._id,
+        platform: "stripe",
+        created_at: now,
+      });
+    }
+
+    account.account_external_id = stripeAccountId;
+    account.status = "error";
+    account.updated_at = now;
+    await account.save();
+  }
+
+  const accountLink = await stripe.accountLinks.create({
+    account: stripeAccountId,
+    refresh_url: refreshUrlWithParams.toString(),
+    return_url: returnUrlWithParams.toString(),
+    type: "account_onboarding",
+  });
+
+  return {
+    authorizationUrl: accountLink.url,
+  };
+}
+
+async function checkStripeAccountStatus({ clerkUserId }) {
+  const stripe = getStripeClient();
+  const user = await findLocalUser(clerkUserId);
+
+  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "stripe" });
+
+  if (!account || !account.account_external_id) {
+    return { connected: false, chargesEnabled: false, payoutsEnabled: false, requirements: [] };
+  }
+
+  const stripeAccount = await stripe.accounts.retrieve(account.account_external_id);
+  const chargesEnabled = stripeAccount.charges_enabled;
+  const payoutsEnabled = stripeAccount.payouts_enabled;
+  const requirements = stripeAccount.requirements && stripeAccount.requirements.currently_due
+    ? stripeAccount.requirements.currently_due
+    : [];
+  const isOnboardingComplete = chargesEnabled && payoutsEnabled && requirements.length === 0;
+
+  const now = new Date();
+  account.status = isOnboardingComplete ? "connected" : "error";
+  account.account_name = stripeAccount.business_profile && stripeAccount.business_profile.name
+    ? stripeAccount.business_profile.name
+    : (stripeAccount.email || account.account_external_id);
+  account.metadata_json = {
+    charges_enabled: chargesEnabled,
+    payouts_enabled: payoutsEnabled,
+    requirements,
+    details_submitted: stripeAccount.details_submitted,
+    checked_at: now.toISOString(),
+  };
+  account.updated_at = now;
+  await account.save();
+
+  return {
+    connected: isOnboardingComplete,
+    chargesEnabled,
+    payoutsEnabled,
+    requirements,
+    detailsSubmitted: stripeAccount.details_submitted,
+    stripeAccountId: account.account_external_id,
   };
 }
 
@@ -374,6 +499,7 @@ async function disconnectPlatform({ clerkUserId, platform }) {
 }
 
 module.exports = {
+  checkStripeAccountStatus,
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,

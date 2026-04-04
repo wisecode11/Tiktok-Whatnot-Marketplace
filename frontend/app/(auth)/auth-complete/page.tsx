@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth, useClerk, useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -20,7 +20,7 @@ import {
 
 type Flow = "login" | "signup"
 
-export default function AuthCompletePage() {
+function AuthCompleteContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { getToken, isLoaded, isSignedIn } = useAuth()
@@ -134,5 +134,23 @@ export default function AuthCompletePage() {
         </button>
       </div>
     </div>
+  )
+}
+
+export default function AuthCompletePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex w-full max-w-md flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/90 px-6 py-10 text-center shadow-[0_24px_80px_-50px_rgba(84,74,255,0.35)] backdrop-blur-sm">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <h1 className="mt-5 text-2xl font-semibold text-foreground">Preparing your workspace</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            We are syncing your Clerk account with the correct portal and routing you to your dashboard.
+          </p>
+        </div>
+      }
+    >
+      <AuthCompleteContent />
+    </Suspense>
   )
 }
