@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useClerk, useUser } from "@clerk/nextjs"
+import { useClerk, useUser, useAuth } from "@clerk/nextjs"
 import { usePathname } from "next/navigation"
 import { BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
@@ -47,7 +47,9 @@ import {
   LucideIcon,
   Lock,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { waitForSessionToken } from "@/lib/auth"
+import { getMyModeratorProfile, type ModeratorProfileResponse } from "@/lib/moderator-profile"
 
 interface NavItem {
   title: string
@@ -85,16 +87,50 @@ export function AppSidebar({
   const pathname = usePathname()
   const { signOut } = useClerk()
   const { user: clerkUser } = useUser()
+  const { getToken, isLoaded } = useAuth()
   const authenticatedUser = useAuthenticatedUser()
   const subscriptionAccess = useOptionalSellerSubscriptionAccess()
   const [lockedItemTitle, setLockedItemTitle] = useState<string | null>(null)
+  const [moderatorProfile, setModeratorProfile] = useState<ModeratorProfileResponse["profile"] | null>(null)
   const logoutRedirectUrl = pathname.startsWith("/admin") ? "/admin-login" : "/login"
   const hasActiveSubscription = subscriptionAccess?.hasActiveSubscription ?? true
   const isLoading = subscriptionAccess?.isLoading ?? false
-  const displayName = authenticatedUser
-    ? [authenticatedUser.firstName, authenticatedUser.lastName].filter(Boolean).join(" ") || authenticatedUser.email
-    : user?.name
+  const isModerator = authenticatedUser?.backendRole === "moderator"
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadModeratorProfile() {
+      if (!isLoaded || !isModerator) {
+        return
+      }
+
+      try {
+        const token = await waitForSessionToken(getToken)
+        const result = await getMyModeratorProfile(token)
+
+        if (!cancelled) {
+          setModeratorProfile(result.profile)
+        }
+      } catch {
+        if (!cancelled) {
+          setModeratorProfile(null)
+        }
+      }
+    }
+
+    void loadModeratorProfile()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, isLoaded, isModerator])
+
   const displayEmail = authenticatedUser?.email || user?.email
+  const displayName = moderatorProfile?.displayName || (authenticatedUser
+    ? [authenticatedUser.firstName, authenticatedUser.lastName].filter(Boolean).join(" ") || authenticatedUser.email
+    : user?.name)
+  const displaySubtitle = moderatorProfile?.headline || displayEmail
   const displayAvatar = clerkUser?.imageUrl || user?.avatar
 
   return (
@@ -224,7 +260,7 @@ export function AppSidebar({
                   <div className="flex flex-1 flex-col items-start text-left">
                     <span className="font-medium">{displayName || displayEmail}</span>
                     <span className="text-xs text-muted-foreground">
-                      {displayEmail}
+                      {displaySubtitle}
                     </span>
                   </div>
                   <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -236,10 +272,18 @@ export function AppSidebar({
                 className="w-56"
               >
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                {moderatorProfile ? (
+                  <DropdownMenuLabel className="pt-0 font-normal text-xs text-muted-foreground">
+                    {moderatorProfile.displayName || "Moderator"}
+                    {moderatorProfile.headline ? ` • ${moderatorProfile.headline}` : ""}
+                  </DropdownMenuLabel>
+                ) : null}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
+                <DropdownMenuItem asChild>
+                  <Link href={isModerator ? "/moderator/profile" : pathname}>
+                    <User className="mr-2 h-4 w-4" />
+                    Profile
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Settings className="mr-2 h-4 w-4" />

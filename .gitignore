@@ -1,5 +1,4 @@
-
-# Local environment secrets
-backend/.env
+backend/env.js
+frontend/env.local.js
 .env
-
+.env.*

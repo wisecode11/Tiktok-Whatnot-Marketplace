@@ -8,6 +8,7 @@ const authRoutes = require("./routes/authRoutes");
 const billingRoutes = require("./routes/billingRoutes");
 const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
+const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
 const models = require("./models");
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/billing", billingRoutes);
 app.use("/api/integrations", integrationRoutes);
+app.use("/api/moderator-profile", moderatorProfileRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, models: Object.keys(models).length });

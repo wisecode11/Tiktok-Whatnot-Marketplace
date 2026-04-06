@@ -15,6 +15,16 @@ const ModeratorProfileSchema = new mongoose.Schema({
   bio: String,
   headline: String,
 
+  skills: {
+    type: [String],
+    default: [],
+  },
+
+  availability_summary: {
+    type: String,
+    default: "",
+  },
+
   years_experience: Number,
 
   hourly_rate_cents: {
@@ -38,6 +48,7 @@ const ModeratorProfileSchema = new mongoose.Schema({
   public_slug: {
     type: String,
     unique: true,
+    sparse: true,
   },
 
   created_at: Date,
