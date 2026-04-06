@@ -131,7 +131,34 @@ function buildDefaultProfile(user) {
   };
 }
 
+<<<<<<< HEAD
+async function getOrCreateModeratorProfile({ clerkUserId }) {
+  const user = await getModeratorUserOrThrow(clerkUserId);
+
+  let profile = await ModeratorProfile.findOne({ user_id: user._id });
+
+  if (!profile) {
+    profile = new ModeratorProfile(buildDefaultProfile(user));
+    await profile.save();
+  }
+
+  return {
+    profile: serializeProfile(profile),
+  };
+}
+
+async function upsertModeratorProfile({ clerkUserId, payload }) {
+  const user = await getModeratorUserOrThrow(clerkUserId);
+
+  let profile = await ModeratorProfile.findOne({ user_id: user._id });
+
+  if (!profile) {
+    profile = new ModeratorProfile(buildDefaultProfile(user));
+  }
+
+=======
 async function applyProfilePayload({ profile, user, payload = {}, shouldPublish = false }) {
+>>>>>>> b5d364e (profile fixes and public profile handling)
   const displayName = normalizeString(payload.displayName);
   const headline = normalizeString(payload.headline);
   const bio = normalizeString(payload.bio);
@@ -173,12 +200,17 @@ async function applyProfilePayload({ profile, user, payload = {}, shouldPublish 
   profile.hourly_rate_cents = hourlyRateCents;
   profile.response_time_minutes = responseTimeMinutes;
 
+<<<<<<< HEAD
+  const requestedIsPublished = payload.isPublished === true;
+  profile.profile_status = profileStatusFromFlags(requestedIsPublished);
+=======
   if (shouldPublish) {
     const sourceName = profile.display_name || [user.first_name, user.last_name].filter(Boolean).join(" ") || "moderator";
     const desiredSlug = slugify(sourceName);
     profile.public_slug = await ensureUniqueSlug(desiredSlug, profile._id);
     profile.profile_status = "published";
   }
+>>>>>>> b5d364e (profile fixes and public profile handling)
 
   const now = new Date();
   profile.updated_at = now;
@@ -187,6 +219,12 @@ async function applyProfilePayload({ profile, user, payload = {}, shouldPublish 
     profile.created_at = now;
   }
 
+<<<<<<< HEAD
+  if (requestedIsPublished) {
+    const sourceName = profile.display_name || [user.first_name, user.last_name].filter(Boolean).join(" ") || "moderator";
+    const desiredSlug = slugify(sourceName);
+    profile.public_slug = await ensureUniqueSlug(desiredSlug, profile._id);
+=======
   return profile;
 }
 
@@ -224,6 +262,7 @@ async function upsertModeratorProfile({ clerkUserId, payload }) {
 
   if (!requestedIsPublished) {
     profile.profile_status = profileStatusFromFlags(false);
+>>>>>>> b5d364e (profile fixes and public profile handling)
   }
 
   await profile.save();
@@ -233,7 +272,11 @@ async function upsertModeratorProfile({ clerkUserId, payload }) {
   };
 }
 
+<<<<<<< HEAD
+async function publishModeratorProfile({ clerkUserId }) {
+=======
 async function publishModeratorProfile({ clerkUserId, payload = {} }) {
+>>>>>>> b5d364e (profile fixes and public profile handling)
   const user = await getModeratorUserOrThrow(clerkUserId);
   let profile = await ModeratorProfile.findOne({ user_id: user._id });
 
@@ -241,12 +284,25 @@ async function publishModeratorProfile({ clerkUserId, payload = {} }) {
     profile = new ModeratorProfile(buildDefaultProfile(user));
   }
 
+<<<<<<< HEAD
+  const baseName = profile.display_name || [user.first_name, user.last_name].filter(Boolean).join(" ") || "moderator";
+  const desiredSlug = slugify(baseName);
+
+  profile.public_slug = await ensureUniqueSlug(desiredSlug, profile._id);
+  profile.profile_status = "published";
+  profile.updated_at = new Date();
+
+  if (!profile.created_at) {
+    profile.created_at = profile.updated_at;
+  }
+=======
   await applyProfilePayload({
     profile,
     user,
     payload,
     shouldPublish: true,
   });
+>>>>>>> b5d364e (profile fixes and public profile handling)
 
   await profile.save();
 

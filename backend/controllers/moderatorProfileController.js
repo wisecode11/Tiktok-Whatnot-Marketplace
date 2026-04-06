@@ -45,7 +45,10 @@ async function publishMyModeratorProfile(req, res) {
   try {
     const result = await publishModeratorProfile({
       clerkUserId: req.auth.userId,
+<<<<<<< HEAD
+=======
       payload: req.body || {},
+>>>>>>> b5d364e (profile fixes and public profile handling)
     });
 
     return res.status(200).json(result);
