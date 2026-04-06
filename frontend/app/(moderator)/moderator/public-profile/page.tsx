@@ -52,6 +52,28 @@ function parseSkills(value: string) {
     .filter(Boolean)
 }
 
+function buildProfilePayload(form: ProfileFormState) {
+  const hourlyRateUsd = form.hourlyRateUsd.trim()
+  const hourlyRate = hourlyRateUsd ? Number(hourlyRateUsd) : null
+  const yearsExperience = form.yearsExperience.trim()
+  const responseTimeMinutes = form.responseTimeMinutes.trim()
+
+  if (hourlyRate !== null && (!Number.isFinite(hourlyRate) || hourlyRate < 0)) {
+    throw new Error("Hourly rate must be a positive number.")
+  }
+
+  return {
+    displayName: form.displayName,
+    headline: form.headline,
+    bio: form.bio,
+    yearsExperience: yearsExperience ? Number(yearsExperience) : null,
+    hourlyRateCents: hourlyRate === null ? null : Math.round(hourlyRate * 100),
+    responseTimeMinutes: responseTimeMinutes ? Number(responseTimeMinutes) : null,
+    skills: parseSkills(form.skillsText),
+    availabilitySummary: form.availabilitySummary,
+  }
+}
+
 export default function ModeratorPublicProfilePage() {
   const { getToken, isLoaded } = useAuth()
   const { toast } = useToast()
@@ -71,6 +93,7 @@ export default function ModeratorPublicProfilePage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const publicProfileUrl = useMemo(() => {
     if (!profile?.publicSlug) {
@@ -90,6 +113,7 @@ export default function ModeratorPublicProfilePage() {
 
       setIsLoading(true)
       setErrorMessage(null)
+      setSuccessMessage(null)
 
       try {
         const token = await waitForSessionToken(getToken)
@@ -125,36 +149,21 @@ export default function ModeratorPublicProfilePage() {
 
   async function saveProfile() {
     setIsSaving(true)
+    setSuccessMessage(null)
 
     try {
       const token = await waitForSessionToken(getToken)
-      const hourlyRateUsd = form.hourlyRateUsd.trim()
-      const hourlyRate = hourlyRateUsd ? Number(hourlyRateUsd) : null
-
-      if (hourlyRate !== null && (!Number.isFinite(hourlyRate) || hourlyRate < 0)) {
-        throw new Error("Hourly rate must be a positive number.")
-      }
-
-      const response = await updateMyModeratorProfile(token, {
-        displayName: form.displayName,
-        headline: form.headline,
-        bio: form.bio,
-        yearsExperience: form.yearsExperience.trim() ? Number(form.yearsExperience.trim()) : null,
-        hourlyRateCents: hourlyRate === null ? null : Math.round(hourlyRate * 100),
-        responseTimeMinutes: form.responseTimeMinutes.trim()
-          ? Number(form.responseTimeMinutes.trim())
-          : null,
-        skills: parseSkills(form.skillsText),
-        availabilitySummary: form.availabilitySummary,
-      })
+      const response = await updateMyModeratorProfile(token, buildProfilePayload(form))
 
       setProfile(response.profile)
       setForm(toFormState(response.profile))
+      setSuccessMessage("Profile data saved in the database.")
       toast({
         title: "Profile saved",
-        description: "Your moderator public profile draft was updated.",
+        description: "Your moderator profile data was saved successfully.",
       })
     } catch (error) {
+      setSuccessMessage(null)
       toast({
         title: "Unable to save profile",
         description: error instanceof Error ? error.message : "Please try again.",
@@ -167,17 +176,20 @@ export default function ModeratorPublicProfilePage() {
 
   async function publishProfile() {
     setIsPublishing(true)
+    setSuccessMessage(null)
 
     try {
       const token = await waitForSessionToken(getToken)
-      const response = await publishMyModeratorProfile(token)
+      const response = await publishMyModeratorProfile(token, buildProfilePayload(form))
       setProfile(response.profile)
       setForm(toFormState(response.profile))
+      setSuccessMessage("Profile data saved successfully.")
       toast({
         title: "Profile published",
-        description: "Your public profile is now visible in the marketplace.",
+        description: "Your profile was saved and is now visible in the marketplace.",
       })
     } catch (error) {
+      setSuccessMessage(null)
       toast({
         title: "Unable to publish",
         description: error instanceof Error ? error.message : "Please try again.",
@@ -234,6 +246,12 @@ export default function ModeratorPublicProfilePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          {successMessage ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {successMessage}
+            </div>
+          ) : null}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <FieldGroup>
               <Field>
@@ -354,6 +372,12 @@ export default function ModeratorPublicProfilePage() {
           {publicProfileUrl ? (
             <p className="text-xs text-muted-foreground">
               Public URL slug ready: {publicProfileUrl}
+            </p>
+          ) : null}
+
+          {profile.updatedAt ? (
+            <p className="text-xs text-muted-foreground">
+              Last saved: {new Date(profile.updatedAt).toLocaleString()}
             </p>
           ) : null}
         </CardContent>
