@@ -1,4 +1,8 @@
-const { ModeratorProfile, User } = require("../models");
+const {
+  ModeratorProfile,
+  ModeratorSchedule,
+  User,
+} = require("../models");
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -131,6 +135,192 @@ function buildDefaultProfile(user) {
   };
 }
 
+const WEEKLY_DAY_CODES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+function normalizeTimeValue(value, fieldName) {
+  if (typeof value !== "string") {
+    throw createHttpError(400, `${fieldName} must be a string in HH:MM format.`);
+  }
+
+  const trimmed = value.trim();
+
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(trimmed)) {
+    throw createHttpError(400, `${fieldName} must match HH:MM 24-hour format.`);
+  }
+
+  return trimmed;
+}
+
+function normalizeDayOfWeek(value, fieldName) {
+  const numeric = Number(value);
+
+  if (!Number.isInteger(numeric) || numeric < 0 || numeric > 6) {
+    throw createHttpError(400, `${fieldName} must be an integer between 0 and 6.`);
+  }
+
+  return numeric;
+}
+
+function normalizeHolidayDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw createHttpError(400, "holidays must contain dates in YYYY-MM-DD format.");
+  }
+
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw createHttpError(400, "holidays contains an invalid calendar date.");
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeIsoDateTime(value, fieldName) {
+  if (typeof value !== "string" || !/(Z|[+-]\d{2}:\d{2})$/i.test(value.trim())) {
+    throw createHttpError(400, `${fieldName} must include timezone offset (for example, 2026-04-06T12:00:00Z).`);
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw createHttpError(400, `${fieldName} must be a valid ISO date-time.`);
+  }
+
+  // Date is stored in UTC in MongoDB. Returning a Date object keeps that behavior.
+  return new Date(parsed.toISOString());
+}
+
+function normalizeAvailabilityPayload(payload = {}) {
+  const timezone = normalizeString(payload.timezone) || "UTC";
+  const weeklyInput = Array.isArray(payload.weekly) ? payload.weekly : [];
+  const breaksInput = Array.isArray(payload.breaks) ? payload.breaks : [];
+  const holidaysInput = Array.isArray(payload.holidays) ? payload.holidays : [];
+  const timeOffRangesInput = Array.isArray(payload.timeOffRanges) ? payload.timeOffRanges : [];
+
+  const weekly = weeklyInput.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw createHttpError(400, `weekly[${index}] must be an object.`);
+    }
+
+    const dayOfWeek = normalizeDayOfWeek(entry.dayOfWeek, `weekly[${index}].dayOfWeek`);
+    const isAvailable = entry.isAvailable === true;
+    const startTime = normalizeTimeValue(entry.startTime || "09:00", `weekly[${index}].startTime`);
+    const endTime = normalizeTimeValue(entry.endTime || "17:00", `weekly[${index}].endTime`);
+
+    if (startTime >= endTime) {
+      throw createHttpError(400, `weekly[${index}] startTime must be before endTime.`);
+    }
+
+    return { dayOfWeek, isAvailable, startTime, endTime };
+  });
+
+  const breaks = breaksInput.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw createHttpError(400, `breaks[${index}] must be an object.`);
+    }
+
+    const dayOfWeek = normalizeDayOfWeek(entry.dayOfWeek, `breaks[${index}].dayOfWeek`);
+    const startTime = normalizeTimeValue(entry.startTime, `breaks[${index}].startTime`);
+    const endTime = normalizeTimeValue(entry.endTime, `breaks[${index}].endTime`);
+
+    if (startTime >= endTime) {
+      throw createHttpError(400, `breaks[${index}] startTime must be before endTime.`);
+    }
+
+    return { dayOfWeek, startTime, endTime };
+  });
+
+  const holidays = Array.from(new Set(holidaysInput.map(normalizeHolidayDate))).sort();
+
+  const timeOffRanges = timeOffRangesInput.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw createHttpError(400, `timeOffRanges[${index}] must be an object.`);
+    }
+
+    const startAt = normalizeIsoDateTime(entry.startAt, `timeOffRanges[${index}].startAt`);
+    const endAt = normalizeIsoDateTime(entry.endAt, `timeOffRanges[${index}].endAt`);
+
+    if (endAt <= startAt) {
+      throw createHttpError(400, `timeOffRanges[${index}] endAt must be after startAt.`);
+    }
+
+    const reason = normalizeString(entry.reason) || "time-off";
+    return { startAt, endAt, reason };
+  });
+
+  return {
+    timezone,
+    weekly,
+    breaks,
+    holidays,
+    timeOffRanges,
+  };
+}
+
+function serializeAvailability(schedule) {
+  if (!schedule) {
+    return {
+      timezone: "UTC",
+      weekly: WEEKLY_DAY_CODES.map((_, dayOfWeek) => ({
+        dayOfWeek,
+        isAvailable: false,
+        startTime: "09:00",
+        endTime: "17:00",
+        breaks: [],
+      })),
+      holidays: [],
+      timeOffRanges: [],
+    };
+  }
+
+  // Build a map for quick lookup
+  const dayMap = new Map(
+    (schedule.weekly_schedule || []).map((entry) => [entry.day_of_week, entry])
+  );
+
+  const weekly = WEEKLY_DAY_CODES.map((_, dayOfWeek) => {
+    const day = dayMap.get(dayOfWeek);
+    return {
+      dayOfWeek,
+      isAvailable: day ? Boolean(day.is_available) : false,
+      startTime: day?.start_time || "09:00",
+      endTime: day?.end_time || "17:00",
+      breaks: (day?.breaks || []).map((br) => ({
+        startTime: br.start_time,
+        endTime: br.end_time,
+      })),
+    };
+  });
+
+  const holidays = (schedule.holidays || []).slice().sort();
+
+  const timeOffRanges = (schedule.time_off_ranges || [])
+    .map((entry) => ({
+      startAt: entry.start_at,
+      endAt: entry.end_at,
+      reason: entry.reason || "time-off",
+    }))
+    .sort((first, second) => new Date(first.startAt) - new Date(second.startAt));
+
+  return {
+    timezone: schedule.timezone || "UTC",
+    weekly,
+    holidays,
+    timeOffRanges,
+  };
+}
+
+async function getOrCreateProfileForUser(user) {
+  let profile = await ModeratorProfile.findOne({ user_id: user._id });
+
+  if (!profile) {
+    profile = new ModeratorProfile(buildDefaultProfile(user));
+    await profile.save();
+  }
+
+  return profile;
+}
+
 async function applyProfilePayload({ profile, user, payload = {}, shouldPublish = false }) {
   const displayName = normalizeString(payload.displayName);
   const headline = normalizeString(payload.headline);
@@ -192,13 +382,7 @@ async function applyProfilePayload({ profile, user, payload = {}, shouldPublish 
 
 async function getOrCreateModeratorProfile({ clerkUserId }) {
   const user = await getModeratorUserOrThrow(clerkUserId);
-
-  let profile = await ModeratorProfile.findOne({ user_id: user._id });
-
-  if (!profile) {
-    profile = new ModeratorProfile(buildDefaultProfile(user));
-    await profile.save();
-  }
+  const profile = await getOrCreateProfileForUser(user);
 
   return {
     profile: serializeProfile(profile),
@@ -255,6 +439,71 @@ async function publishModeratorProfile({ clerkUserId, payload = {} }) {
   };
 }
 
+async function getModeratorAvailability({ clerkUserId }) {
+  const user = await getModeratorUserOrThrow(clerkUserId);
+  const profile = await getOrCreateProfileForUser(user);
+
+  const schedule = await ModeratorSchedule.findOne({ moderator_profile_id: profile._id });
+
+  return {
+    availability: serializeAvailability(schedule),
+  };
+}
+
+async function upsertModeratorAvailability({ clerkUserId, payload = {} }) {
+  const user = await getModeratorUserOrThrow(clerkUserId);
+  const profile = await getOrCreateProfileForUser(user);
+  const normalized = normalizeAvailabilityPayload(payload);
+  const now = new Date();
+
+  // Build the breaks lookup: { [dayOfWeek]: [{ start_time, end_time }, ...] }
+  const breaksByDay = {};
+  for (const breakEntry of normalized.breaks) {
+    if (!breaksByDay[breakEntry.dayOfWeek]) {
+      breaksByDay[breakEntry.dayOfWeek] = [];
+    }
+    breaksByDay[breakEntry.dayOfWeek].push({
+      start_time: breakEntry.startTime,
+      end_time: breakEntry.endTime,
+    });
+  }
+
+  // Build the 7-element weekly_schedule array with breaks embedded per day
+  const weekly_schedule = normalized.weekly.map((entry) => ({
+    day_of_week: entry.dayOfWeek,
+    is_available: entry.isAvailable,
+    start_time: entry.startTime,
+    end_time: entry.endTime,
+    breaks: breaksByDay[entry.dayOfWeek] || [],
+  }));
+
+  const time_off_ranges = normalized.timeOffRanges.map((entry) => ({
+    start_at: entry.startAt,
+    end_at: entry.endAt,
+    reason: entry.reason,
+  }));
+
+  // Upsert — one document per moderator profile (findOneAndUpdate with upsert)
+  const schedule = await ModeratorSchedule.findOneAndUpdate(
+    { moderator_profile_id: profile._id },
+    {
+      $set: {
+        timezone: normalized.timezone,
+        weekly_schedule,
+        holidays: normalized.holidays,
+        time_off_ranges,
+        updated_at: now,
+      },
+      $setOnInsert: { created_at: now },
+    },
+    { upsert: true, new: true }
+  );
+
+  return {
+    availability: serializeAvailability(schedule),
+  };
+}
+
 async function getPublicModeratorProfileBySlug({ slug }) {
   const normalizedSlug = normalizeString(slug);
 
@@ -277,8 +526,10 @@ async function getPublicModeratorProfileBySlug({ slug }) {
 }
 
 module.exports = {
+  getModeratorAvailability,
   getOrCreateModeratorProfile,
   getPublicModeratorProfileBySlug,
   publishModeratorProfile,
+  upsertModeratorAvailability,
   upsertModeratorProfile,
 };

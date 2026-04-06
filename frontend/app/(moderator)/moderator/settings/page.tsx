@@ -63,7 +63,7 @@ export default function ModeratorSettingsPage() {
               <Avatar className="h-24 w-24">
                 <AvatarImage src="" />
                 <AvatarFallback className="bg-primary/10 text-primary text-2xl">
-                  JS
+                  JM
                 </AvatarFallback>
               </Avatar>
               <div className="space-y-2">
