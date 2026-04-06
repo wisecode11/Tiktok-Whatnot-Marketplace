@@ -85,9 +85,10 @@ export function updateMyModeratorProfile(token: string, payload: UpdateModerator
   })
 }
 
-export function publishMyModeratorProfile(token: string) {
+export function publishMyModeratorProfile(token: string, payload?: UpdateModeratorProfilePayload) {
   return request<ModeratorProfileResponse>("/api/moderator-profile/me/publish", {
     token,
     method: "POST",
+    body: payload as Record<string, unknown> | undefined,
   })
 }

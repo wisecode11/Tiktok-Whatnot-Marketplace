@@ -1,4 +1,6 @@
 backend/env.js
 frontend/env.local.js
+backend/.env
+frontend/.env.local
 .env
 .env.*

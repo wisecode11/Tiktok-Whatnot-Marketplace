@@ -48,6 +48,7 @@ const ModeratorProfileSchema = new mongoose.Schema({
   public_slug: {
     type: String,
     unique: true,
+    sparse: true,
   },
 
   created_at: Date,
