@@ -351,12 +351,12 @@ export default function ModeratorPublicProfilePage() {
           </FieldGroup>
 
           <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-muted-foreground">
+            {/* <div className="text-sm text-muted-foreground">
               Status: <span className="font-medium text-foreground capitalize">{profile.profileStatus}</span>
               {profile.publicSlug ? (
                 <span className="ml-2 text-primary">slug: {profile.publicSlug}</span>
               ) : null}
-            </div>
+            </div> */}
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" onClick={() => void saveProfile()} disabled={isSaving || isPublishing}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -369,11 +369,11 @@ export default function ModeratorPublicProfilePage() {
             </div>
           </div>
 
-          {publicProfileUrl ? (
+          {/* {publicProfileUrl ? (
             <p className="text-xs text-muted-foreground">
               Public URL slug ready: {publicProfileUrl}
             </p>
-          ) : null}
+          ) : null} */}
 
           {profile.updatedAt ? (
             <p className="text-xs text-muted-foreground">

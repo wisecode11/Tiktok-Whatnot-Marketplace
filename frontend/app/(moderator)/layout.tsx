@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { Topbar } from "@/components/dashboard/topbar"
 import {
   LayoutDashboard,
-  Calendar,
+  CalendarClock,
   Briefcase,
   BadgeCheck,
   Star,
@@ -24,7 +24,7 @@ const navigation = [
       { title: "Public Profile", href: "/moderator/public-profile", icon: BadgeCheck },
       { title: "My Jobs", href: "/moderator/jobs", icon: Briefcase, badge: 3 },
       { title: "Find Work", href: "/moderator/marketplace", icon: Users },
-      { title: "Schedule", href: "/moderator/schedule", icon: Calendar },
+      { title: "Availability", href: "/moderator/availability", icon: CalendarClock },
     ],
   },
   {

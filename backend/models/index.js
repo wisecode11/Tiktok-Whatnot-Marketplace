@@ -14,6 +14,7 @@ module.exports = {
   ModeratorService: require('./ModeratorService'),
   ModeratorAvailabilityRule: require('./ModeratorAvailabilityRule'),
   ModeratorTimeOff: require('./ModeratorTimeOff'),
+  ModeratorSchedule: require('./ModeratorSchedule'),
   ModeratorBooking: require('./ModeratorBooking'),
   ModeratorBookingMessage: require('./ModeratorBookingMessage'),
   ModeratorReview: require('./ModeratorReview'),

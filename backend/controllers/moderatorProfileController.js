@@ -1,7 +1,9 @@
 const {
+  getModeratorAvailability,
   getOrCreateModeratorProfile,
   getPublicModeratorProfileBySlug,
   publishModeratorProfile,
+  upsertModeratorAvailability,
   upsertModeratorProfile,
 } = require("../services/moderatorProfileService");
 
@@ -54,6 +56,31 @@ async function publishMyModeratorProfile(req, res) {
   }
 }
 
+async function getMyAvailability(req, res) {
+  try {
+    const result = await getModeratorAvailability({
+      clerkUserId: req.auth.userId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function updateMyAvailability(req, res) {
+  try {
+    const result = await upsertModeratorAvailability({
+      clerkUserId: req.auth.userId,
+      payload: req.body || {},
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getPublicModeratorProfile(req, res) {
   try {
     const result = await getPublicModeratorProfileBySlug({
@@ -67,8 +94,10 @@ async function getPublicModeratorProfile(req, res) {
 }
 
 module.exports = {
+  getMyAvailability,
   getMyModeratorProfile,
   getPublicModeratorProfile,
   publishMyModeratorProfile,
+  updateMyAvailability,
   updateMyModeratorProfile,
 };

@@ -36,6 +36,41 @@ export interface UpdateModeratorProfilePayload {
   isPublished?: boolean
 }
 
+export interface ModeratorAvailabilityResponse {
+  availability: {
+    timezone: string
+    weekly: Array<{
+      dayOfWeek: number
+      isAvailable: boolean
+      startTime: string
+      endTime: string
+      breaks: Array<{ startTime: string; endTime: string }>
+    }>
+    holidays: string[]
+    timeOffRanges: Array<{
+      startAt: string
+      endAt: string
+      reason: string
+    }>
+  }
+}
+
+export interface UpdateModeratorAvailabilityPayload {
+  timezone: string
+  weekly: Array<{
+    dayOfWeek: number
+    isAvailable: boolean
+    startTime: string
+    endTime: string
+  }>
+  breaks: Array<{
+    dayOfWeek: number
+    startTime: string
+    endTime: string
+  }>
+  holidays: string[]
+}
+
 async function request<T>(
   path: string,
   {
@@ -90,5 +125,19 @@ export function publishMyModeratorProfile(token: string, payload?: UpdateModerat
     token,
     method: "POST",
     body: payload as Record<string, unknown> | undefined,
+  })
+}
+
+export function getMyModeratorAvailability(token: string) {
+  return request<ModeratorAvailabilityResponse>("/api/moderator-profile/me/availability", {
+    token,
+  })
+}
+
+export function updateMyModeratorAvailability(token: string, payload: UpdateModeratorAvailabilityPayload) {
+  return request<ModeratorAvailabilityResponse>("/api/moderator-profile/me/availability", {
+    token,
+    method: "PUT",
+    body: payload as Record<string, unknown>,
   })
 }

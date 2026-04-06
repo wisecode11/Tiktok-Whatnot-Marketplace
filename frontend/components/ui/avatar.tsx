@@ -25,11 +25,18 @@ function AvatarImage({
   className,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  const normalizedSrc = typeof props.src === 'string' ? props.src.trim() : props.src
+
+  if (!normalizedSrc) {
+    return null
+  }
+
   return (
     <AvatarPrimitive.Image
       data-slot="avatar-image"
       className={cn('aspect-square size-full', className)}
       {...props}
+      src={normalizedSrc}
     />
   )
 }

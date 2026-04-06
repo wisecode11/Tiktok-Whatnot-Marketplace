@@ -19,23 +19,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: `${BRAND_NAME} - Live Commerce Platform`,
   description: 'The premier marketplace for live commerce streamers and moderators. Connect, grow, and monetize your streaming business.',
-  generator: 'v0.app',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
   },
 }
 
