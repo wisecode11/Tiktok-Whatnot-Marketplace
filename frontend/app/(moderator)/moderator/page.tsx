@@ -1,9 +1,12 @@
+"use client"
+
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { StatCard } from "@/components/ui/stat-card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useAuthenticatedUser } from "@/components/auth/authenticated-user-context"
 import {
   ArrowRight,
   Briefcase,
@@ -75,13 +78,20 @@ const recentActivity = [
 ]
 
 export default function ModeratorDashboard() {
+  const authenticatedUser = useAuthenticatedUser()
+  const displayName = authenticatedUser
+    ? authenticatedUser.firstName || authenticatedUser.lastName
+      ? [authenticatedUser.firstName, authenticatedUser.lastName].filter(Boolean).join(" ")
+      : authenticatedUser.email
+    : "Moderator"
+
   return (
     <div className="space-y-6">
       {/* Welcome Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Welcome back, Jordan
+            Welcome back, {displayName}
           </h1>
           <p className="text-muted-foreground">
             You have 3 upcoming jobs this week

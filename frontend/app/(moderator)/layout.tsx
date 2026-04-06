@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Calendar,
   Briefcase,
+  BadgeCheck,
   Star,
   MessageSquare,
   Wallet,
@@ -20,6 +21,7 @@ const navigation = [
   {
     items: [
       { title: "Dashboard", href: "/moderator", icon: LayoutDashboard },
+      { title: "Public Profile", href: "/moderator/public-profile", icon: BadgeCheck },
       { title: "My Jobs", href: "/moderator/jobs", icon: Briefcase, badge: 3 },
       { title: "Find Work", href: "/moderator/marketplace", icon: Users },
       { title: "Schedule", href: "/moderator/schedule", icon: Calendar },
