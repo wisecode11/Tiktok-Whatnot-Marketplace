@@ -7,6 +7,7 @@ import { Topbar } from "@/components/dashboard/topbar"
 import {
   LayoutDashboard,
   CalendarClock,
+  CalendarDays,
   Briefcase,
   BadgeCheck,
   Star,
@@ -22,19 +23,20 @@ const navigation = [
     items: [
       { title: "Dashboard", href: "/moderator", icon: LayoutDashboard },
       { title: "Public Profile", href: "/moderator/public-profile", icon: BadgeCheck },
-      { title: "My Jobs", href: "/moderator/jobs", icon: Briefcase, badge: 3 },
-      { title: "Find Work", href: "/moderator/marketplace", icon: Users },
+      { title: "Bookings", href: "/moderator/bookings", icon: CalendarDays, badge: 4 },
+      // { title: "My Jobs", href: "/moderator/jobs", icon: Briefcase, badge: 3 },
+      // { title: "Find Work", href: "/moderator/marketplace", icon: Users },
       { title: "Availability", href: "/moderator/availability", icon: CalendarClock },
     ],
   },
-  {
-    label: "Performance",
-    items: [
-      { title: "Reviews", href: "/moderator/reviews", icon: Star },
-      { title: "Messages", href: "/moderator/messages", icon: MessageSquare, badge: 5 },
-      { title: "Earnings", href: "/moderator/earnings", icon: Wallet },
-    ],
-  },
+  // {
+  //   label: "Performance",
+  //   items: [
+  //     { title: "Reviews", href: "/moderator/reviews", icon: Star },
+  //     { title: "Messages", href: "/moderator/messages", icon: MessageSquare, badge: 5 },
+  //     { title: "Earnings", href: "/moderator/earnings", icon: Wallet },
+  //   ],
+  // },
 ]
 
 const footerItems = [
