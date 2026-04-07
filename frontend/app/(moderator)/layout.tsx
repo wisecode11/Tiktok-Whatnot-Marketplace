@@ -1,53 +1,21 @@
-"use client"
+import type { Metadata } from "next"
+import { ModeratorLayoutShell } from "@/components/dashboard/moderator-layout-shell"
+import { BRAND_NAME } from "@/lib/brand"
 
-import { RoleGate } from "@/components/auth/role-gate"
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
-import { AppSidebar } from "@/components/dashboard/app-sidebar"
-import { Topbar } from "@/components/dashboard/topbar"
-import {
-  LayoutDashboard,
-  CalendarClock,
-  CalendarDays,
-  Briefcase,
-  BadgeCheck,
-  Star,
-  MessageSquare,
-  Wallet,
-  Settings,
-  HelpCircle,
-  Users,
-} from "lucide-react"
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
-const navigation = [
-  {
-    items: [
-      { title: "Dashboard", href: "/moderator", icon: LayoutDashboard },
-      { title: "Public Profile", href: "/moderator/public-profile", icon: BadgeCheck },
-      { title: "Bookings", href: "/moderator/bookings", icon: CalendarDays, badge: 4 },
-      // { title: "My Jobs", href: "/moderator/jobs", icon: Briefcase, badge: 3 },
-      // { title: "Find Work", href: "/moderator/marketplace", icon: Users },
-      { title: "Availability", href: "/moderator/availability", icon: CalendarClock },
-    ],
+export const metadata: Metadata = {
+  title: {
+    default: `Moderator Dashboard | ${BRAND_NAME}`,
+    template: `%s | ${BRAND_NAME}`,
   },
-  // {
-  //   label: "Performance",
-  //   items: [
-  //     { title: "Reviews", href: "/moderator/reviews", icon: Star },
-  //     { title: "Messages", href: "/moderator/messages", icon: MessageSquare, badge: 5 },
-  //     { title: "Earnings", href: "/moderator/earnings", icon: Wallet },
-  //   ],
-  // },
-]
-
-const footerItems = [
-  { title: "Settings", href: "/moderator/settings", icon: Settings },
-  { title: "Help", href: "/help", icon: HelpCircle },
-]
-
-const mockUser = {
-  name: "Jordan Smith",
-  email: "jordan@moderator.io",
-  avatar: "",
+  description:
+    "Moderator control center for bookings, availability, and public profile management.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 }
 
 export default function ModeratorLayout({
@@ -55,26 +23,5 @@ export default function ModeratorLayout({
 }: {
   children: React.ReactNode
 }) {
-  return (
-    <RoleGate allowedRoles={["moderator"]} unauthenticatedPath="/login">
-      <SidebarProvider>
-        <AppSidebar
-          navigation={navigation}
-          user={mockUser}
-          logo={{
-            href: "/moderator",
-          }}
-          footerItems={footerItems}
-        />
-        <SidebarInset>
-          <Topbar />
-          <main className="flex-1 overflow-auto">
-            <div className="container max-w-7xl p-6">
-              {children}
-            </div>
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
-    </RoleGate>
-  )
+  return <ModeratorLayoutShell>{children}</ModeratorLayoutShell>
 }
