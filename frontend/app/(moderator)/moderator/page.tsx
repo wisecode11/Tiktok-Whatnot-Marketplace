@@ -1,34 +1,30 @@
 "use client"
 
 import Link from "next/link"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { StatusBadge } from "@/components/ui/status-badge"
-import { StatCard } from "@/components/ui/stat-card"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useAuthenticatedUser } from "@/components/auth/authenticated-user-context"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { StatusBadge } from "@/components/ui/status-badge"
 import {
+  AlertCircle,
   ArrowRight,
-  Briefcase,
   Calendar,
-  Clock,
-  DollarSign,
-  Star,
-  TrendingUp,
-  Video,
-  Users,
+  CalendarClock,
   CheckCircle2,
+  Clock3,
+  DollarSign,
+  MessageSquare,
 } from "lucide-react"
 
-const upcomingJobs = [
+const todayBookings = [
   {
     id: "1",
     streamer: "TechStyle Live",
     avatar: "",
     platform: "TikTok Shop",
-    date: "Today",
     time: "2:00 PM - 5:00 PM",
-    rate: "$25/hr",
+    payout: "$75",
     status: "confirmed",
   },
   {
@@ -36,44 +32,26 @@ const upcomingJobs = [
     streamer: "Fashion Forward",
     avatar: "",
     platform: "Whatnot",
-    date: "Tomorrow",
-    time: "10:00 AM - 2:00 PM",
-    rate: "$30/hr",
+    time: "6:30 PM - 8:00 PM",
+    payout: "$45",
     status: "pending",
-  },
-  {
-    id: "3",
-    streamer: "Gadget Galaxy",
-    avatar: "",
-    platform: "Amazon Live",
-    date: "Mar 28",
-    time: "6:00 PM - 9:00 PM",
-    rate: "$28/hr",
-    status: "confirmed",
   },
 ]
 
-const recentActivity = [
+const pendingRequests = [
   {
-    type: "payment",
-    message: "Payment received from TechStyle Live",
-    amount: "$150.00",
-    time: "2 hours ago",
+    id: "3",
+    streamer: "Gadget Galaxy",
+    platform: "Amazon Live",
+    requestedFor: "Tomorrow, 6:00 PM - 9:00 PM",
+    payout: "$84",
   },
   {
-    type: "review",
-    message: "New 5-star review from Fashion Forward",
-    time: "5 hours ago",
-  },
-  {
-    type: "job",
-    message: "Job request from Gadget Galaxy",
-    time: "1 day ago",
-  },
-  {
-    type: "milestone",
-    message: "Reached 50 completed streams!",
-    time: "2 days ago",
+    id: "4",
+    streamer: "Beauty Boss",
+    platform: "TikTok Shop",
+    requestedFor: "Fri, 1:00 PM - 3:00 PM",
+    payout: "$60",
   },
 ]
 
@@ -85,108 +63,103 @@ export default function ModeratorDashboard() {
       : authenticatedUser.email
     : "Moderator"
 
+  const firstName = displayName.split(" ")[0] || "Moderator"
+
   return (
     <div className="space-y-6">
-      {/* Welcome Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Welcome back, {displayName}
-          </h1>
-          <p className="text-muted-foreground">
-            You have 3 upcoming jobs this week
-          </p>
+      <div className="rounded-2xl border border-border/60 bg-gradient-to-r from-slate-50 via-white to-sky-50 p-5 dark:from-slate-950/40 dark:via-background dark:to-sky-950/20">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+              Hi {firstName}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Focus only on what needs action right now.
+            </p>
+          </div>
+          <Button asChild className="gap-2">
+            <Link href="/moderator/bookings">
+              <CalendarClock className="h-4 w-4" />
+              Open Bookings
+            </Link>
+          </Button>
         </div>
-        <Button asChild className="gap-2 shadow-lg shadow-primary/25">
-          <Link href="/moderator/marketplace">
-            <Briefcase className="h-4 w-4" />
-            Find New Jobs
-          </Link>
-        </Button>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="This Month Earnings"
-          value="$2,450"
-          change="+18%"
-          changeType="positive"
-          icon={DollarSign}
-        />
-        <StatCard
-          title="Completed Streams"
-          value="52"
-          change="+8"
-          changeType="positive"
-          icon={Video}
-        />
-        <StatCard
-          title="Average Rating"
-          value="4.9"
-          icon={Star}
-          iconColor="text-warning"
-        />
-        <StatCard
-          title="Active Clients"
-          value="8"
-          change="+2"
-          changeType="positive"
-          icon={Users}
-        />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card className="border-border/60 bg-card/70">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Pending Requests</p>
+            <p className="mt-2 text-2xl font-semibold">{pendingRequests.length}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Needs accept or decline</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60 bg-card/70">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Today Sessions</p>
+            <p className="mt-2 text-2xl font-semibold">{todayBookings.length}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Confirmed and pending</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60 bg-card/70">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">This Week Earnings</p>
+            <p className="mt-2 text-2xl font-semibold">$420</p>
+            <p className="mt-1 text-xs text-muted-foreground">Expected payout</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Upcoming Jobs */}
-        <Card className="border-border/50 bg-card/50 lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-primary" />
-              Upcoming Jobs
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="border-border/60 bg-card/70 xl:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Calendar className="h-4 w-4 text-primary" />
+              Today Schedule
             </CardTitle>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/moderator/jobs">
+              <Link href="/moderator/bookings">
                 View all
                 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </Button>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {upcomingJobs.map((job) => (
+
+          <CardContent className="space-y-3">
+            {todayBookings.map((job) => (
               <div
                 key={job.id}
-                className="flex items-center gap-4 rounded-xl bg-muted/50 p-4 transition-colors hover:bg-muted"
+                className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/70 p-4 md:flex-row md:items-center md:justify-between"
               >
-                <Avatar className="h-12 w-12">
-                  <AvatarImage src={job.avatar} />
-                  <AvatarFallback className="bg-primary/10 text-primary">
-                    {job.streamer.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold truncate">{job.streamer}</span>
-                    <StatusBadge
-                      variant={job.status === "confirmed" ? "success" : "warning"}
-                      size="sm"
-                    >
-                      {job.status}
-                    </StatusBadge>
-                  </div>
-                  <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-                    <span>{job.platform}</span>
-                    <span>-</span>
-                    <span>{job.date}</span>
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={job.avatar} />
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      {job.streamer.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{job.streamer}</p>
+                      <StatusBadge variant={job.status === "confirmed" ? "success" : "warning"}>
+                        {job.status}
+                      </StatusBadge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{job.platform}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
+
+                <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Clock3 className="h-4 w-4" />
                     {job.time}
                   </div>
-                  <div className="mt-1 font-semibold text-primary">
-                    {job.rate}
+                  <div className="flex items-center gap-1.5 font-medium text-primary">
+                    <DollarSign className="h-4 w-4" />
+                    {job.payout}
                   </div>
                 </div>
               </div>
@@ -194,86 +167,67 @@ export default function ModeratorDashboard() {
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              Recent Activity
+        <Card className="border-border/60 bg-card/70">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertCircle className="h-4 w-4 text-amber-500" />
+              Action Required
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentActivity.map((activity, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                    {activity.type === "payment" && (
-                      <DollarSign className="h-4 w-4 text-primary" />
-                    )}
-                    {activity.type === "review" && (
-                      <Star className="h-4 w-4 text-warning" />
-                    )}
-                    {activity.type === "job" && (
-                      <Briefcase className="h-4 w-4 text-accent" />
-                    )}
-                    {activity.type === "milestone" && (
-                      <CheckCircle2 className="h-4 w-4 text-success" />
-                    )}
+
+          <CardContent className="space-y-3">
+            {pendingRequests.map((request) => (
+              <div key={request.id} className="rounded-xl border border-border/60 bg-background/70 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{request.streamer}</p>
+                    <p className="truncate text-xs text-muted-foreground">{request.platform}</p>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm">{activity.message}</p>
-                    {activity.amount && (
-                      <p className="text-sm font-semibold text-primary">
-                        {activity.amount}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      {activity.time}
-                    </p>
-                  </div>
+                  <span className="text-sm font-semibold text-primary">{request.payout}</span>
                 </div>
-              ))}
-            </div>
+
+                <p className="mt-2 text-xs text-muted-foreground">{request.requestedFor}</p>
+
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1" asChild>
+                    <Link href="/moderator/bookings">Decline</Link>
+                  </Button>
+                  <Button size="sm" className="flex-1" asChild>
+                    <Link href="/moderator/bookings">Accept</Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
 
-      {/* Quick Stats Row */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="border-border/50 bg-gradient-to-br from-primary/10 to-primary/5">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15">
-              <Clock className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Hours This Week</p>
-              <p className="text-2xl font-bold">24.5</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border/50 bg-gradient-to-br from-accent/10 to-accent/5">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/15">
-              <Video className="h-6 w-6 text-accent" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Live Streams Moderated</p>
-              <p className="text-2xl font-bold">156</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border/50 bg-gradient-to-br from-success/10 to-success/5">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-success/15">
-              <TrendingUp className="h-6 w-6 text-success" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Response Rate</p>
-              <p className="text-2xl font-bold">98%</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="border-border/60 bg-card/70">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-medium">Quick Actions</p>
+            <p className="text-sm text-muted-foreground">Go directly to the screens you use most.</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/moderator/availability">Update Availability</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/moderator/messages">
+                <MessageSquare className="mr-1 h-4 w-4" />
+                Messages
+              </Link>
+            </Button>
+            <Button size="sm" asChild>
+              <Link href="/moderator/bookings">
+                <CheckCircle2 className="mr-1 h-4 w-4" />
+                Manage Bookings
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
