@@ -20,6 +20,10 @@ function normalizeString(value) {
   return trimmed ? trimmed : null;
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function normalizeNullableNumber(value, fieldName) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -29,6 +33,20 @@ function normalizeNullableNumber(value, fieldName) {
 
   if (!Number.isFinite(numericValue)) {
     throw createHttpError(400, `${fieldName} must be a valid number.`);
+  }
+
+  return numericValue;
+}
+
+function normalizeOptionalNonNegativeNumber(value, fieldName) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    throw createHttpError(400, `${fieldName} must be a non-negative number.`);
   }
 
   return numericValue;
@@ -100,6 +118,13 @@ function serializeProfile(profile) {
     isPublished: profile.profile_status === "published",
     createdAt: profile.created_at || null,
     updatedAt: profile.updated_at || null,
+  };
+}
+
+function serializePublicProfile(profile, availability) {
+  return {
+    ...serializeProfile(profile),
+    availability,
   };
 }
 
@@ -520,8 +545,188 @@ async function getPublicModeratorProfileBySlug({ slug }) {
     throw createHttpError(404, "Moderator profile not found.");
   }
 
+  const schedule = await ModeratorSchedule.findOne({ moderator_profile_id: profile._id });
+
   return {
-    profile: serializeProfile(profile),
+    profile: serializePublicProfile(profile, serializeAvailability(schedule)),
+  };
+}
+
+async function getPublicModeratorProfileByUserId({ userId }) {
+  const normalizedUserId = normalizeString(userId);
+
+  if (!normalizedUserId) {
+    throw createHttpError(400, "A userId is required.");
+  }
+
+  const user = await User.findOne({
+    _id: normalizedUserId,
+    user_type: "moderator",
+    status: { $ne: "deleted" },
+  });
+
+  if (!user) {
+    throw createHttpError(404, "Moderator not found.");
+  }
+
+  const profile = await ModeratorProfile.findOne({ user_id: user._id });
+
+  if (!profile) {
+    const displayName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
+      || (user.email ? String(user.email).split("@")[0] : "Moderator");
+
+    return {
+      profile: {
+        id: user._id,
+        userId: user._id,
+        displayName,
+        headline: "",
+        bio: "",
+        yearsExperience: null,
+        hourlyRateCents: null,
+        responseTimeMinutes: null,
+        averageRating: null,
+        ratingCount: 0,
+        skills: [],
+        availabilitySummary: "",
+        publicSlug: null,
+        profileStatus: "draft",
+        isPublished: false,
+        createdAt: user.created_at || null,
+        updatedAt: user.updated_at || null,
+        availability: serializeAvailability(null),
+      },
+    };
+  }
+
+  const schedule = await ModeratorSchedule.findOne({ moderator_profile_id: profile._id });
+
+  return {
+    profile: serializePublicProfile(profile, serializeAvailability(schedule)),
+  };
+}
+
+async function listPublicModerators({ query = {} }) {
+  const search = normalizeString(query.search);
+  const skillList = String(query.skills || "")
+    .split(",")
+    .map((skill) => skill.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  const minExperience = normalizeOptionalNonNegativeNumber(
+    query.minExperience,
+    "minExperience"
+  );
+  const minRating = normalizeOptionalNonNegativeNumber(query.minRating, "minRating");
+
+  if (minRating !== null && minRating > 5) {
+    throw createHttpError(400, "minRating must be less than or equal to 5.");
+  }
+
+  const users = await User.find({
+    user_type: "moderator",
+    status: { $ne: "deleted" },
+  })
+    .sort({ created_at: -1 })
+    .limit(200);
+
+  const userIds = users.map((user) => user._id);
+  const profiles = await ModeratorProfile.find({ user_id: { $in: userIds } });
+  const profileByUserId = new Map(profiles.map((profile) => [String(profile.user_id), profile]));
+
+  const normalizedSkillSet = new Set(skillList.map((skill) => skill.toLowerCase()));
+  const searchRegex = search ? new RegExp(escapeRegex(search), "i") : null;
+
+  const moderators = users
+    .map((user) => {
+      const profile = profileByUserId.get(String(user._id));
+
+      if (profile) {
+        return serializeProfile(profile);
+      }
+
+      const displayName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
+        || (user.email ? String(user.email).split("@")[0] : "Moderator");
+
+      return {
+        id: user._id,
+        userId: user._id,
+        displayName,
+        headline: "",
+        bio: "",
+        yearsExperience: null,
+        hourlyRateCents: null,
+        responseTimeMinutes: null,
+        averageRating: null,
+        ratingCount: 0,
+        skills: [],
+        availabilitySummary: "",
+        publicSlug: null,
+        profileStatus: "draft",
+        isPublished: false,
+        createdAt: user.created_at || null,
+        updatedAt: user.updated_at || null,
+      };
+    })
+    .filter((profile) => {
+      if (normalizedSkillSet.size > 0) {
+        const skills = Array.isArray(profile.skills)
+          ? profile.skills.map((skill) => String(skill).toLowerCase())
+          : [];
+
+        const hasSkill = skills.some((skill) => normalizedSkillSet.has(skill));
+        if (!hasSkill) {
+          return false;
+        }
+      }
+
+      if (minExperience !== null) {
+        if (profile.yearsExperience === null || profile.yearsExperience < minExperience) {
+          return false;
+        }
+      }
+
+      if (minRating !== null) {
+        if (profile.averageRating === null || profile.averageRating < minRating) {
+          return false;
+        }
+      }
+
+      if (searchRegex) {
+        const searchableValues = [
+          profile.displayName,
+          profile.headline,
+          profile.bio,
+          ...(Array.isArray(profile.skills) ? profile.skills : []),
+        ].filter(Boolean);
+
+        const matchesSearch = searchableValues.some((value) => searchRegex.test(String(value)));
+        if (!matchesSearch) {
+          return false;
+        }
+      }
+
+      return true;
+    })
+    .sort((first, second) => {
+      const firstPublished = first.profileStatus === "published" ? 1 : 0;
+      const secondPublished = second.profileStatus === "published" ? 1 : 0;
+      if (firstPublished !== secondPublished) {
+        return secondPublished - firstPublished;
+      }
+
+      const firstRating = first.averageRating || 0;
+      const secondRating = second.averageRating || 0;
+      if (firstRating !== secondRating) {
+        return secondRating - firstRating;
+      }
+
+      return new Date(second.createdAt || 0) - new Date(first.createdAt || 0);
+    })
+    .slice(0, 100);
+
+  return {
+    moderators,
   };
 }
 
@@ -529,6 +734,8 @@ module.exports = {
   getModeratorAvailability,
   getOrCreateModeratorProfile,
   getPublicModeratorProfileBySlug,
+  getPublicModeratorProfileByUserId,
+  listPublicModerators,
   publishModeratorProfile,
   upsertModeratorAvailability,
   upsertModeratorProfile,

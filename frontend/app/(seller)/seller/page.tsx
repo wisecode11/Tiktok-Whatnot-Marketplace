@@ -49,7 +49,7 @@ const quickActions = [
     title: "Find Moderators",
     description: "Hire help for your streams",
     icon: Users,
-    href: "/seller/team",
+    href: "/seller/moderators",
   },
   {
     title: "Schedule Stream",

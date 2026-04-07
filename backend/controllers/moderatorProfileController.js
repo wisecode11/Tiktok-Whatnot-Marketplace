@@ -2,6 +2,8 @@ const {
   getModeratorAvailability,
   getOrCreateModeratorProfile,
   getPublicModeratorProfileBySlug,
+  getPublicModeratorProfileByUserId,
+  listPublicModerators,
   publishModeratorProfile,
   upsertModeratorAvailability,
   upsertModeratorProfile,
@@ -93,10 +95,36 @@ async function getPublicModeratorProfile(req, res) {
   }
 }
 
+async function getPublicModeratorProfileByUser(req, res) {
+  try {
+    const result = await getPublicModeratorProfileByUserId({
+      userId: req.params.userId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function listPublicModeratorProfiles(req, res) {
+  try {
+    const result = await listPublicModerators({
+      query: req.query || {},
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
   getMyAvailability,
   getMyModeratorProfile,
   getPublicModeratorProfile,
+  getPublicModeratorProfileByUser,
+  listPublicModeratorProfiles,
   publishMyModeratorProfile,
   updateMyAvailability,
   updateMyModeratorProfile,
