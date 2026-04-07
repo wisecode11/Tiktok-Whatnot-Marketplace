@@ -1,6 +1,7 @@
 const { createClerkClient } = require("@clerk/backend");
 
 const User = require("../models/Users");
+const ConnectedAccount = require("../models/ConnectedAccount");
 
 const ROLE_MAP = {
   streamer: "seller",
@@ -50,8 +51,32 @@ function getDashboardPath(role) {
   return DASHBOARD_PATHS[role] || "/login";
 }
 
+function getLaunchPadPath(role) {
+  return `/launch-pad?role=${role}`;
+}
+
 function getSignupRedirect(role) {
-  return role === "admin" ? getDashboardPath(role) : `/launch-pad?role=${role}`;
+  return role === "admin" ? getDashboardPath(role) : getLaunchPadPath(role);
+}
+
+async function getLoginRedirect(user) {
+  const role = FRONTEND_ROLE_MAP[user.user_type];
+
+  if (role !== "moderator") {
+    return getDashboardPath(role);
+  }
+
+  const stripeConnection = await ConnectedAccount.findOne({
+    user_id: user._id,
+    platform: "stripe",
+    status: "connected",
+  });
+
+  if (stripeConnection) {
+    return getDashboardPath(role);
+  }
+
+  return getLaunchPadPath(role);
 }
 
 function pickPrimaryEmail(clerkUser) {
@@ -167,9 +192,11 @@ async function loginWithRole({ clerkUserId, role }) {
   user.updated_at = new Date();
   await user.save();
 
+  const redirectTo = await getLoginRedirect(user);
+
   return {
     user: serializeUser(user),
-    redirectTo: getDashboardPath(actualRole),
+    redirectTo,
   };
 }
 
