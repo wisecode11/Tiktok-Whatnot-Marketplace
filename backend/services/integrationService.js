@@ -2,6 +2,7 @@ const crypto = require("crypto");
 
 const Stripe = require("stripe");
 const ConnectedAccount = require("../models/ConnectedAccount");
+const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
 const { decryptText, encryptText } = require("../utils/crypto");
 
@@ -207,6 +208,47 @@ function serializeConnectedAccount(account) {
   };
 }
 
+async function upsertStripeConnectSnapshot({
+  localUserId,
+  stripeAccountId,
+  stripeAccount = null,
+  onboardingStatus,
+}) {
+  if (!localUserId || !stripeAccountId) {
+    return null;
+  }
+
+  const now = new Date();
+  const existing = await StripeConnectAccount.findOne({
+    user_id: localUserId,
+    account_type: "moderator",
+  });
+  const record = existing || new StripeConnectAccount({
+    user_id: localUserId,
+    account_type: "moderator",
+    created_at: now,
+  });
+
+  record.stripe_account_id = stripeAccountId;
+
+  if (stripeAccount) {
+    record.charges_enabled = Boolean(stripeAccount.charges_enabled);
+    record.payouts_enabled = Boolean(stripeAccount.payouts_enabled);
+    record.details_submitted = Boolean(stripeAccount.details_submitted);
+    record.country = stripeAccount.country || record.country || "US";
+    record.currency = stripeAccount.default_currency || record.currency || "usd";
+  }
+
+  if (onboardingStatus) {
+    record.onboarding_status = onboardingStatus;
+  }
+
+  record.updated_at = now;
+  await record.save();
+
+  return record;
+}
+
 async function getConnectedAccounts({ clerkUserId }) {
   const user = await findLocalUser(clerkUserId);
   const accounts = await ConnectedAccount.find({ user_id: user._id }).sort({ created_at: 1 });
@@ -299,6 +341,12 @@ async function createStripeConnectSession({ clerkUserId, role }) {
     account.status = "error";
     account.updated_at = now;
     await account.save();
+
+    await upsertStripeConnectSnapshot({
+      localUserId: user._id,
+      stripeAccountId,
+      onboardingStatus: "created",
+    });
   }
 
   const accountLink = await stripe.accountLinks.create({
@@ -330,6 +378,7 @@ async function checkStripeAccountStatus({ clerkUserId }) {
     ? stripeAccount.requirements.currently_due
     : [];
   const isOnboardingComplete = chargesEnabled && payoutsEnabled && requirements.length === 0;
+  const onboardingStatus = isOnboardingComplete ? "connected" : "incomplete";
 
   const now = new Date();
   account.status = isOnboardingComplete ? "connected" : "error";
@@ -345,6 +394,13 @@ async function checkStripeAccountStatus({ clerkUserId }) {
   };
   account.updated_at = now;
   await account.save();
+
+  await upsertStripeConnectSnapshot({
+    localUserId: user._id,
+    stripeAccountId: account.account_external_id,
+    stripeAccount,
+    onboardingStatus,
+  });
 
   return {
     connected: isOnboardingComplete,
@@ -494,6 +550,14 @@ async function disconnectPlatform({ clerkUserId, platform }) {
   account.token_expires_at = null;
   account.updated_at = new Date();
   await account.save();
+
+  if (normalizedPlatform === "stripe" && account.account_external_id) {
+    await upsertStripeConnectSnapshot({
+      localUserId: user._id,
+      stripeAccountId: account.account_external_id,
+      onboardingStatus: "revoked",
+    });
+  }
 
   return { success: true };
 }
