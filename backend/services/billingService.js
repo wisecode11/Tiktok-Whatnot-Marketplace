@@ -1023,6 +1023,9 @@ async function handleStripeWebhookEvent({ signature, payload }) {
     throw createHttpError(400, `Webhook signature verification failed: ${error.message}`);
   }
 
+  // Lazy-load to avoid circular dependencies.
+  const bookingPaymentService = require("./bookingPaymentService");
+
   switch (event.type) {
     case "customer.created":
     case "customer.updated": {
@@ -1072,11 +1075,22 @@ async function handleStripeWebhookEvent({ signature, payload }) {
     case "payment_intent.requires_action":
     case "payment_intent.requires_payment_method": {
       const paymentIntent = event.data.object;
-      const reference = await resolveWorkspaceSubscriptionReference({
-        stripeSubscriptionId: null,
-        stripeCustomerId: extractStripeId(paymentIntent.customer),
-      });
-      await syncPaymentIntentFromStripe(paymentIntent, reference && reference._id);
+      const isBookingPayment =
+        paymentIntent.metadata && paymentIntent.metadata.payment_purpose === "moderator_booking";
+
+      if (isBookingPayment) {
+        if (event.type === "payment_intent.succeeded") {
+          await bookingPaymentService.handleBookingPaymentSucceeded(paymentIntent);
+        } else if (event.type === "payment_intent.payment_failed") {
+          await bookingPaymentService.handleBookingPaymentFailed(paymentIntent);
+        }
+      } else {
+        const reference = await resolveWorkspaceSubscriptionReference({
+          stripeSubscriptionId: null,
+          stripeCustomerId: extractStripeId(paymentIntent.customer),
+        });
+        await syncPaymentIntentFromStripe(paymentIntent, reference && reference._id);
+      }
       break;
     }
 
