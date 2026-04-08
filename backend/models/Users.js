@@ -22,6 +22,8 @@ const UserSchema = new mongoose.Schema({
     default: "active",
   },
 
+  stripe_customer_id: String,
+
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });

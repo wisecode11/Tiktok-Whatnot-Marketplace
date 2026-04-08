@@ -3,6 +3,7 @@
 // Platform takes a 15% application fee; remaining 85% flows to the moderator's
 // connected Stripe Express account via transfer_data.destination.
 
+const { createClerkClient } = require("@clerk/backend");
 const Stripe = require("stripe");
 
 const ModeratorBooking = require("../models/ModeratorBooking");
@@ -25,6 +26,97 @@ function getStripeClient() {
     throw createHttpError(500, "Stripe is not configured on the server.");
   }
   return new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-03-31.basil" });
+}
+
+function getClerkClient() {
+  if (!process.env.CLERK_SECRET_KEY) {
+    return null;
+  }
+
+  return createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
+}
+
+async function getPrimaryEmailFromClerk(clerkUserId) {
+  if (!clerkUserId) {
+    return null;
+  }
+
+  const clerkClient = getClerkClient();
+  if (!clerkClient) {
+    return null;
+  }
+
+  try {
+    const clerkUser = await clerkClient.users.getUser(clerkUserId);
+    const primaryEmail = clerkUser.emailAddresses.find(
+      (email) => email.id === clerkUser.primaryEmailAddressId,
+    );
+    const email = (primaryEmail || clerkUser.emailAddresses[0] || {}).emailAddress || null;
+    return email ? email.toLowerCase() : null;
+  } catch (error) {
+    console.error("Failed to read Clerk email for booking payment:", error);
+    return null;
+  }
+}
+
+async function getRequesterContactDetails(requester) {
+  const clerkEmail = await getPrimaryEmailFromClerk(requester.clerk_user_id);
+  const email = (clerkEmail || requester.email || "").trim().toLowerCase() || null;
+  const name = `${requester.first_name || ""} ${requester.last_name || ""}`.trim() || undefined;
+
+  return { email, name };
+}
+
+async function getOrCreateStripeCustomerForRequester({ stripe, requester }) {
+  const { email, name } = await getRequesterContactDetails(requester);
+
+  let customerId = requester.stripe_customer_id || null;
+  let stripeCustomer = null;
+
+  if (customerId) {
+    try {
+      const existingCustomer = await stripe.customers.retrieve(customerId);
+      stripeCustomer = existingCustomer && !existingCustomer.deleted ? existingCustomer : null;
+    } catch (error) {
+      if (!(error && error.code === "resource_missing")) {
+        throw error;
+      }
+    }
+  }
+
+  if (!stripeCustomer) {
+    stripeCustomer = await stripe.customers.create({
+      email: email || undefined,
+      name,
+      description: `Requester for moderator bookings (clerk_id: ${requester.clerk_user_id})`,
+      metadata: {
+        user_id: requester._id,
+        user_type: "requester",
+      },
+    });
+  } else if (stripeCustomer.email !== email || stripeCustomer.name !== name) {
+    stripeCustomer = await stripe.customers.update(stripeCustomer.id, {
+      email: email || undefined,
+      name,
+      metadata: {
+        ...(stripeCustomer.metadata || {}),
+        user_id: requester._id,
+        user_type: "requester",
+      },
+    });
+  }
+
+  requester.stripe_customer_id = stripeCustomer.id;
+  if (email && requester.email !== email) {
+    requester.email = email;
+  }
+  requester.updated_at = new Date();
+  await requester.save();
+
+  return {
+    customerId: stripeCustomer.id,
+    customerEmail: email,
+  };
 }
 
 async function findLocalUser(clerkUserId) {
@@ -64,6 +156,54 @@ function calculateFees(grossAmountCents) {
   const platformFeeCents = Math.round(grossAmountCents * PLATFORM_FEE_PERCENT);
   const moderatorPayoutCents = grossAmountCents - platformFeeCents;
   return { platformFeeCents, moderatorPayoutCents };
+}
+
+function normalizeScheduledWindow({ scheduledStartAt, scheduledEndAt }) {
+  const hasStart = Boolean(scheduledStartAt);
+  const hasEnd = Boolean(scheduledEndAt);
+
+  if (hasStart !== hasEnd) {
+    throw createHttpError(400, "Both scheduledStartAt and scheduledEndAt are required together.");
+  }
+
+  if (!hasStart && !hasEnd) {
+    return {
+      startAt: null,
+      endAt: null,
+    };
+  }
+
+  const startAt = new Date(scheduledStartAt);
+  const endAt = new Date(scheduledEndAt);
+
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+    throw createHttpError(400, "Invalid scheduledStartAt or scheduledEndAt value.");
+  }
+
+  if (endAt <= startAt) {
+    throw createHttpError(400, "scheduledEndAt must be after scheduledStartAt.");
+  }
+
+  return {
+    startAt,
+    endAt,
+  };
+}
+
+async function ensureModeratorSlotIsAvailable({ moderatorUserId, slotStartAt, slotEndAt }) {
+  if (!slotStartAt || !slotEndAt) return;
+
+  const overlappingBooking = await ModeratorBooking.findOne({
+    moderator_user_id: moderatorUserId,
+    status: { $nin: ["cancelled", "refunded"] },
+    payment_status: { $nin: ["failed", "refunded"] },
+    scheduled_start_at: { $lt: slotEndAt },
+    scheduled_end_at: { $gt: slotStartAt },
+  }).select("_id");
+
+  if (overlappingBooking) {
+    throw createHttpError(409, "This moderator is already booked for the selected time slot.");
+  }
 }
 
 /**
@@ -154,6 +294,21 @@ async function createBookingPaymentIntent({
     throw createHttpError(400, "You cannot hire yourself as a moderator.");
   }
 
+  const scheduledWindow = normalizeScheduledWindow({
+    scheduledStartAt,
+    scheduledEndAt,
+  });
+
+  if (!scheduledWindow.startAt || !scheduledWindow.endAt) {
+    throw createHttpError(400, "scheduledStartAt and scheduledEndAt are required.");
+  }
+
+  await ensureModeratorSlotIsAvailable({
+    moderatorUserId,
+    slotStartAt: scheduledWindow.startAt,
+    slotEndAt: scheduledWindow.endAt,
+  });
+
   const { platformFeeCents, moderatorPayoutCents } = calculateFees(totalCents);
 
   // Create booking record first so we have its ID for metadata.
@@ -164,17 +319,23 @@ async function createBookingPaymentIntent({
     workspaceId,
     amountCents: totalCents,
     notes,
-    scheduledStartAt,
-    scheduledEndAt,
+    scheduledStartAt: scheduledWindow.startAt,
+    scheduledEndAt: scheduledWindow.endAt,
   });
 
   const stripe = getStripeClient();
+  const { customerId, customerEmail } = await getOrCreateStripeCustomerForRequester({
+    stripe,
+    requester,
+  });
 
   // Destination charge: application_fee_amount stays with platform,
   // transfer_data.destination sends remainder to moderator's connected account.
   const paymentIntent = await stripe.paymentIntents.create({
     amount: totalCents,
     currency: "usd",
+    customer: customerId,
+    receipt_email: customerEmail || undefined,
     payment_method_types: ["card"],
     application_fee_amount: platformFeeCents,
     transfer_data: {
@@ -193,6 +354,7 @@ async function createBookingPaymentIntent({
 
   // Persist the payment intent ID on the booking.
   booking.stripe_payment_intent_id = paymentIntent.id;
+  booking.stripe_customer_id = customerId;
   booking.payment_status = "pending";
   booking.updated_at = new Date();
   await booking.save();
@@ -256,6 +418,64 @@ async function handleBookingPaymentSucceeded(paymentIntent) {
     });
 
     await payout.save();
+  }
+
+  // Create a one-time Stripe invoice record for this already-paid booking.
+  if (booking.stripe_customer_id && !booking.stripe_invoice_id) {
+    try {
+      const stripe = getStripeClient();
+      const gross = booking.agreed_price_cents || 0;
+      const platformFee = booking.platform_fee_cents || 0;
+      const moderatorPayout = booking.moderator_payout_cents || 0;
+      const paymentIntentInvoiceId =
+        typeof paymentIntent.invoice === "string"
+          ? paymentIntent.invoice
+          : paymentIntent.invoice && paymentIntent.invoice.id;
+
+      if (paymentIntentInvoiceId) {
+        booking.stripe_invoice_id = paymentIntentInvoiceId;
+        booking.updated_at = new Date();
+        await booking.save();
+        return;
+      }
+
+      const invoice = await stripe.invoices.create({
+        customer: booking.stripe_customer_id,
+        auto_advance: false,
+        collection_method: "send_invoice",
+        days_until_due: 0,
+        description: `Moderator booking - ${booking.notes || "Live Session"}`,
+        metadata: {
+          booking_id: booking._id,
+          payment_intent_id: paymentIntent.id,
+          booking_type: "moderator_booking",
+        },
+      });
+
+      await stripe.invoiceItems.create({
+        customer: booking.stripe_customer_id,
+        invoice: invoice.id,
+        amount: gross,
+        currency: paymentIntent.currency || "usd",
+        description: `Moderator Booking: ${booking.notes || "Live Session"} (Platform fee $${(platformFee / 100).toFixed(2)}, moderator payout $${(moderatorPayout / 100).toFixed(2)})`,
+        metadata: {
+          booking_id: booking._id,
+          breakdown: `Platform Fee: $${(platformFee / 100).toFixed(2)} | Moderator: $${(moderatorPayout / 100).toFixed(2)}`,
+        },
+      });
+
+      const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
+      const paidInvoice = await stripe.invoices.pay(finalizedInvoice.id, {
+        paid_out_of_band: true,
+      });
+
+      booking.stripe_invoice_id = paidInvoice.id;
+      booking.updated_at = new Date();
+      await booking.save();
+    } catch (invoiceError) {
+      console.error("Failed to create invoice for booking:", invoiceError);
+      // Don't fail the entire webhook if invoice creation fails
+    }
   }
 }
 
