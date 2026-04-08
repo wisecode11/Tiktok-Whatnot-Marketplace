@@ -6,6 +6,7 @@ const express = require("express");
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const billingRoutes = require("./routes/billingRoutes");
+const bookingPaymentRoutes = require("./routes/bookingPaymentRoutes");
 const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
 const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
@@ -27,6 +28,7 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/billing", billingRoutes);
+app.use("/api/booking-payments", bookingPaymentRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/moderator-profile", moderatorProfileRoutes);
 

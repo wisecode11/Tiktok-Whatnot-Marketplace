@@ -50,6 +50,15 @@ const ModeratorBookingSchema = new mongoose.Schema({
   platform_fee_cents: Number,
   moderator_payout_cents: Number,
 
+  // Stripe payment tracking
+  stripe_payment_intent_id: String,
+  stripe_charge_id: String,
+  payment_status: {
+    type: String,
+    enum: ["unpaid", "pending", "paid", "failed", "refunded"],
+    default: "unpaid",
+  },
+
   notes: String,
 
   created_at: Date,

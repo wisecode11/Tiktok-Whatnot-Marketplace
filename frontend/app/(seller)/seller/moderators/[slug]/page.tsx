@@ -23,6 +23,7 @@ import {
   getPublicModeratorProfileByUserId,
   type PublicModeratorProfile,
 } from "@/lib/moderator-profile"
+import { HireModeratorModal } from "@/components/hire-moderator-modal"
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
@@ -49,6 +50,7 @@ export default function SellerModeratorProfilePage() {
   const [profile, setProfile] = useState<PublicModeratorProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isHireModalOpen, setIsHireModalOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -133,8 +135,17 @@ export default function SellerModeratorProfilePage() {
             Back to moderators
           </Link>
         </Button>
-        <Button disabled>Hire Moderator</Button>
+        <Button onClick={() => setIsHireModalOpen(true)}>Hire Moderator</Button>
       </div>
+
+      {/* Hire Moderator Payment Modal */}
+      <HireModeratorModal
+        open={isHireModalOpen}
+        onOpenChange={setIsHireModalOpen}
+        moderatorUserId={profile.userId}
+        moderatorName={profile.displayName || "Moderator"}
+        hourlyRateCents={profile.hourlyRateCents}
+      />
 
       <Card className="border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background">
         <CardContent className="space-y-4 p-6">
