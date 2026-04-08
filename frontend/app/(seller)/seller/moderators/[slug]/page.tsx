@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
 import {
   ArrowLeft,
   CalendarDays,
@@ -45,7 +45,11 @@ function renderRating(rating: number | null) {
 
 export default function SellerModeratorProfilePage() {
   const params = useParams<{ slug: string }>()
+  const searchParams = useSearchParams()
   const slugOrToken = params?.slug
+  const selectedDate = (searchParams.get("date") || "").trim()
+  const selectedStartTime = (searchParams.get("startTime") || "").trim()
+  const selectedEndTime = (searchParams.get("endTime") || "").trim()
 
   const [profile, setProfile] = useState<PublicModeratorProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -145,6 +149,9 @@ export default function SellerModeratorProfilePage() {
         moderatorUserId={profile.userId}
         moderatorName={profile.displayName || "Moderator"}
         hourlyRateCents={profile.hourlyRateCents}
+        initialScheduledDate={selectedDate || null}
+        initialScheduledStartTime={selectedStartTime || null}
+        initialScheduledEndTime={selectedEndTime || null}
       />
 
       <Card className="border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background">

@@ -1,4 +1,5 @@
 const {
+  ModeratorBooking,
   ModeratorProfile,
   ModeratorSchedule,
   User,
@@ -606,6 +607,90 @@ async function getPublicModeratorProfileByUserId({ userId }) {
   };
 }
 
+/**
+ * Parse "HH:MM" time string into total minutes since midnight.
+ */
+function timeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== "string") return 0;
+  const [hStr, mStr] = timeStr.split(":");
+  return Number(hStr) * 60 + Number(mStr);
+}
+
+/**
+ * Check whether a requested [slotStart, slotEnd) time window falls within
+ * a moderator's weekly working hours for the given day AND is not blocked
+ * by any break.
+ *
+ * @param {object} daySchedule  – one entry from ModeratorSchedule.weekly_schedule
+ * @param {string} slotStart    – "HH:MM"
+ * @param {string} slotEnd      – "HH:MM"
+ * @returns {boolean}
+ */
+function slotFitsInDaySchedule(daySchedule, slotStart, slotEnd) {
+  if (!daySchedule || !daySchedule.is_available) return false;
+
+  const workStart = timeToMinutes(daySchedule.start_time);
+  const workEnd   = timeToMinutes(daySchedule.end_time);
+  const reqStart  = timeToMinutes(slotStart);
+  const reqEnd    = timeToMinutes(slotEnd);
+
+  // Requested slot must fit completely within working window.
+  if (reqStart < workStart || reqEnd > workEnd) return false;
+
+  // Slot must not overlap any break.
+  for (const br of (daySchedule.breaks || [])) {
+    const brStart = timeToMinutes(br.start_time);
+    const brEnd   = timeToMinutes(br.end_time);
+    // Overlap test: slot starts before break ends AND slot ends after break starts
+    if (reqStart < brEnd && reqEnd > brStart) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Given a schedule document and a requested date+slot, return true if the
+ * moderator is actually available (weekly rules, holidays, time-off ranges
+ * all satisfied).
+ *
+ * @param {object} schedule    – ModeratorSchedule mongoose document (may be null)
+ * @param {Date}   slotStartDt – JS Date representing the start of the requested slot (UTC)
+ * @param {Date}   slotEndDt   – JS Date representing the end   of the requested slot (UTC)
+ * @param {string} dateStr     – "YYYY-MM-DD" in the moderator's local timezone (used for holiday check)
+ * @returns {boolean}
+ */
+function isModeratorAvailableForSlot(schedule, slotStartDt, slotEndDt, dateStr) {
+  if (!schedule) return false;
+
+  // 1. Holiday check (full-day blackout stored as YYYY-MM-DD strings)
+  if ((schedule.holidays || []).includes(dateStr)) return false;
+
+  // 2. Time-off range check
+  for (const range of (schedule.time_off_ranges || [])) {
+    const rangeStart = new Date(range.start_at);
+    const rangeEnd   = new Date(range.end_at);
+    // If the requested slot overlaps the time-off range at all → not available
+    if (slotStartDt < rangeEnd && slotEndDt > rangeStart) return false;
+  }
+
+  // 3. Weekly schedule check
+  // Use the day-of-week of the requested slot start in UTC (caller should pass
+  // the correct date/time already adjusted for the moderator's timezone before
+  // constructing slotStartDt, OR we compare in UTC which is an acceptable
+  // approximation for date-based filtering).
+  const dayOfWeek = slotStartDt.getUTCDay(); // 0 = Sunday … 6 = Saturday
+
+  const daySchedule = (schedule.weekly_schedule || []).find(
+    (entry) => entry.day_of_week === dayOfWeek
+  );
+
+  // Derive HH:MM from the UTC date for slot-within-day comparison
+  const slotStartTime = `${String(slotStartDt.getUTCHours()).padStart(2, "0")}:${String(slotStartDt.getUTCMinutes()).padStart(2, "0")}`;
+  const slotEndTime   = `${String(slotEndDt.getUTCHours()).padStart(2, "0")}:${String(slotEndDt.getUTCMinutes()).padStart(2, "0")}`;
+
+  return slotFitsInDaySchedule(daySchedule, slotStartTime, slotEndTime);
+}
+
 async function listPublicModerators({ query = {} }) {
   const search = normalizeString(query.search);
   const skillList = String(query.skills || "")
@@ -623,6 +708,42 @@ async function listPublicModerators({ query = {} }) {
     throw createHttpError(400, "minRating must be less than or equal to 5.");
   }
 
+  // ── Date / time slot filter (new) ─────────────────────────────────────────
+  // Expects query.date = "YYYY-MM-DD" and query.startTime + query.endTime = "HH:MM"
+  // All three must be present for slot-based filtering to activate.
+  // Times are treated as UTC (or the same timezone used when saving availability).
+  const dateStr      = normalizeString(query.date);       // "YYYY-MM-DD"
+  const startTimeStr = normalizeString(query.startTime);  // "HH:MM"
+  const endTimeStr   = normalizeString(query.endTime);    // "HH:MM"
+
+  const hasSlotFilter = Boolean(dateStr && startTimeStr && endTimeStr);
+
+  let slotStartDt = null;
+  let slotEndDt   = null;
+
+  if (hasSlotFilter) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      throw createHttpError(400, "date must be in YYYY-MM-DD format.");
+    }
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(startTimeStr)) {
+      throw createHttpError(400, "startTime must be in HH:MM format.");
+    }
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(endTimeStr)) {
+      throw createHttpError(400, "endTime must be in HH:MM format.");
+    }
+    if (startTimeStr >= endTimeStr) {
+      throw createHttpError(400, "startTime must be before endTime.");
+    }
+
+    slotStartDt = new Date(`${dateStr}T${startTimeStr}:00.000Z`);
+    slotEndDt   = new Date(`${dateStr}T${endTimeStr}:00.000Z`);
+
+    if (Number.isNaN(slotStartDt.getTime()) || Number.isNaN(slotEndDt.getTime())) {
+      throw createHttpError(400, "Invalid date or time value.");
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   const users = await User.find({
     user_type: "moderator",
     status: { $ne: "deleted" },
@@ -633,6 +754,36 @@ async function listPublicModerators({ query = {} }) {
   const userIds = users.map((user) => user._id);
   const profiles = await ModeratorProfile.find({ user_id: { $in: userIds } });
   const profileByUserId = new Map(profiles.map((profile) => [String(profile.user_id), profile]));
+
+  // ── Pre-load schedules and booked-user-ids when slot filter is active ─────
+  let bookedUserIdSet = new Set();
+  let scheduleByProfileId = new Map();
+
+  if (hasSlotFilter) {
+    const profileIds = profiles.map((p) => p._id);
+
+    // Load all schedules for these moderators in one query
+    const schedules = await ModeratorSchedule.find({
+      moderator_profile_id: { $in: profileIds },
+    });
+    scheduleByProfileId = new Map(
+      schedules.map((s) => [String(s.moderator_profile_id), s])
+    );
+
+    // Find moderator_user_ids that have an active booking overlapping the slot.
+    // Active = not cancelled / refunded / failed.
+    const overlappingBookings = await ModeratorBooking.find({
+      moderator_user_id: { $in: userIds },
+      status: { $nin: ["cancelled", "refunded"] },
+      payment_status: { $nin: ["failed"] },
+      // Overlap condition: booking.start < slotEnd AND booking.end > slotStart
+      scheduled_start_at: { $lt: slotEndDt },
+      scheduled_end_at:   { $gt: slotStartDt },
+    }).select("moderator_user_id");
+
+    bookedUserIdSet = new Set(overlappingBookings.map((b) => String(b.moderator_user_id)));
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   const normalizedSkillSet = new Set(skillList.map((skill) => skill.toLowerCase()));
   const searchRegex = search ? new RegExp(escapeRegex(search), "i") : null;
@@ -669,6 +820,19 @@ async function listPublicModerators({ query = {} }) {
       };
     })
     .filter((profile) => {
+      // ── Slot-based availability filter ──────────────────────────────────
+      if (hasSlotFilter) {
+        // Reject if already booked for this slot
+        if (bookedUserIdSet.has(String(profile.userId))) return false;
+
+        // Reject if schedule says not available
+        const scheduleDoc = scheduleByProfileId.get(String(profile.id));
+        if (!isModeratorAvailableForSlot(scheduleDoc, slotStartDt, slotEndDt, dateStr)) {
+          return false;
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       if (normalizedSkillSet.size > 0) {
         const skills = Array.isArray(profile.skills)
           ? profile.skills.map((skill) => String(skill).toLowerCase())
@@ -727,6 +891,7 @@ async function listPublicModerators({ query = {} }) {
 
   return {
     moderators,
+    ...(hasSlotFilter ? { filteredBySlot: true, date: dateStr, startTime: startTimeStr, endTime: endTimeStr } : {}),
   };
 }
 

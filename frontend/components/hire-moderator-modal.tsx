@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { loadStripe } from "@stripe/stripe-js"
 import {
@@ -172,6 +172,9 @@ export interface HireModeratorModalProps {
   moderatorUserId: string
   moderatorName: string
   hourlyRateCents: number | null
+  initialScheduledDate?: string | null
+  initialScheduledStartTime?: string | null
+  initialScheduledEndTime?: string | null
 }
 
 export function HireModeratorModal({
@@ -180,6 +183,9 @@ export function HireModeratorModal({
   moderatorUserId,
   moderatorName,
   hourlyRateCents,
+  initialScheduledDate,
+  initialScheduledStartTime,
+  initialScheduledEndTime,
 }: HireModeratorModalProps) {
   const { getToken } = useAuth()
 
@@ -191,11 +197,21 @@ export function HireModeratorModal({
   const [hours, setHours] = useState("1")
   const [customAmountDollars, setCustomAmountDollars] = useState("")
   const [notes, setNotes] = useState("")
+  const [scheduledDate, setScheduledDate] = useState(initialScheduledDate || "")
+  const [scheduledStartTime, setScheduledStartTime] = useState(initialScheduledStartTime || "")
+  const [scheduledEndTime, setScheduledEndTime] = useState(initialScheduledEndTime || "")
   const [isCreatingIntent, setIsCreatingIntent] = useState(false)
   const [intentError, setIntentError] = useState<string | null>(null)
 
   const [intent, setIntent] = useState<CreateBookingIntentResponse | null>(null)
   const [successBookingId, setSuccessBookingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setScheduledDate(initialScheduledDate || "")
+    setScheduledStartTime(initialScheduledStartTime || "")
+    setScheduledEndTime(initialScheduledEndTime || "")
+  }, [open, initialScheduledDate, initialScheduledStartTime, initialScheduledEndTime])
 
   // Derived amount
   const derivedAmountCents = (() => {
@@ -228,6 +244,18 @@ export function HireModeratorModal({
       return
     }
 
+    const hasFullScheduleValue = Boolean(scheduledDate && scheduledStartTime && scheduledEndTime)
+
+    if (!hasFullScheduleValue) {
+      setIntentError("Please select booking date, start time, and end time.")
+      return
+    }
+
+    if (hasFullScheduleValue && scheduledEndTime <= scheduledStartTime) {
+      setIntentError("End time must be after start time.")
+      return
+    }
+
     setIsCreatingIntent(true)
     setIntentError(null)
 
@@ -239,6 +267,12 @@ export function HireModeratorModal({
         moderatorUserId,
         amountCents: derivedAmountCents,
         notes: notes || undefined,
+        scheduledStartAt: hasFullScheduleValue
+          ? `${scheduledDate}T${scheduledStartTime}:00.000Z`
+          : undefined,
+        scheduledEndAt: hasFullScheduleValue
+          ? `${scheduledDate}T${scheduledEndTime}:00.000Z`
+          : undefined,
       })
 
       setIntent(result)
@@ -316,6 +350,38 @@ export function HireModeratorModal({
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Describe the session goals, platform, schedule…"
               />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-date">Date</Label>
+                <Input
+                  id="scheduled-date"
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-start">Start time</Label>
+                <Input
+                  id="scheduled-start"
+                  type="time"
+                  value={scheduledStartTime}
+                  onChange={(e) => setScheduledStartTime(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="scheduled-end">End time</Label>
+                <Input
+                  id="scheduled-end"
+                  type="time"
+                  value={scheduledEndTime}
+                  onChange={(e) => setScheduledEndTime(e.target.value)}
+                />
+              </div>
             </div>
 
             {derivedAmountCents > 0 && (

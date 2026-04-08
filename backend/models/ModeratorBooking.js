@@ -53,6 +53,8 @@ const ModeratorBookingSchema = new mongoose.Schema({
   // Stripe payment tracking
   stripe_payment_intent_id: String,
   stripe_charge_id: String,
+  stripe_customer_id: String,
+  stripe_invoice_id: String,
   payment_status: {
     type: String,
     enum: ["unpaid", "pending", "paid", "failed", "refunded"],

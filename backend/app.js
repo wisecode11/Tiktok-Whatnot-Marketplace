@@ -14,9 +14,24 @@ const models = require("./models");
 
 const app = express();
 
+const configuredOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedOrigins = Array.from(
+  new Set([...configuredOrigins, "http://localhost:3000", "http://localhost:3001"]),
+);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS: origin not allowed"));
+    },
   }),
 );
 app.post(

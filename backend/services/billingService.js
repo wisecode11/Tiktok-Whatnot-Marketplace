@@ -899,7 +899,7 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
   const existing = await WorkspaceSubscription.findOne({
     workspace_id: workspace._id,
     stripe_subscription_id: { $nin: [null, ""] },
-    status: { $nin: ["cancelled", "free"] },
+    status: { $nin: ["cancelled", "free", "incomplete_expired"] },
   }).sort({ updated_at: -1, created_at: -1 });
 
   let subscription;
@@ -927,10 +927,6 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
         owner_user_id: user._id,
         plan_id: plan._id,
         role: "seller",
-      },
-      payment_settings: {
-        save_default_payment_method: "on_subscription",
-        payment_method_types: ["card"],
       },
       payment_behavior: "pending_if_incomplete",
       proration_behavior: "create_prorations",

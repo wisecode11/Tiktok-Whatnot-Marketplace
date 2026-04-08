@@ -196,6 +196,9 @@ export function listPublicModerators(params?: {
   skills?: string[]
   minExperience?: number | null
   minRating?: number | null
+  date?: string | null
+  startTime?: string | null
+  endTime?: string | null
 }) {
   const query = new URLSearchParams()
 
@@ -213,6 +216,18 @@ export function listPublicModerators(params?: {
 
   if (params?.minRating !== null && params?.minRating !== undefined) {
     query.set("minRating", String(params.minRating))
+  }
+
+  if (params?.date) {
+    query.set("date", params.date)
+  }
+
+  if (params?.startTime) {
+    query.set("startTime", params.startTime)
+  }
+
+  if (params?.endTime) {
+    query.set("endTime", params.endTime)
   }
 
   const suffix = query.toString() ? `?${query.toString()}` : ""
