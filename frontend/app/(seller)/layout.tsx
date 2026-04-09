@@ -8,12 +8,8 @@ import { Topbar } from "@/components/dashboard/topbar"
 import {
   LayoutDashboard,
   BarChart3,
-  Calendar,
-  Package,
-  Users,
-  FileText,
-  Brain,
   UserSearch,
+  Users,
   CreditCard,
   Settings,
   Rocket,
@@ -26,25 +22,13 @@ const sellerNavigation = [
       { title: "Launch Pad", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
-
     ],
   },
   {
-    label: "Commerce",
+    label: "Moderators",
     items: [
-     
-      { title: "Team", href: "/seller/team", icon: Users, requiresSubscription: true },
-
-  
-    ],
-  },
-  {
-    label: "Tools",
-    items: [
-      { title: "AI Tools", href: "/seller/ai-tools", icon: Brain, requiresSubscription: true },
       { title: "Find Moderators", href: "/seller/moderators", icon: UserSearch, requiresSubscription: true },
-       { title: "Hired Moderators", href: "/seller/hired-moderators", icon: UserSearch, requiresSubscription: true },
-   
+      { title: "Hired Moderators", href: "/seller/hired-moderators", icon: Users, requiresSubscription: true },
     ],
   },
   {
