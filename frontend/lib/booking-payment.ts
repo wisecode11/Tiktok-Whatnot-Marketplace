@@ -74,6 +74,23 @@ export interface BookingPaymentStatus {
   createdAt: string | null
 }
 
+export interface HiredModeratorBooking {
+  bookingId: string
+  moderatorUserId: string | null
+  moderatorName: string
+  moderatorEmail: string | null
+  moderatorPublicSlug: string | null
+  paymentStatus: string
+  bookingStatus: string
+  scheduledStartAt: string | null
+  scheduledEndAt: string | null
+  createdAt: string | null
+}
+
+export interface HiredModeratorsResponse {
+  bookings: HiredModeratorBooking[]
+}
+
 export function createBookingPaymentIntent(
   token: string,
   payload: CreateBookingIntentPayload,
@@ -90,6 +107,13 @@ export function getBookingPaymentStatus(
   bookingId: string,
 ): Promise<BookingPaymentStatus> {
   return request<BookingPaymentStatus>(`/api/booking-payments/${encodeURIComponent(bookingId)}/status`, {
+    token,
+    method: "GET",
+  })
+}
+
+export function listHiredModerators(token: string): Promise<HiredModeratorsResponse> {
+  return request<HiredModeratorsResponse>("/api/booking-payments/hired-moderators", {
     token,
     method: "GET",
   })

@@ -9,6 +9,7 @@ const Stripe = require("stripe");
 const ModeratorBooking = require("../models/ModeratorBooking");
 const ModeratorPayout = require("../models/ModeratorPayout");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
+const ModeratorProfile = require("../models/ModeratorProfile");
 const User = require("../models/Users");
 
 const PLATFORM_FEE_PERCENT = 0.15; // 15%
@@ -526,9 +527,60 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
   };
 }
 
+/**
+ * List all moderator bookings created by the currently authenticated streamer.
+ */
+async function listHiredModerators({ clerkUserId }) {
+  const requester = await findLocalUser(clerkUserId);
+
+  const bookings = await ModeratorBooking.find({ requester_user_id: requester._id })
+    .sort({ created_at: -1 })
+    .limit(500);
+
+  const moderatorUserIds = Array.from(
+    new Set(bookings.map((booking) => String(booking.moderator_user_id)).filter(Boolean)),
+  );
+
+  const [moderators, moderatorProfiles] = await Promise.all([
+    User.find({ _id: { $in: moderatorUserIds } }).select("_id first_name last_name email"),
+    ModeratorProfile.find({ user_id: { $in: moderatorUserIds } }).select("user_id public_slug"),
+  ]);
+
+  const moderatorById = new Map(moderators.map((moderator) => [String(moderator._id), moderator]));
+  const moderatorProfileByUserId = new Map(
+    moderatorProfiles.map((profile) => [String(profile.user_id), profile]),
+  );
+
+  const rows = bookings.map((booking) => {
+    const moderator = moderatorById.get(String(booking.moderator_user_id));
+    const profile = moderatorProfileByUserId.get(String(booking.moderator_user_id));
+
+    const moderatorName = moderator
+      ? [moderator.first_name, moderator.last_name].filter(Boolean).join(" ").trim()
+        || (moderator.email ? String(moderator.email).split("@")[0] : "Moderator")
+      : "Moderator";
+
+    return {
+      bookingId: booking._id,
+      moderatorUserId: booking.moderator_user_id || null,
+      moderatorName,
+      moderatorEmail: moderator && moderator.email ? String(moderator.email).toLowerCase() : null,
+      moderatorPublicSlug: profile && profile.public_slug ? profile.public_slug : null,
+      paymentStatus: booking.payment_status || "unpaid",
+      bookingStatus: booking.status || "requested",
+      scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
+      scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
+      createdAt: booking.created_at ? booking.created_at.toISOString() : null,
+    };
+  });
+
+  return { bookings: rows };
+}
+
 module.exports = {
   createBookingPaymentIntent,
   handleBookingPaymentSucceeded,
   handleBookingPaymentFailed,
   getBookingPaymentStatus,
+  listHiredModerators,
 };
