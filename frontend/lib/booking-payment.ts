@@ -91,6 +91,22 @@ export interface HiredModeratorsResponse {
   bookings: HiredModeratorBooking[]
 }
 
+export interface ModeratorBookingItem {
+  bookingId: string
+  streamerUserId: string | null
+  streamerUsername: string
+  streamerEmail: string | null
+  paymentStatus: string
+  bookingStatus: string
+  scheduledStartAt: string | null
+  scheduledEndAt: string | null
+  createdAt: string | null
+}
+
+export interface ModeratorBookingsResponse {
+  bookings: ModeratorBookingItem[]
+}
+
 export function createBookingPaymentIntent(
   token: string,
   payload: CreateBookingIntentPayload,
@@ -114,6 +130,13 @@ export function getBookingPaymentStatus(
 
 export function listHiredModerators(token: string): Promise<HiredModeratorsResponse> {
   return request<HiredModeratorsResponse>("/api/booking-payments/hired-moderators", {
+    token,
+    method: "GET",
+  })
+}
+
+export function listModeratorBookings(token: string): Promise<ModeratorBookingsResponse> {
+  return request<ModeratorBookingsResponse>("/api/booking-payments/moderator-bookings", {
     token,
     method: "GET",
   })

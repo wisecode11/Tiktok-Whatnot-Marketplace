@@ -499,6 +499,8 @@ async function handleBookingPaymentFailed(paymentIntent) {
 
 /**
  * Get booking + payout status for the frontend after payment.
+ * FALLBACK: If payment is pending but has a Stripe intent, verify with Stripe API
+ * and auto-update if it actually succeeded (webhook may have failed).
  */
 async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
   const user = await findLocalUser(clerkUserId);
@@ -510,6 +512,50 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
 
   if (booking.requester_user_id !== user._id && booking.moderator_user_id !== user._id) {
     throw createHttpError(403, "You do not have access to this booking.");
+  }
+
+  // FALLBACK: If pending but has Stripe intent, check with Stripe API
+  if (booking.payment_status === "pending" && booking.stripe_payment_intent_id) {
+    try {
+      const stripe = getStripeClient();
+      const paymentIntent = await stripe.paymentIntents.retrieve(booking.stripe_payment_intent_id);
+      
+      // If Stripe says it succeeded but our DB says pending, update DB
+      if (paymentIntent.status === "succeeded" && booking.payment_status !== "paid") {
+        booking.payment_status = "paid";
+        booking.status = "accepted"; // auto-accept on payment
+        booking.stripe_charge_id = paymentIntent.latest_charge || booking.stripe_charge_id || null;
+        booking.updated_at = new Date();
+        await booking.save();
+        
+        // Also ensure payout record exists
+        const existingPayout = await ModeratorPayout.findOne({ 
+          stripe_payment_intent_id: booking.stripe_payment_intent_id 
+        });
+        if (!existingPayout) {
+          const gross = booking.agreed_price_cents || 0;
+          const fee = booking.platform_fee_cents || Math.round(gross * PLATFORM_FEE_PERCENT);
+          const net = booking.moderator_payout_cents || gross - fee;
+          
+          await ModeratorPayout.create({
+            booking_id: booking._id,
+            moderator_user_id: booking.moderator_user_id,
+            stripe_payment_intent_id: booking.stripe_payment_intent_id,
+            gross_amount_cents: gross,
+            platform_fee_cents: fee,
+            net_amount_cents: net,
+            amount_cents: net,
+            currency: paymentIntent.currency || "usd",
+            status: "pending",
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Fallback payment verification failed:", error.message);
+      // Continue with DB status even if Stripe API check fails
+    }
   }
 
   return {
@@ -577,10 +623,55 @@ async function listHiredModerators({ clerkUserId }) {
   return { bookings: rows };
 }
 
+/**
+ * List all bookings assigned to the currently authenticated moderator.
+ */
+async function listModeratorBookings({ clerkUserId }) {
+  const moderator = await findLocalUser(clerkUserId);
+
+  const bookings = await ModeratorBooking.find({ moderator_user_id: moderator._id })
+    .sort({ created_at: -1 })
+    .limit(500);
+
+  const requesterUserIds = Array.from(
+    new Set(bookings.map((booking) => String(booking.requester_user_id)).filter(Boolean)),
+  );
+
+  const requesters = await User.find({ _id: { $in: requesterUserIds } }).select(
+    "_id first_name last_name email",
+  );
+
+  const requesterById = new Map(requesters.map((requester) => [String(requester._id), requester]));
+
+  const rows = bookings.map((booking) => {
+    const requester = requesterById.get(String(booking.requester_user_id));
+
+    const streamerUsername = requester
+      ? [requester.first_name, requester.last_name].filter(Boolean).join(" ").trim()
+        || (requester.email ? String(requester.email).split("@")[0] : "Streamer")
+      : "Streamer";
+
+    return {
+      bookingId: booking._id,
+      streamerUserId: booking.requester_user_id || null,
+      streamerUsername,
+      streamerEmail: requester && requester.email ? String(requester.email).toLowerCase() : null,
+      paymentStatus: booking.payment_status || "unpaid",
+      bookingStatus: booking.status || "requested",
+      scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
+      scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
+      createdAt: booking.created_at ? booking.created_at.toISOString() : null,
+    };
+  });
+
+  return { bookings: rows };
+}
+
 module.exports = {
   createBookingPaymentIntent,
   handleBookingPaymentSucceeded,
   handleBookingPaymentFailed,
   getBookingPaymentStatus,
   listHiredModerators,
+  listModeratorBookings,
 };

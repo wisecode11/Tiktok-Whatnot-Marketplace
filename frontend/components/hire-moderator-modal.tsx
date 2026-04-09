@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   createBookingPaymentIntent,
+  getBookingPaymentStatus,
   type CreateBookingIntentResponse,
 } from "@/lib/booking-payment"
 
@@ -69,8 +70,32 @@ function CheckoutForm({
 }) {
   const stripe = useStripe()
   const elements = useElements()
+  const { getToken } = useAuth()
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
+
+  // Poll payment status until it's marked as paid (handles webhook delays)
+  async function pollPaymentStatus(bookingId: string, maxRetries = 15) {
+    let retries = 0;
+    while (retries < maxRetries) {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        
+        const status = await getBookingPaymentStatus(token, bookingId);
+        if (status.paymentStatus === "paid") {
+          return true; // Payment confirmed
+        }
+      } catch (err) {
+        console.warn("Payment status check failed:", err);
+      }
+      
+      // Wait 1 second before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      retries++;
+    }
+    return false;
+  }
 
   async function handlePay(e: React.FormEvent) {
     e.preventDefault()
@@ -97,6 +122,8 @@ function CheckoutForm({
     }
 
     if (paymentIntent?.status === "succeeded") {
+      // Poll to ensure database is updated (handles webhook delays)
+      await pollPaymentStatus(intent.bookingId)
       onSuccess(intent.bookingId)
     } else {
       setPaymentError("Payment could not be completed. Please try again.")
