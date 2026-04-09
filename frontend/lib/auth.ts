@@ -33,6 +33,35 @@ export interface PlatformConnectionResponse {
   authorizationUrl: string
 }
 
+export interface TikTokProfileResponse {
+  connected: boolean
+  profile: {
+    openId: string | null
+    unionId: string | null
+    avatarUrl: string | null
+    avatarLargeUrl: string | null
+    displayName: string | null
+    username: string | null
+    bioDescription: string | null
+    profileDeepLink: string | null
+    isVerified: boolean | null
+    followerCount: number | null
+    followingCount: number | null
+    likesCount: number | null
+    videoCount: number | null
+  } | null
+  account: {
+    platform: string
+    status: string
+    username: string | null
+    externalId: string | null
+    expiresAt: string | null
+    lastSyncedAt: string | null
+    scopes: string | null
+    fields: string | null
+  } | null
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -226,4 +255,8 @@ export interface StripeStatusResponse {
 
 export async function getStripeStatus(token: string) {
   return request<StripeStatusResponse>("/api/integrations/stripe/status", { token })
+}
+
+export async function getTikTokProfile(token: string) {
+  return request<TikTokProfileResponse>("/api/integrations/tiktok/profile", { token })
 }

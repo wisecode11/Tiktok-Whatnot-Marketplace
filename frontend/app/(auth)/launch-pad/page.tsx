@@ -90,6 +90,7 @@ function LaunchPadContent() {
   const [isRefreshing, setIsRefreshing] = useState(true)
   const [feedbackMessage, setFeedbackMessage] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
+  const [autoConnectTriggered, setAutoConnectTriggered] = useState(false)
 
   useEffect(() => {
     const platform = searchParams.get("platform")
@@ -246,6 +247,24 @@ function LaunchPadContent() {
       setErrorMessage(getClerkErrorMessage(error))
     }
   }
+
+  useEffect(() => {
+    const autoConnectPlatform = searchParams.get("autoconnect")
+
+    if (!autoConnectPlatform || autoConnectTriggered || isRefreshing) {
+      return
+    }
+
+    const platform = platforms.find((item) => item.id === autoConnectPlatform)
+
+    if (!platform || platform.connected || platform.connecting) {
+      setAutoConnectTriggered(true)
+      return
+    }
+
+    setAutoConnectTriggered(true)
+    void handleConnect(autoConnectPlatform)
+  }, [autoConnectTriggered, isRefreshing, platforms, searchParams])
 
   const handleDisconnect = async (platformId: string) => {
     setErrorMessage("")

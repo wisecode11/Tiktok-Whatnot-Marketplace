@@ -9,6 +9,23 @@ const { decryptText, encryptText } = require("../utils/crypto");
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_REVOKE_URL = "https://open.tiktokapis.com/v2/oauth/revoke/";
+const TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/";
+const TIKTOK_BASIC_USER_INFO_FIELDS = "open_id,union_id,avatar_url";
+const TIKTOK_ENHANCED_USER_INFO_FIELDS = [
+  "open_id",
+  "union_id",
+  "avatar_url",
+  "avatar_large_url",
+  "display_name",
+  "bio_description",
+  "profile_deep_link",
+  "is_verified",
+  "username",
+  "follower_count",
+  "following_count",
+  "likes_count",
+  "video_count",
+].join(",");
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -205,6 +222,214 @@ function serializeConnectedAccount(account) {
     username: account.account_name || null,
     externalId: account.account_external_id || null,
     expiresAt: account.token_expires_at || null,
+  };
+}
+
+function getTikTokUserInfoFields() {
+  return process.env.TIKTOK_USER_INFO_FIELDS || TIKTOK_ENHANCED_USER_INFO_FIELDS;
+}
+
+function getTikTokFallbackUserInfoFields() {
+  return TIKTOK_BASIC_USER_INFO_FIELDS;
+}
+
+function parseTikTokApiError(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const error = payload.error;
+
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if (error.code && error.code !== "ok") {
+    return {
+      code: error.code,
+      message: error.message || error.code,
+      details: error,
+    };
+  }
+
+  return null;
+}
+
+async function refreshTikTokAccessToken(account) {
+  if (!account || !account.refresh_token_encrypted) {
+    throw createHttpError(401, "TikTok refresh token is missing. Please reconnect your TikTok account.");
+  }
+
+  const refreshToken = decryptText(account.refresh_token_encrypted);
+
+  if (!refreshToken) {
+    throw createHttpError(401, "TikTok refresh token is unavailable. Please reconnect your TikTok account.");
+  }
+
+  const { clientKey, clientSecret } = getTikTokConfig();
+  const tokenPayload = await fetchTikTokToken({
+    client_key: clientKey,
+    client_secret: clientSecret,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const now = new Date();
+
+  account.access_token_encrypted = encryptText(tokenPayload.access_token);
+  account.refresh_token_encrypted = encryptText(tokenPayload.refresh_token || refreshToken);
+  account.token_expires_at = tokenPayload.expires_in
+    ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
+    : null;
+  account.status = "connected";
+  account.updated_at = now;
+  account.metadata_json = {
+    ...(account.metadata_json || {}),
+    open_id: tokenPayload.open_id || account.account_external_id || null,
+    refresh_expires_in: tokenPayload.refresh_expires_in || null,
+    refreshed_at: now.toISOString(),
+  };
+
+  if (tokenPayload.open_id) {
+    account.account_external_id = tokenPayload.open_id;
+    account.account_name = `@${tokenPayload.open_id}`;
+  }
+
+  await account.save();
+
+  return decryptText(account.access_token_encrypted);
+}
+
+async function getValidTikTokAccessToken(account) {
+  if (!account || !account.access_token_encrypted) {
+    throw createHttpError(404, "TikTok account is not connected.");
+  }
+
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : null;
+  const isExpired = expiresAt ? expiresAt <= Date.now() + 60 * 1000 : false;
+
+  if (isExpired) {
+    return refreshTikTokAccessToken(account);
+  }
+
+  return decryptText(account.access_token_encrypted);
+}
+
+async function fetchTikTokUserInfo(accessToken, fields) {
+  const requestUrl = new URL(TIKTOK_USER_INFO_URL);
+  requestUrl.searchParams.set("fields", fields);
+
+  const response = await fetch(requestUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Cache-Control": "no-cache",
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  const apiError = parseTikTokApiError(payload);
+
+  if (!response.ok || apiError) {
+    const message = apiError
+      ? apiError.message
+      : payload.error_description || payload.message || "TikTok user info request failed.";
+    throw createHttpError(response.status || 502, message, apiError ? apiError.details : payload);
+  }
+
+  return payload;
+}
+
+async function getTikTokProfile({ clerkUserId }) {
+  const user = await findLocalUser(clerkUserId);
+  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
+
+  if (!account || !account.access_token_encrypted) {
+    return {
+      connected: false,
+      profile: null,
+      account: null,
+    };
+  }
+
+  const requestedFields = getTikTokUserInfoFields();
+  const fallbackFields = getTikTokFallbackUserInfoFields();
+
+  let accessToken = await getValidTikTokAccessToken(account);
+  let userInfoPayload;
+  let resolvedFields = requestedFields;
+
+  try {
+    userInfoPayload = await fetchTikTokUserInfo(accessToken, requestedFields);
+  } catch (error) {
+    if (error.status === 401) {
+      accessToken = await refreshTikTokAccessToken(account);
+      userInfoPayload = await fetchTikTokUserInfo(accessToken, requestedFields);
+    } else if (requestedFields !== fallbackFields) {
+      resolvedFields = fallbackFields;
+      userInfoPayload = await fetchTikTokUserInfo(accessToken, fallbackFields);
+    } else {
+      throw error;
+    }
+  }
+
+  const profile = userInfoPayload && userInfoPayload.data && userInfoPayload.data.user
+    ? userInfoPayload.data.user
+    : {};
+  const now = new Date();
+
+  account.status = "connected";
+  account.updated_at = now;
+  account.metadata_json = {
+    ...(account.metadata_json || {}),
+    last_profile_sync_at: now.toISOString(),
+    union_id: profile.union_id || (account.metadata_json && account.metadata_json.union_id) || null,
+    user_info_fields: resolvedFields,
+  };
+
+  if (profile.open_id) {
+    account.account_external_id = profile.open_id;
+  }
+
+  if (profile.username) {
+    account.account_name = `@${profile.username}`;
+  } else if (!account.account_name && profile.open_id) {
+    account.account_name = `@${profile.open_id}`;
+  }
+
+  await account.save();
+
+  return {
+    connected: true,
+    profile: {
+      openId: profile.open_id || account.account_external_id || null,
+      unionId: profile.union_id || null,
+      avatarUrl: profile.avatar_url || null,
+      avatarLargeUrl: profile.avatar_large_url || null,
+      displayName: profile.display_name || null,
+      username: profile.username || null,
+      bioDescription: profile.bio_description || null,
+      profileDeepLink: profile.profile_deep_link || null,
+      isVerified: typeof profile.is_verified === "boolean" ? profile.is_verified : null,
+      followerCount: typeof profile.follower_count === "number" ? profile.follower_count : null,
+      followingCount: typeof profile.following_count === "number" ? profile.following_count : null,
+      likesCount: typeof profile.likes_count === "number" ? profile.likes_count : null,
+      videoCount: typeof profile.video_count === "number" ? profile.video_count : null,
+    },
+    account: {
+      platform: account.platform,
+      status: account.status,
+      username: account.account_name || null,
+      externalId: account.account_external_id || null,
+      expiresAt: account.token_expires_at || null,
+      lastSyncedAt: account.metadata_json && account.metadata_json.last_profile_sync_at
+        ? account.metadata_json.last_profile_sync_at
+        : null,
+      scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
+      fields: account.metadata_json && account.metadata_json.user_info_fields
+        ? account.metadata_json.user_info_fields
+        : resolvedFields,
+    },
   };
 }
 
@@ -567,5 +792,6 @@ module.exports = {
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getTikTokProfile,
   handleTikTokCallback,
 };
