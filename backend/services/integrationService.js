@@ -11,6 +11,7 @@ const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_REVOKE_URL = "https://open.tiktokapis.com/v2/oauth/revoke/";
 const TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/";
 const TIKTOK_BASIC_USER_INFO_FIELDS = "open_id,union_id,avatar_url";
+const TIKTOK_STATS_USER_INFO_FIELDS = "open_id,union_id,avatar_url,follower_count,following_count,likes_count,video_count";
 const TIKTOK_ENHANCED_USER_INFO_FIELDS = [
   "open_id",
   "union_id",
@@ -233,6 +234,23 @@ function getTikTokFallbackUserInfoFields() {
   return TIKTOK_BASIC_USER_INFO_FIELDS;
 }
 
+function getTikTokStatsUserInfoFields() {
+  return process.env.TIKTOK_STATS_USER_INFO_FIELDS || TIKTOK_STATS_USER_INFO_FIELDS;
+}
+
+function toNullableNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
 function parseTikTokApiError(payload) {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -353,6 +371,7 @@ async function getTikTokProfile({ clerkUserId }) {
   }
 
   const requestedFields = getTikTokUserInfoFields();
+  const statsFields = getTikTokStatsUserInfoFields();
   const fallbackFields = getTikTokFallbackUserInfoFields();
 
   let accessToken = await getValidTikTokAccessToken(account);
@@ -362,10 +381,42 @@ async function getTikTokProfile({ clerkUserId }) {
   try {
     userInfoPayload = await fetchTikTokUserInfo(accessToken, requestedFields);
   } catch (error) {
-    if (error.status === 401) {
+    const errorCode = error && error.details && error.details.code
+      ? String(error.details.code).toLowerCase()
+      : "";
+
+    if (requestedFields !== statsFields && errorCode === "scope_not_authorized") {
+      resolvedFields = statsFields;
+      userInfoPayload = await fetchTikTokUserInfo(accessToken, statsFields);
+    } else if (requestedFields !== fallbackFields && errorCode === "scope_not_authorized") {
+      resolvedFields = fallbackFields;
+      userInfoPayload = await fetchTikTokUserInfo(accessToken, fallbackFields);
+    } else if (error.status === 401) {
       accessToken = await refreshTikTokAccessToken(account);
-      userInfoPayload = await fetchTikTokUserInfo(accessToken, requestedFields);
+
+      try {
+        userInfoPayload = await fetchTikTokUserInfo(accessToken, requestedFields);
+      } catch (retryError) {
+        const retryCode = retryError && retryError.details && retryError.details.code
+          ? String(retryError.details.code).toLowerCase()
+          : "";
+
+        if (requestedFields !== statsFields && retryCode === "scope_not_authorized") {
+          resolvedFields = statsFields;
+          userInfoPayload = await fetchTikTokUserInfo(accessToken, statsFields);
+        } else if (requestedFields !== fallbackFields && retryCode === "scope_not_authorized") {
+          resolvedFields = fallbackFields;
+          userInfoPayload = await fetchTikTokUserInfo(accessToken, fallbackFields);
+        } else {
+          throw retryError;
+        }
+      }
+    } else if (requestedFields !== statsFields) {
+      // If profile fields fail for any other reason, attempt stats-only fields first.
+      resolvedFields = statsFields;
+      userInfoPayload = await fetchTikTokUserInfo(accessToken, statsFields);
     } else if (requestedFields !== fallbackFields) {
+      // If a non-auth error occurs with enhanced fields, try the documented basic field set.
       resolvedFields = fallbackFields;
       userInfoPayload = await fetchTikTokUserInfo(accessToken, fallbackFields);
     } else {
@@ -411,10 +462,10 @@ async function getTikTokProfile({ clerkUserId }) {
       bioDescription: profile.bio_description || null,
       profileDeepLink: profile.profile_deep_link || null,
       isVerified: typeof profile.is_verified === "boolean" ? profile.is_verified : null,
-      followerCount: typeof profile.follower_count === "number" ? profile.follower_count : null,
-      followingCount: typeof profile.following_count === "number" ? profile.following_count : null,
-      likesCount: typeof profile.likes_count === "number" ? profile.likes_count : null,
-      videoCount: typeof profile.video_count === "number" ? profile.video_count : null,
+      followerCount: toNullableNumber(profile.follower_count),
+      followingCount: toNullableNumber(profile.following_count),
+      likesCount: toNullableNumber(profile.likes_count),
+      videoCount: toNullableNumber(profile.video_count),
     },
     account: {
       platform: account.platform,

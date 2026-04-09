@@ -67,6 +67,18 @@ function getUnavailableValue(isConnected: boolean) {
   return isConnected ? "Not available" : "Account not connected"
 }
 
+function hasTikTokScope(scopes: string | null | undefined, requiredScope: string) {
+  if (!scopes) {
+    return false
+  }
+
+  return scopes
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .includes(requiredScope)
+}
+
 export default function SellerDashboard() {
   const { getToken, isLoaded } = useAuth()
   const [tiktokProfile, setTikTokProfile] = useState<TikTokProfileResponse | null>(null)
@@ -200,23 +212,42 @@ export default function SellerDashboard() {
     ]
   }, [tiktokProfile])
 
+  const hasStatsScope = useMemo(() => {
+    return hasTikTokScope(tiktokProfile?.account?.scopes, "user.info.stats")
+  }, [tiktokProfile])
+
   const tiktokStats = useMemo(() => {
     const profile = tiktokProfile?.profile
 
     return [
       {
         title: "Followers",
-        value: profile?.followerCount != null ? formatOptionalNumber(profile.followerCount) : getUnavailableValue(isTikTokConnected),
+        value:
+          profile?.followerCount != null
+            ? formatOptionalNumber(profile.followerCount)
+            : isTikTokConnected && !hasStatsScope
+              ? "Scope user.info.stats required"
+              : getUnavailableValue(isTikTokConnected),
         icon: Users,
       },
       {
         title: "Following",
-        value: profile?.followingCount != null ? formatOptionalNumber(profile.followingCount) : getUnavailableValue(isTikTokConnected),
+        value:
+          profile?.followingCount != null
+            ? formatOptionalNumber(profile.followingCount)
+            : isTikTokConnected && !hasStatsScope
+              ? "Scope user.info.stats required"
+              : getUnavailableValue(isTikTokConnected),
         icon: UserPlus,
       },
       {
         title: "Total Likes",
-        value: profile?.likesCount != null ? formatOptionalNumber(profile.likesCount) : getUnavailableValue(isTikTokConnected),
+        value:
+          profile?.likesCount != null
+            ? formatOptionalNumber(profile.likesCount)
+            : isTikTokConnected && !hasStatsScope
+              ? "Scope user.info.stats required"
+              : getUnavailableValue(isTikTokConnected),
         icon: Heart,
       },
       {
@@ -225,7 +256,7 @@ export default function SellerDashboard() {
         icon: Clapperboard,
       },
     ]
-  }, [isTikTokConnected, tiktokProfile])
+  }, [hasStatsScope, isTikTokConnected, tiktokProfile])
 
   const commerceStats = useMemo(() => {
     const value = isTikTokConnected ? "Not available" : "Account not connected"
@@ -263,7 +294,7 @@ export default function SellerDashboard() {
               <Spinner className="h-4 w-4" />
               Syncing
             </div>
-          ) : tiktokProfile?.connected ? (
+          ) : isTikTokConnected ? (
             <StatusBadge variant="success" dot pulse>
               Connected
             </StatusBadge>
@@ -286,7 +317,7 @@ export default function SellerDashboard() {
               description={errorMessage}
               className="min-h-40"
             />
-          ) : !tiktokProfile?.connected || !tiktokProfile.account ? (
+          ) : !isTikTokConnected ? (
             <EmptyState
               icon={RefreshCw}
               title="Account not connected"
@@ -299,6 +330,15 @@ export default function SellerDashboard() {
               }}
               className="min-h-40"
             />
+          ) : !tiktokProfile?.account ? (
+            <div className="flex min-h-40 items-center justify-center rounded-2xl border border-dashed bg-muted/20 px-6 text-center">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">TikTok account is connected</p>
+                <p className="text-sm text-muted-foreground">
+                  Profile sync is still in progress or limited by current scopes. Basic account connection is active.
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
               <div className="flex items-start gap-4 rounded-2xl border border-border/50 bg-muted/20 p-5">
@@ -370,6 +410,19 @@ export default function SellerDashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* KPI Cards */}
+      {isTikTokConnected && !hasStatsScope ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="flex items-start gap-3 p-4 text-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              Followers, Following, and Likes require TikTok scope <span className="font-medium">user.info.stats</span>.
+              Reconnect TikTok from launch pad and approve stats access to load these values.
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
