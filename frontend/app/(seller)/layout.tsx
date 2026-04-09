@@ -26,15 +26,16 @@ const sellerNavigation = [
       { title: "Launch Pad", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
-      { title: "Calendar", href: "/seller/calendar", icon: Calendar },
+
     ],
   },
   {
     label: "Commerce",
     items: [
-      { title: "Products", href: "/seller/products", icon: Package, badge: 4, requiresSubscription: true },
+     
       { title: "Team", href: "/seller/team", icon: Users, requiresSubscription: true },
-      { title: "Content", href: "/seller/content", icon: FileText },
+
+  
     ],
   },
   {
@@ -42,6 +43,8 @@ const sellerNavigation = [
     items: [
       { title: "AI Tools", href: "/seller/ai-tools", icon: Brain, requiresSubscription: true },
       { title: "Find Moderators", href: "/seller/moderators", icon: UserSearch, requiresSubscription: true },
+       { title: "Hired Moderators", href: "/seller/hired-moderators", icon: UserSearch, requiresSubscription: true },
+   
     ],
   },
   {
