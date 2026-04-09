@@ -19,7 +19,7 @@ import {
 const sellerNavigation = [
   {
     items: [
-      { title: "Launch Pad", href: "/seller", icon: Rocket },
+      { title: "Connect Platforms", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
     ],

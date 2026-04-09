@@ -48,7 +48,7 @@ import {
   Lock,
 } from "lucide-react"
 import { useEffect, useState } from "react"
-import { waitForSessionToken } from "@/lib/auth"
+import { getConnectedAccounts, waitForSessionToken } from "@/lib/auth"
 import { getMyModeratorProfile, type ModeratorProfileResponse } from "@/lib/moderator-profile"
 
 interface NavItem {
@@ -92,10 +92,12 @@ export function AppSidebar({
   const subscriptionAccess = useOptionalSellerSubscriptionAccess()
   const [lockedItemTitle, setLockedItemTitle] = useState<string | null>(null)
   const [moderatorProfile, setModeratorProfile] = useState<ModeratorProfileResponse["profile"] | null>(null)
+  const [sellerPlatformNames, setSellerPlatformNames] = useState<string[]>([])
   const logoutRedirectUrl = pathname.startsWith("/admin") ? "/admin-login" : "/login"
   const hasActiveSubscription = subscriptionAccess?.hasActiveSubscription ?? true
   const isLoading = subscriptionAccess?.isLoading ?? false
   const isModerator = authenticatedUser?.backendRole === "moderator"
+  const isSeller = authenticatedUser?.backendRole === "seller"
 
   useEffect(() => {
     let cancelled = false
@@ -126,12 +128,61 @@ export function AppSidebar({
     }
   }, [getToken, isLoaded, isModerator])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSellerConnections() {
+      if (!isLoaded || !isSeller) {
+        return
+      }
+
+      try {
+        const token = await waitForSessionToken(getToken)
+        const result = await getConnectedAccounts(token)
+        const platformNames = result.accounts
+          .filter((account) => account.connected)
+          .map((account) => {
+            if (account.platform === "tiktok") {
+              return "TikTok"
+            }
+
+            if (account.platform === "whatnot") {
+              return "Whatnot"
+            }
+
+            return account.platform
+          })
+
+        if (!cancelled) {
+          setSellerPlatformNames(platformNames)
+        }
+      } catch {
+        if (!cancelled) {
+          setSellerPlatformNames([])
+        }
+      }
+    }
+
+    void loadSellerConnections()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, isLoaded, isSeller])
+
   const displayEmail = authenticatedUser?.email || user?.email
   const displayName = moderatorProfile?.displayName || (authenticatedUser
     ? [authenticatedUser.firstName, authenticatedUser.lastName].filter(Boolean).join(" ") || authenticatedUser.email
     : user?.name)
   const displaySubtitle = moderatorProfile?.headline || displayEmail
   const displayAvatar = clerkUser?.imageUrl || user?.avatar
+  const currentPlatformTitle = sellerPlatformNames.length === 0
+    ? "Connect Platforms"
+    : sellerPlatformNames.length === 1
+      ? sellerPlatformNames[0]
+      : sellerPlatformNames.length === 2
+        ? `${sellerPlatformNames[0]} + ${sellerPlatformNames[1]}`
+        : `${sellerPlatformNames[0]} +${sellerPlatformNames.length - 1}`
 
   return (
     <>
@@ -174,6 +225,10 @@ export function AppSidebar({
                   {group.items.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                     const isLocked = Boolean(item.requiresSubscription && !isLoading && !hasActiveSubscription)
+                    const displayTitle = isSeller && item.href === "/seller" ? currentPlatformTitle : item.title
+                    const displayBadge = isSeller && item.href === "/seller" && sellerPlatformNames.length > 0
+                      ? sellerPlatformNames.length
+                      : item.badge
 
                     return (
                       <SidebarMenuItem key={item.href}>
@@ -199,16 +254,16 @@ export function AppSidebar({
                             }}
                           >
                             <item.icon className="h-4 w-4" />
-                            <span>{item.title}</span>
+                            <span>{displayTitle}</span>
                             {isLocked ? <Lock className="ml-auto h-4 w-4 text-muted-foreground" /> : null}
-                            {!isLocked && item.badge !== undefined && (
+                            {!isLocked && displayBadge !== undefined && (
                               <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary">
-                                {item.badge}
+                                {displayBadge}
                               </span>
                             )}
-                            {isLocked && item.badge !== undefined && (
+                            {isLocked && displayBadge !== undefined && (
                               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary">
-                                {item.badge}
+                                {displayBadge}
                               </span>
                             )}
                           </Link>

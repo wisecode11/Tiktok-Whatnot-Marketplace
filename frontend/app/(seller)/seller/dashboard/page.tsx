@@ -1,29 +1,248 @@
+"use client"
+
+import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatCard } from "@/components/ui/stat-card"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Spinner } from "@/components/ui/spinner"
 import {
-  Eye,
+  AlertCircle,
   Heart,
   Users,
-  ShoppingCart,
   DollarSign,
   Clock,
-  TrendingUp,
-  MessageSquare,
   Video,
-  Calendar,
+  RefreshCw,
+  ShieldCheck,
+  BadgeCheck,
+  UserPlus,
+  Clapperboard,
+  Link as LinkIcon,
+  PlugZap,
+  Radio,
+  CircleDollarSign,
+  PackageSearch,
 } from "lucide-react"
-import { mockDashboardStats, mockRecentActivity, mockUpcomingStreams } from "@/lib/mock-data"
+import {
+  AuthApiError,
+  getConnectedAccounts,
+  getTikTokProfile,
+  waitForSessionToken,
+  type ConnectedAccountResponse,
+  type TikTokProfileResponse,
+} from "@/lib/auth"
+
+const formatter = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+})
+
+const platformLabels: Record<string, string> = {
+  tiktok: "TikTok Shop",
+  whatnot: "Whatnot",
+}
+
+const launchPadLinks: Record<string, string> = {
+  tiktok: "/launch-pad?role=streamer&autoconnect=tiktok",
+  whatnot: "/launch-pad?role=streamer&autoconnect=whatnot",
+}
+
+function getAvatarFallback(profile: TikTokProfileResponse["profile"], account: TikTokProfileResponse["account"]) {
+  const source = profile?.displayName || account?.username || profile?.username || profile?.openId || "TT"
+  return source.replace(/^@/, "").slice(0, 2).toUpperCase()
+}
+
+function formatOptionalNumber(value: number | null | undefined) {
+  return typeof value === "number" ? value.toLocaleString() : "Unavailable"
+}
+
+function getUnavailableValue(isConnected: boolean) {
+  return isConnected ? "Not available" : "Account not connected"
+}
 
 export default function SellerDashboard() {
+  const { getToken, isLoaded } = useAuth()
+  const [tiktokProfile, setTikTokProfile] = useState<TikTokProfileResponse | null>(null)
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccountResponse["accounts"]>([])
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadDashboardData() {
+      if (!isLoaded) {
+        return
+      }
+
+      try {
+        setIsLoading(true)
+        setErrorMessage(null)
+
+        const token = await waitForSessionToken(getToken)
+        const [profileResult, accountsResult] = await Promise.allSettled([
+          getTikTokProfile(token),
+          getConnectedAccounts(token),
+        ])
+
+        if (!isCancelled) {
+          if (profileResult.status === "fulfilled") {
+            setTikTokProfile(profileResult.value)
+          } else {
+            setTikTokProfile(null)
+          }
+
+          if (accountsResult.status === "fulfilled") {
+            setConnectedAccounts(accountsResult.value.accounts)
+          } else {
+            setConnectedAccounts([])
+          }
+
+          if (profileResult.status === "rejected" && accountsResult.status === "rejected") {
+            throw profileResult.reason
+          }
+        }
+      } catch (error) {
+        if (isCancelled) {
+          return
+        }
+
+        const message = error instanceof AuthApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Unable to load TikTok profile right now."
+        setErrorMessage(message)
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    void loadDashboardData()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [getToken, isLoaded])
+
+  const platformAccounts = useMemo(() => {
+    return ["tiktok", "whatnot"].map((platformId) => {
+      const account = connectedAccounts.find((item) => item.platform === platformId)
+
+      if (platformId === "tiktok") {
+        return {
+          id: platformId,
+          name: platformLabels[platformId],
+          connected: Boolean(tiktokProfile?.connected || account?.connected),
+          username:
+            tiktokProfile?.profile?.username
+              ? `@${tiktokProfile.profile.username}`
+              : tiktokProfile?.account?.username || account?.username || null,
+          externalId: tiktokProfile?.profile?.openId || tiktokProfile?.account?.externalId || account?.externalId || null,
+          status: tiktokProfile?.account?.status || account?.status || "not connected",
+          actionHref: launchPadLinks[platformId],
+        }
+      }
+
+      return {
+        id: platformId,
+        name: platformLabels[platformId],
+        connected: Boolean(account?.connected),
+        username: account?.username || null,
+        externalId: account?.externalId || null,
+        status: account?.status || "not connected",
+        actionHref: launchPadLinks[platformId],
+      }
+    })
+  }, [connectedAccounts, tiktokProfile])
+
+  const isTikTokConnected = platformAccounts.some((platform) => platform.id === "tiktok" && platform.connected)
+
+  const accountSummary = useMemo(() => {
+    if (!tiktokProfile?.account) {
+      return []
+    }
+
+    return [
+      {
+        label: "Open ID",
+        value: tiktokProfile.profile?.openId || tiktokProfile.account.externalId || "Unavailable",
+      },
+      {
+        label: "Union ID",
+        value: tiktokProfile.profile?.unionId || "Unavailable",
+      },
+      {
+        label: "Token expires",
+        value: tiktokProfile.account.expiresAt
+          ? formatter.format(new Date(tiktokProfile.account.expiresAt))
+          : "Unavailable",
+      },
+      {
+        label: "Last sync",
+        value: tiktokProfile.account.lastSyncedAt
+          ? formatter.format(new Date(tiktokProfile.account.lastSyncedAt))
+          : "Not synced yet",
+      },
+      {
+        label: "Scopes",
+        value: tiktokProfile.account.scopes || "Unavailable",
+      },
+    ]
+  }, [tiktokProfile])
+
+  const tiktokStats = useMemo(() => {
+    const profile = tiktokProfile?.profile
+
+    return [
+      {
+        title: "Followers",
+        value: profile?.followerCount != null ? formatOptionalNumber(profile.followerCount) : getUnavailableValue(isTikTokConnected),
+        icon: Users,
+      },
+      {
+        title: "Following",
+        value: profile?.followingCount != null ? formatOptionalNumber(profile.followingCount) : getUnavailableValue(isTikTokConnected),
+        icon: UserPlus,
+      },
+      {
+        title: "Total Likes",
+        value: profile?.likesCount != null ? formatOptionalNumber(profile.likesCount) : getUnavailableValue(isTikTokConnected),
+        icon: Heart,
+      },
+      {
+        title: "Public Videos",
+        value: profile?.videoCount != null ? formatOptionalNumber(profile.videoCount) : getUnavailableValue(isTikTokConnected),
+        icon: Clapperboard,
+      },
+    ]
+  }, [isTikTokConnected, tiktokProfile])
+
+  const commerceStats = useMemo(() => {
+    const value = isTikTokConnected ? "Not available" : "Account not connected"
+
+    return [
+      { title: "Orders", value, icon: PackageSearch },
+      { title: "Revenue", value, icon: CircleDollarSign },
+      { title: "Avg Order Value", value, icon: DollarSign },
+      { title: "Stream Duration", value, icon: Clock },
+    ]
+  }, [isTikTokConnected])
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Dashboard"
-        description="Monitor your live commerce performance"
+        description="Monitor your live commerce performance and connected TikTok account"
       >
         <Button className="gap-2">
           <Video className="h-4 w-4" />
@@ -31,167 +250,209 @@ export default function SellerDashboard() {
         </Button>
       </PageHeader>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Views"
-          value={mockDashboardStats.totalViews.toLocaleString()}
-          change={mockDashboardStats.viewsChange}
-          icon={Eye}
-        />
-        <StatCard
-          title="Total Likes"
-          value={mockDashboardStats.totalLikes.toLocaleString()}
-          change={mockDashboardStats.likesChange}
-          icon={Heart}
-        />
-        <StatCard
-          title="Followers"
-          value={mockDashboardStats.followers.toLocaleString()}
-          change={mockDashboardStats.followersChange}
-          icon={Users}
-        />
-        <StatCard
-          title="Engagement Rate"
-          value={`${mockDashboardStats.engagementRate}%`}
-          change={mockDashboardStats.engagementChange}
-          icon={TrendingUp}
-        />
-      </div>
-
-      {/* Revenue Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Orders"
-          value={mockDashboardStats.totalOrders.toLocaleString()}
-          change={mockDashboardStats.ordersChange}
-          icon={ShoppingCart}
-        />
-        <StatCard
-          title="Revenue"
-          value={`$${mockDashboardStats.revenue.toLocaleString()}`}
-          change={mockDashboardStats.revenueChange}
-          icon={DollarSign}
-        />
-        <StatCard
-          title="Avg Order Value"
-          value={`$${mockDashboardStats.avgOrderValue}`}
-          change={mockDashboardStats.aovChange}
-          icon={DollarSign}
-        />
-        <StatCard
-          title="Stream Duration"
-          value={mockDashboardStats.streamDuration}
-          change={mockDashboardStats.durationChange}
-          icon={Clock}
-        />
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Chart Placeholder */}
-        <Card className="border-border/50 bg-card/50 lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-lg">Performance Overview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex h-64 items-center justify-center rounded-xl bg-muted/30 text-muted-foreground">
-              <div className="text-center">
-                <TrendingUp className="mx-auto mb-2 h-8 w-8" />
-                <p>Analytics chart placeholder</p>
-                <p className="text-sm">Connect real data to display charts</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Upcoming Streams */}
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Upcoming Streams</CardTitle>
-            <Button variant="ghost" size="sm">
-              <Calendar className="mr-1 h-4 w-4" />
-              View All
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockUpcomingStreams.map((stream) => (
-                <div
-                  key={stream.id}
-                  className="rounded-xl border border-border/50 bg-muted/30 p-3"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="font-medium">{stream.title}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {stream.scheduledAt}
-                      </div>
-                    </div>
-                    <StatusBadge
-                      variant={
-                        stream.status === "scheduled" ? "info" : "default"
-                      }
-                    >
-                      {stream.status}
-                    </StatusBadge>
-                  </div>
-                  <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {stream.duration}
-                    </span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 uppercase">
-                      {stream.platform}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Activity Feed */}
       <Card className="border-border/50 bg-card/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <MessageSquare className="h-5 w-5 text-primary" />
-            Recent Activity
-          </CardTitle>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-lg">TikTok Account</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Live profile data from your connected TikTok account.
+            </p>
+          </div>
+          {isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" />
+              Syncing
+            </div>
+          ) : tiktokProfile?.connected ? (
+            <StatusBadge variant="success" dot pulse>
+              Connected
+            </StatusBadge>
+          ) : (
+            <StatusBadge variant="warning">Not connected</StatusBadge>
+          )}
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {mockRecentActivity.map((activity) => (
-              <div
-                key={activity.id}
-                className="flex items-start gap-3 rounded-lg p-2 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                  {activity.type === "order" && (
-                    <ShoppingCart className="h-4 w-4 text-primary" />
-                  )}
-                  {activity.type === "follow" && (
-                    <Users className="h-4 w-4 text-primary" />
-                  )}
-                  {activity.type === "comment" && (
-                    <MessageSquare className="h-4 w-4 text-primary" />
-                  )}
-                  {activity.type === "stream" && (
-                    <Video className="h-4 w-4 text-primary" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm">{activity.message}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {activity.timestamp}
+          {isLoading ? (
+            <div className="flex min-h-40 items-center justify-center rounded-2xl border border-dashed bg-muted/20">
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <Spinner className="h-4 w-4" />
+                Loading TikTok profile
+              </div>
+            </div>
+          ) : errorMessage ? (
+            <EmptyState
+              icon={AlertCircle}
+              title="TikTok profile unavailable"
+              description={errorMessage}
+              className="min-h-40"
+            />
+          ) : !tiktokProfile?.connected || !tiktokProfile.account ? (
+            <EmptyState
+              icon={RefreshCw}
+              title="Account not connected"
+              description="Connect your TikTok account from launch pad to load live TikTok profile data on this dashboard."
+              action={{
+                label: "Connect account",
+                onClick: () => {
+                  window.location.href = launchPadLinks.tiktok
+                },
+              }}
+              className="min-h-40"
+            />
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+              <div className="flex items-start gap-4 rounded-2xl border border-border/50 bg-muted/20 p-5">
+                <Avatar className="h-16 w-16 border border-border/60">
+                  <AvatarImage src={tiktokProfile.profile?.avatarLargeUrl || tiktokProfile.profile?.avatarUrl || undefined} alt="TikTok avatar" />
+                  <AvatarFallback>{getAvatarFallback(tiktokProfile.profile, tiktokProfile.account)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-semibold">
+                      {tiktokProfile.profile?.displayName || tiktokProfile.account.username || "TikTok account"}
+                    </h2>
+                    <StatusBadge variant="info">{tiktokProfile.account.platform}</StatusBadge>
+                    {tiktokProfile.profile?.isVerified ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                        <BadgeCheck className="h-3.5 w-3.5" />
+                        Verified
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    @{tiktokProfile.profile?.username || tiktokProfile.account.username?.replace(/^@/, "") || tiktokProfile.account.externalId || "Unavailable"}
                   </p>
+                  {tiktokProfile.profile?.bioDescription ? (
+                    <p className="max-w-2xl text-sm text-muted-foreground">
+                      {tiktokProfile.profile.bioDescription}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <ShieldCheck className="h-4 w-4 text-primary" />
+                      Status: {tiktokProfile.account.status}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <RefreshCw className="h-4 w-4 text-primary" />
+                      Last sync: {tiktokProfile.account.lastSyncedAt ? formatter.format(new Date(tiktokProfile.account.lastSyncedAt)) : "Not synced yet"}
+                    </span>
+                    {tiktokProfile.profile?.profileDeepLink ? (
+                      <a
+                        href={tiktokProfile.profile.profileDeepLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                        Open profile
+                      </a>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                {accountSummary.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-2xl border border-border/50 bg-muted/20 p-4"
+                  >
+                    <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                      {item.label}
+                    </div>
+                    <div className="mt-2 break-all text-sm font-medium text-foreground">
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* KPI Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {tiktokStats.map((stat) => (
+          <StatCard
+            key={stat.title}
+            title={stat.title}
+            value={stat.value}
+            icon={stat.icon}
+          />
+        ))}
+      </div>
+
+      {/* Additional Stats */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {commerceStats.map((stat) => (
+          <StatCard
+            key={stat.title}
+            title={stat.title}
+            value={stat.value}
+            icon={stat.icon}
+          />
+        ))}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <Card className="border-border/50 bg-card/50">
+          <CardHeader>
+            <CardTitle className="text-lg">Current Platforms</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {platformAccounts.map((platform) => (
+              <div
+                key={platform.id}
+                className="flex items-center justify-between rounded-2xl border border-border/50 bg-muted/20 p-4"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium">{platform.name}</div>
+                    <StatusBadge variant={platform.connected ? "success" : "warning"}>
+                      {platform.connected ? "Connected" : "Not connected"}
+                    </StatusBadge>
+                  </div>
+                  <div className="truncate text-sm text-muted-foreground">
+                    {platform.connected
+                      ? platform.username || platform.externalId || "Not available"
+                      : "Account not connected"}
+                  </div>
+                </div>
+                <Button asChild variant={platform.connected ? "outline" : "default"} size="sm">
+                  <Link href={platform.actionHref}>
+                    {platform.connected ? "Manage" : "Connect account"}
+                  </Link>
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50 bg-card/50">
+          <CardHeader>
+            <CardTitle className="text-lg">API Availability</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 font-medium text-foreground">
+                  <PlugZap className="h-4 w-4 text-primary" />
+                  Live from current APIs
+                </div>
+                <p className="mt-2">TikTok profile, account identity, followers, following, likes, and public video count.</p>
+              </div>
+              <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 font-medium text-foreground">
+                  <Radio className="h-4 w-4 text-primary" />
+                  Not available from this API
+                </div>
+                <p className="mt-2">Orders, revenue, average order value, stream duration, schedule data, and activity feed are not provided by the connected TikTok user info endpoint.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

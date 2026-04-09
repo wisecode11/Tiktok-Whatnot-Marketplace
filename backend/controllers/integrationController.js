@@ -3,6 +3,7 @@ const {
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getTikTokProfile,
   handleTikTokCallback,
 } = require("../services/integrationService");
 
@@ -49,6 +50,15 @@ async function listConnections(req, res) {
   }
 }
 
+async function getTikTokProfileData(req, res) {
+  try {
+    const result = await getTikTokProfile({ clerkUserId: req.auth.userId });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function removeConnection(req, res) {
   try {
     const result = await disconnectPlatform({
@@ -75,6 +85,7 @@ async function tiktokCallback(req, res) {
 
 module.exports = {
   checkStripeStatus,
+  getTikTokProfileData,
   listConnections,
   removeConnection,
   startConnection,
