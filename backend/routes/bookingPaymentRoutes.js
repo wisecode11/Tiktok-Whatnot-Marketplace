@@ -6,6 +6,7 @@ const {
 	createIntent,
 	getStatus,
 	getHiredModerators,
+	getModeratorBookings,
 } = require("../controllers/bookingPaymentController");
 const { authenticateRequest } = require("../middleware/authenticate");
 
@@ -16,6 +17,9 @@ router.post("/create-intent", authenticateRequest, createIntent);
 
 // GET /api/booking-payments/hired-moderators
 router.get("/hired-moderators", authenticateRequest, getHiredModerators);
+
+// GET /api/booking-payments/moderator-bookings
+router.get("/moderator-bookings", authenticateRequest, getModeratorBookings);
 
 // GET /api/booking-payments/:bookingId/status
 router.get("/:bookingId/status", authenticateRequest, getStatus);

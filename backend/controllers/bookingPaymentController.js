@@ -4,6 +4,7 @@ const {
   createBookingPaymentIntent,
   getBookingPaymentStatus,
   listHiredModerators,
+  listModeratorBookings,
 } = require("../services/bookingPaymentService");
 
 function sendError(res, error) {
@@ -64,8 +65,23 @@ async function getHiredModerators(req, res) {
   }
 }
 
+/**
+ * GET /api/booking-payments/moderator-bookings
+ */
+async function getModeratorBookings(req, res) {
+  try {
+    const result = await listModeratorBookings({
+      clerkUserId: req.auth.userId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
   createIntent,
   getStatus,
   getHiredModerators,
+  getModeratorBookings,
 };
