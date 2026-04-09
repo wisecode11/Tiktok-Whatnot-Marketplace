@@ -194,8 +194,6 @@ export function HireModeratorModal({
   const [step, setStep] = useState<Step>("form")
 
   // Form state
-  const [hours, setHours] = useState("1")
-  const [customAmountDollars, setCustomAmountDollars] = useState("")
   const [notes, setNotes] = useState("")
   const [scheduledDate, setScheduledDate] = useState(initialScheduledDate || "")
   const [scheduledStartTime, setScheduledStartTime] = useState(initialScheduledStartTime || "")
@@ -213,23 +211,38 @@ export function HireModeratorModal({
     setScheduledEndTime(initialScheduledEndTime || "")
   }, [open, initialScheduledDate, initialScheduledStartTime, initialScheduledEndTime])
 
-  // Derived amount
-  const derivedAmountCents = (() => {
-    if (customAmountDollars && parseFloat(customAmountDollars) > 0) {
-      return Math.round(parseFloat(customAmountDollars) * 100)
+  const hasFullScheduleValue = Boolean(scheduledDate && scheduledStartTime && scheduledEndTime)
+
+  const durationHours = (() => {
+    if (!hasFullScheduleValue) return 0
+
+    const [startHour, startMinute] = scheduledStartTime.split(":").map(Number)
+    const [endHour, endMinute] = scheduledEndTime.split(":").map(Number)
+    if (
+      Number.isNaN(startHour)
+      || Number.isNaN(startMinute)
+      || Number.isNaN(endHour)
+      || Number.isNaN(endMinute)
+    ) {
+      return 0
     }
-    if (hourlyRateCents && parseFloat(hours) > 0) {
-      return Math.round(hourlyRateCents * parseFloat(hours))
-    }
-    return 0
+
+    const startMinutes = (startHour * 60) + startMinute
+    const endMinutes = (endHour * 60) + endMinute
+    if (endMinutes <= startMinutes) return 0
+
+    return (endMinutes - startMinutes) / 60
   })()
+
+  // Total auto-calculated from selected time window.
+  const derivedAmountCents = hourlyRateCents && durationHours > 0
+    ? Math.round(hourlyRateCents * durationHours)
+    : 0
 
   function handleClose(next: boolean) {
     if (!next) {
       // Reset state when closing
       setStep("form")
-      setHours("1")
-      setCustomAmountDollars("")
       setNotes("")
       setIntent(null)
       setIntentError(null)
@@ -239,20 +252,18 @@ export function HireModeratorModal({
   }
 
   async function handleProceed() {
-    if (derivedAmountCents < 100) {
-      setIntentError("Minimum booking amount is $1.00.")
-      return
-    }
-
-    const hasFullScheduleValue = Boolean(scheduledDate && scheduledStartTime && scheduledEndTime)
-
     if (!hasFullScheduleValue) {
       setIntentError("Please select booking date, start time, and end time.")
       return
     }
 
-    if (hasFullScheduleValue && scheduledEndTime <= scheduledStartTime) {
+    if (durationHours <= 0) {
       setIntentError("End time must be after start time.")
+      return
+    }
+
+    if (derivedAmountCents < 100) {
+      setIntentError("Minimum booking amount is $1.00.")
       return
     }
 
@@ -309,37 +320,7 @@ export function HireModeratorModal({
         {/* Step 1 — Fill booking details */}
         {step === "form" && (
           <div className="space-y-4">
-            {hourlyRateCents ? (
-              <div className="space-y-2">
-                <Label htmlFor="hours">
-                  Hours needed <span className="text-muted-foreground">(rate: {displayRate})</span>
-                </Label>
-                <Input
-                  id="hours"
-                  type="number"
-                  min="0.5"
-                  step="0.5"
-                  value={hours}
-                  onChange={(e) => { setHours(e.target.value); setCustomAmountDollars("") }}
-                  placeholder="e.g. 2"
-                />
-              </div>
-            ) : null}
-
-            {/* <div className="space-y-2">
-              <Label htmlFor="custom-amount">
-                {hourlyRateCents ? "Or set a fixed amount (USD)" : "Amount (USD)"}
-              </Label>
-              <Input
-                id="custom-amount"
-                type="number"
-                min="1"
-                step="1"
-                value={customAmountDollars}
-                onChange={(e) => { setCustomAmountDollars(e.target.value); if (e.target.value) setHours("") }}
-                placeholder="e.g. 50"
-              />
-            </div> */}
+            <p className="text-sm text-muted-foreground">Rate: {displayRate}</p>
 
             <div className="space-y-2">
               <Label htmlFor="notes">Notes (optional)</Label>
@@ -389,6 +370,10 @@ export function HireModeratorModal({
                 <div className="flex justify-between font-semibold">
                   <span>Total to pay</span>
                   <span>${(derivedAmountCents / 100).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Calculated duration</span>
+                  <span>{durationHours.toFixed(2)} hour(s)</span>
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Moderator receives (85%)</span>
