@@ -62,6 +62,45 @@ export interface TikTokProfileResponse {
   } | null
 }
 
+export interface TikTokVideoAnalyticsResponse {
+  connected: boolean
+  hasVideoScope: boolean
+  account: {
+    platform: string
+    status: string
+    username: string | null
+    scopes: string | null
+  } | null
+  followerBreakdown: {
+    followers: number | null
+    following: number | null
+    likes: number | null
+    videos: number | null
+  } | null
+  summary: {
+    totalVideos: number
+    totalViews: number | null
+    totalComments: number | null
+    totalLikes: number | null
+    totalShares: number | null
+  }
+  videos: Array<{
+    id: string | null
+    title: string | null
+    coverImageUrl: string | null
+    shareUrl: string | null
+    createTime: number | null
+    viewCount: number | null
+    commentCount: number | null
+    likeCount: number | null
+    shareCount: number | null
+  }>
+  pagination: {
+    cursor: number | null
+    hasMore: boolean
+  }
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -259,4 +298,21 @@ export async function getStripeStatus(token: string) {
 
 export async function getTikTokProfile(token: string) {
   return request<TikTokProfileResponse>("/api/integrations/tiktok/profile", { token })
+}
+
+export async function getTikTokVideoAnalytics(token: string, params?: { cursor?: number; maxCount?: number }) {
+  const search = new URLSearchParams()
+
+  if (typeof params?.cursor === "number") {
+    search.set("cursor", String(params.cursor))
+  }
+
+  if (typeof params?.maxCount === "number") {
+    search.set("maxCount", String(params.maxCount))
+  }
+
+  const query = search.toString()
+  const path = query ? `/api/integrations/tiktok/video-analytics?${query}` : "/api/integrations/tiktok/video-analytics"
+
+  return request<TikTokVideoAnalyticsResponse>(path, { token })
 }

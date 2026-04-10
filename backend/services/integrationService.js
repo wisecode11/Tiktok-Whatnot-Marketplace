@@ -10,8 +10,12 @@ const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_REVOKE_URL = "https://open.tiktokapis.com/v2/oauth/revoke/";
 const TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/";
+const TIKTOK_VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
+const TIKTOK_VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/";
 const TIKTOK_BASIC_USER_INFO_FIELDS = "open_id,union_id,avatar_url";
 const TIKTOK_STATS_USER_INFO_FIELDS = "open_id,union_id,avatar_url,follower_count,following_count,likes_count,video_count";
+const TIKTOK_VIDEO_LIST_DEFAULT_FIELDS = "id,title,create_time,cover_image_url,share_url";
+const TIKTOK_VIDEO_QUERY_DEFAULT_FIELDS = "id,title,create_time,cover_image_url,share_url,view_count,comment_count,like_count,share_count";
 const TIKTOK_ENHANCED_USER_INFO_FIELDS = [
   "open_id",
   "union_id",
@@ -238,6 +242,24 @@ function getTikTokStatsUserInfoFields() {
   return process.env.TIKTOK_STATS_USER_INFO_FIELDS || TIKTOK_STATS_USER_INFO_FIELDS;
 }
 
+function getTikTokVideoListFields() {
+  return process.env.TIKTOK_VIDEO_LIST_FIELDS || TIKTOK_VIDEO_LIST_DEFAULT_FIELDS;
+}
+
+function getTikTokVideoQueryFields() {
+  return process.env.TIKTOK_VIDEO_QUERY_FIELDS || TIKTOK_VIDEO_QUERY_DEFAULT_FIELDS;
+}
+
+function getTikTokVideoMaxCount() {
+  const value = Number(process.env.TIKTOK_VIDEO_MAX_COUNT || 10);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return 10;
+  }
+
+  return Math.min(20, Math.max(1, Math.floor(value)));
+}
+
 function toNullableNumber(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -356,6 +378,96 @@ async function fetchTikTokUserInfo(accessToken, fields) {
   }
 
   return payload;
+}
+
+async function fetchTikTokVideoList(accessToken, { fields, cursor = null, maxCount }) {
+  const requestUrl = new URL(TIKTOK_VIDEO_LIST_URL);
+  requestUrl.searchParams.set("fields", fields);
+
+  const body = {
+    max_count: maxCount,
+  };
+
+  if (cursor != null) {
+    body.cursor = cursor;
+  }
+
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  const apiError = parseTikTokApiError(payload);
+
+  if (!response.ok || apiError) {
+    const message = apiError
+      ? apiError.message
+      : payload.error_description || payload.message || "TikTok video list request failed.";
+    throw createHttpError(response.status || 502, message, apiError ? apiError.details : payload);
+  }
+
+  return payload;
+}
+
+async function fetchTikTokVideoQuery(accessToken, { fields, videoIds }) {
+  const requestUrl = new URL(TIKTOK_VIDEO_QUERY_URL);
+  requestUrl.searchParams.set("fields", fields);
+
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify({
+      filters: {
+        video_ids: videoIds,
+      },
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  const apiError = parseTikTokApiError(payload);
+
+  if (!response.ok || apiError) {
+    const message = apiError
+      ? apiError.message
+      : payload.error_description || payload.message || "TikTok video query request failed.";
+    throw createHttpError(response.status || 502, message, apiError ? apiError.details : payload);
+  }
+
+  return payload;
+}
+
+function hasScope(scopes, requiredScope) {
+  if (!scopes || !requiredScope) {
+    return false;
+  }
+
+  return String(scopes)
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .includes(requiredScope);
+}
+
+function sumNullableMetric(items, getter) {
+  const numbers = items
+    .map(getter)
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+
+  if (!numbers.length) {
+    return null;
+  }
+
+  return numbers.reduce((total, value) => total + value, 0);
 }
 
 async function getTikTokProfile({ clerkUserId }) {
@@ -480,6 +592,225 @@ async function getTikTokProfile({ clerkUserId }) {
       fields: account.metadata_json && account.metadata_json.user_info_fields
         ? account.metadata_json.user_info_fields
         : resolvedFields,
+    },
+  };
+}
+
+async function getTikTokVideoAnalytics({ clerkUserId, cursor = null, maxCount }) {
+  const user = await findLocalUser(clerkUserId);
+  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
+
+  if (!account || !account.access_token_encrypted) {
+    return {
+      connected: false,
+      hasVideoScope: false,
+      account: null,
+      followerBreakdown: null,
+      summary: {
+        totalVideos: 0,
+        totalViews: null,
+        totalComments: null,
+        totalLikes: null,
+        totalShares: null,
+      },
+      videos: [],
+      pagination: {
+        cursor: null,
+        hasMore: false,
+      },
+    };
+  }
+
+  const safeMaxCount = Number.isFinite(Number(maxCount))
+    ? Math.min(20, Math.max(1, Math.floor(Number(maxCount))))
+    : getTikTokVideoMaxCount();
+  const listFields = getTikTokVideoListFields();
+  const queryFields = getTikTokVideoQueryFields();
+  const accountScopes = account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : "";
+  const hasVideoScope = hasScope(accountScopes, "video.list");
+
+  let profileData = null;
+
+  try {
+    profileData = await getTikTokProfile({ clerkUserId });
+  } catch (error) {
+    profileData = null;
+  }
+
+  if (!hasVideoScope) {
+    return {
+      connected: true,
+      hasVideoScope: false,
+      account: {
+        platform: account.platform,
+        status: account.status,
+        username: account.account_name || null,
+        scopes: accountScopes || null,
+      },
+      followerBreakdown: profileData && profileData.profile
+        ? {
+          followers: toNullableNumber(profileData.profile.followerCount),
+          following: toNullableNumber(profileData.profile.followingCount),
+          likes: toNullableNumber(profileData.profile.likesCount),
+          videos: toNullableNumber(profileData.profile.videoCount),
+        }
+        : null,
+      summary: {
+        totalVideos: 0,
+        totalViews: null,
+        totalComments: null,
+        totalLikes: null,
+        totalShares: null,
+      },
+      videos: [],
+      pagination: {
+        cursor: null,
+        hasMore: false,
+      },
+    };
+  }
+
+  let accessToken = await getValidTikTokAccessToken(account);
+  let listPayload;
+
+  try {
+    listPayload = await fetchTikTokVideoList(accessToken, {
+      fields: listFields,
+      cursor,
+      maxCount: safeMaxCount,
+    });
+  } catch (error) {
+    const errorCode = error && error.details && error.details.code
+      ? String(error.details.code).toLowerCase()
+      : "";
+
+    if (errorCode === "scope_not_authorized") {
+      return {
+        connected: true,
+        hasVideoScope: false,
+        account: {
+          platform: account.platform,
+          status: account.status,
+          username: account.account_name || null,
+          scopes: accountScopes || null,
+        },
+        followerBreakdown: profileData && profileData.profile
+          ? {
+            followers: toNullableNumber(profileData.profile.followerCount),
+            following: toNullableNumber(profileData.profile.followingCount),
+            likes: toNullableNumber(profileData.profile.likesCount),
+            videos: toNullableNumber(profileData.profile.videoCount),
+          }
+          : null,
+        summary: {
+          totalVideos: 0,
+          totalViews: null,
+          totalComments: null,
+          totalLikes: null,
+          totalShares: null,
+        },
+        videos: [],
+        pagination: {
+          cursor: null,
+          hasMore: false,
+        },
+      };
+    }
+
+    if (error.status === 401) {
+      accessToken = await refreshTikTokAccessToken(account);
+      listPayload = await fetchTikTokVideoList(accessToken, {
+        fields: listFields,
+        cursor,
+        maxCount: safeMaxCount,
+      });
+    } else {
+      throw error;
+    }
+  }
+
+  const listedVideos = listPayload && listPayload.data && Array.isArray(listPayload.data.videos)
+    ? listPayload.data.videos
+    : [];
+  const videoIds = listedVideos
+    .map((video) => video && video.id)
+    .filter(Boolean)
+    .slice(0, 20);
+
+  let queriedVideos = [];
+
+  if (videoIds.length) {
+    try {
+      const queryPayload = await fetchTikTokVideoQuery(accessToken, {
+        fields: queryFields,
+        videoIds,
+      });
+      queriedVideos = queryPayload && queryPayload.data && Array.isArray(queryPayload.data.videos)
+        ? queryPayload.data.videos
+        : [];
+    } catch (error) {
+      if (error.status === 401) {
+        accessToken = await refreshTikTokAccessToken(account);
+        const queryPayload = await fetchTikTokVideoQuery(accessToken, {
+          fields: queryFields,
+          videoIds,
+        });
+        queriedVideos = queryPayload && queryPayload.data && Array.isArray(queryPayload.data.videos)
+          ? queryPayload.data.videos
+          : [];
+      }
+    }
+  }
+
+  const queryById = new Map(queriedVideos.map((video) => [video.id, video]));
+  const normalizedVideos = listedVideos.map((video) => {
+    const merged = {
+      ...(video || {}),
+      ...(queryById.get(video.id) || {}),
+    };
+    const createTime = toNullableNumber(merged.create_time);
+
+    return {
+      id: merged.id || null,
+      title: merged.title || merged.video_description || null,
+      coverImageUrl: merged.cover_image_url || null,
+      shareUrl: merged.share_url || null,
+      createTime,
+      viewCount: toNullableNumber(merged.view_count),
+      commentCount: toNullableNumber(merged.comment_count),
+      likeCount: toNullableNumber(merged.like_count),
+      shareCount: toNullableNumber(merged.share_count),
+    };
+  });
+
+  return {
+    connected: true,
+    hasVideoScope,
+    account: {
+      platform: account.platform,
+      status: account.status,
+      username: account.account_name || null,
+      scopes: accountScopes || null,
+    },
+    followerBreakdown: profileData && profileData.profile
+      ? {
+        followers: toNullableNumber(profileData.profile.followerCount),
+        following: toNullableNumber(profileData.profile.followingCount),
+        likes: toNullableNumber(profileData.profile.likesCount),
+        videos: toNullableNumber(profileData.profile.videoCount),
+      }
+      : null,
+    summary: {
+      totalVideos: normalizedVideos.length,
+      totalViews: sumNullableMetric(normalizedVideos, (video) => video.viewCount),
+      totalComments: sumNullableMetric(normalizedVideos, (video) => video.commentCount),
+      totalLikes: sumNullableMetric(normalizedVideos, (video) => video.likeCount),
+      totalShares: sumNullableMetric(normalizedVideos, (video) => video.shareCount),
+    },
+    videos: normalizedVideos,
+    pagination: {
+      cursor: listPayload && listPayload.data ? listPayload.data.cursor || null : null,
+      hasMore: Boolean(listPayload && listPayload.data && listPayload.data.has_more),
     },
   };
 }
@@ -844,5 +1175,6 @@ module.exports = {
   disconnectPlatform,
   getConnectedAccounts,
   getTikTokProfile,
+  getTikTokVideoAnalytics,
   handleTikTokCallback,
 };
