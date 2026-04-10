@@ -4,6 +4,7 @@ const {
   disconnectPlatform,
   getConnectedAccounts,
   getTikTokProfile,
+  getTikTokVideoAnalytics,
   handleTikTokCallback,
 } = require("../services/integrationService");
 
@@ -59,6 +60,19 @@ async function getTikTokProfileData(req, res) {
   }
 }
 
+async function getTikTokVideoAnalyticsData(req, res) {
+  try {
+    const result = await getTikTokVideoAnalytics({
+      clerkUserId: req.auth.userId,
+      cursor: req.query && req.query.cursor ? Number(req.query.cursor) : null,
+      maxCount: req.query && req.query.maxCount ? Number(req.query.maxCount) : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function removeConnection(req, res) {
   try {
     const result = await disconnectPlatform({
@@ -86,6 +100,7 @@ async function tiktokCallback(req, res) {
 module.exports = {
   checkStripeStatus,
   getTikTokProfileData,
+  getTikTokVideoAnalyticsData,
   listConnections,
   removeConnection,
   startConnection,
