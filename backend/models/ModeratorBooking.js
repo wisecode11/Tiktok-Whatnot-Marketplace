@@ -61,6 +61,16 @@ const ModeratorBookingSchema = new mongoose.Schema({
     default: "unpaid",
   },
 
+  order_status: {
+    type: String,
+    enum: ["pending", "completed", "accepted", "rejected"],
+    default: "pending",
+  },
+
+  completed_at: Date,
+  decision_at: Date,
+  decision_note: String,
+
   notes: String,
 
   created_at: Date,

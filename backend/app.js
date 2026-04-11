@@ -2,14 +2,17 @@ require("dotenv").config();
 
 const cors = require("cors");
 const express = require("express");
+const http = require("http");
 
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const billingRoutes = require("./routes/billingRoutes");
 const bookingPaymentRoutes = require("./routes/bookingPaymentRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
 const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
+const { initializeChatSocket } = require("./socket/chatSocket");
 const models = require("./models");
 
 const app = express();
@@ -44,6 +47,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/billing", billingRoutes);
 app.use("/api/booking-payments", bookingPaymentRoutes);
+app.use("/api/chat", chatRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/moderator-profile", moderatorProfileRoutes);
 
@@ -54,7 +58,9 @@ app.get("/health", (req, res) => {
 async function start() {
   await connectDB(process.env.MONGODB_URI || "mongodb://localhost:27017/sellerhub");
   const port = process.env.PORT || 5000;
-  app.listen(port, () => console.log(`Server running on ${port}`));
+  const server = http.createServer(app);
+  initializeChatSocket({ server, allowedOrigins });
+  server.listen(port, () => console.log(`Server running on ${port}`));
 }
 
 start().catch((err) => {

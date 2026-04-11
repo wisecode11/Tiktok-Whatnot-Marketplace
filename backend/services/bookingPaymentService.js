@@ -7,6 +7,7 @@ const { createClerkClient } = require("@clerk/backend");
 const Stripe = require("stripe");
 
 const ModeratorBooking = require("../models/ModeratorBooking");
+const ModeratorOrderReview = require("../models/ModeratorOrderReview");
 const ModeratorPayout = require("../models/ModeratorPayout");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const ModeratorProfile = require("../models/ModeratorProfile");
@@ -159,6 +160,28 @@ function calculateFees(grossAmountCents) {
   return { platformFeeCents, moderatorPayoutCents };
 }
 
+function normalizeOrderStatus(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (["pending", "completed", "accepted", "rejected"].includes(normalized)) {
+    return normalized;
+  }
+  return "pending";
+}
+
+function serializeReview(review) {
+  if (!review) {
+    return null;
+  }
+
+  return {
+    id: review._id,
+    rating: review.rating,
+    reviewText: review.review_text || "",
+    isPublic: Boolean(review.is_public),
+    createdAt: review.created_at ? review.created_at.toISOString() : null,
+  };
+}
+
 function normalizeScheduledWindow({ scheduledStartAt, scheduledEndAt }) {
   const hasStart = Boolean(scheduledStartAt);
   const hasEnd = Boolean(scheduledEndAt);
@@ -248,6 +271,7 @@ async function upsertBooking({
     platform_fee_cents: platformFeeCents,
     moderator_payout_cents: moderatorPayoutCents,
     payment_status: "unpaid",
+    order_status: "pending",
     notes: notes || null,
     scheduled_start_at: scheduledStartAt ? new Date(scheduledStartAt) : null,
     scheduled_end_at: scheduledEndAt ? new Date(scheduledEndAt) : null,
@@ -357,6 +381,7 @@ async function createBookingPaymentIntent({
   booking.stripe_payment_intent_id = paymentIntent.id;
   booking.stripe_customer_id = customerId;
   booking.payment_status = "pending";
+  booking.order_status = normalizeOrderStatus(booking.order_status);
   booking.updated_at = new Date();
   await booking.save();
 
@@ -394,6 +419,7 @@ async function handleBookingPaymentSucceeded(paymentIntent) {
   booking.payment_status = "paid";
   booking.stripe_charge_id = chargeId || booking.stripe_charge_id || null;
   booking.status = "accepted"; // auto-accept on payment
+  booking.order_status = "pending";
   booking.updated_at = now;
   await booking.save();
 
@@ -493,6 +519,7 @@ async function handleBookingPaymentFailed(paymentIntent) {
   if (booking.payment_status === "paid") return;
 
   booking.payment_status = "failed";
+  booking.order_status = normalizeOrderStatus(booking.order_status);
   booking.updated_at = new Date();
   await booking.save();
 }
@@ -562,6 +589,7 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
     bookingId: booking._id,
     status: booking.status,
     paymentStatus: booking.payment_status,
+    orderStatus: normalizeOrderStatus(booking.order_status),
     amountCents: booking.agreed_price_cents,
     platformFeeCents: booking.platform_fee_cents,
     moderatorPayoutCents: booking.moderator_payout_cents,
@@ -569,7 +597,132 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
     scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
     scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
     notes: booking.notes || null,
+    decisionNote: booking.decision_note || null,
+    completedAt: booking.completed_at ? booking.completed_at.toISOString() : null,
+    decisionAt: booking.decision_at ? booking.decision_at.toISOString() : null,
     createdAt: booking.created_at ? booking.created_at.toISOString() : null,
+  };
+}
+
+async function markBookingTaskCompleted({ clerkUserId, bookingId }) {
+  const moderator = await findLocalUser(clerkUserId);
+  const booking = await ModeratorBooking.findById(bookingId);
+
+  if (!booking) {
+    throw createHttpError(404, "Booking not found.");
+  }
+
+  if (booking.moderator_user_id !== moderator._id) {
+    throw createHttpError(403, "Only assigned moderator can mark this task as completed.");
+  }
+
+  if (booking.payment_status !== "paid") {
+    throw createHttpError(409, "Task can be completed only after payment is confirmed.");
+  }
+
+  const orderStatus = normalizeOrderStatus(booking.order_status);
+
+  if (orderStatus === "accepted" || orderStatus === "rejected") {
+    throw createHttpError(409, "Order has already been finalized by the streamer.");
+  }
+
+  booking.status = "completed";
+  booking.order_status = "completed";
+  booking.completed_at = new Date();
+  booking.updated_at = new Date();
+  await booking.save();
+
+  return {
+    success: true,
+    bookingId: booking._id,
+    orderStatus: booking.order_status,
+    completedAt: booking.completed_at ? booking.completed_at.toISOString() : null,
+  };
+}
+
+async function updateBookingOrderDecision({ clerkUserId, bookingId, decision, note }) {
+  const streamer = await findLocalUser(clerkUserId);
+  const booking = await ModeratorBooking.findById(bookingId);
+
+  if (!booking) {
+    throw createHttpError(404, "Booking not found.");
+  }
+
+  if (booking.requester_user_id !== streamer._id) {
+    throw createHttpError(403, "Only the streamer can accept or reject this order.");
+  }
+
+  const normalizedDecision = String(decision || "").toLowerCase();
+  if (!["accepted", "rejected"].includes(normalizedDecision)) {
+    throw createHttpError(400, "Decision must be accepted or rejected.");
+  }
+
+  const orderStatus = normalizeOrderStatus(booking.order_status);
+
+  if (orderStatus !== "completed") {
+    throw createHttpError(409, "Order can be accepted or rejected only after moderator marks it completed.");
+  }
+
+  booking.order_status = normalizedDecision;
+  booking.decision_at = new Date();
+  booking.decision_note = typeof note === "string" ? note.trim().slice(0, 500) : null;
+  booking.status = normalizedDecision === "accepted" ? "accepted" : "cancelled";
+  booking.updated_at = new Date();
+  await booking.save();
+
+  return {
+    success: true,
+    bookingId: booking._id,
+    orderStatus: booking.order_status,
+    decisionAt: booking.decision_at ? booking.decision_at.toISOString() : null,
+    decisionNote: booking.decision_note || null,
+  };
+}
+
+async function submitBookingReview({ clerkUserId, bookingId, rating, reviewText }) {
+  const streamer = await findLocalUser(clerkUserId);
+  const booking = await ModeratorBooking.findById(bookingId);
+
+  if (!booking) {
+    throw createHttpError(404, "Booking not found.");
+  }
+
+  if (booking.requester_user_id !== streamer._id) {
+    throw createHttpError(403, "Only the streamer can submit a review for this order.");
+  }
+
+  if (normalizeOrderStatus(booking.order_status) !== "accepted") {
+    throw createHttpError(409, "Review can only be submitted after order is accepted.");
+  }
+
+  const normalizedRating = Number(rating);
+  if (!Number.isInteger(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+    throw createHttpError(400, "Rating must be an integer between 1 and 5.");
+  }
+
+  const existingReview = await ModeratorOrderReview.findOne({ booking_id: booking._id });
+  if (existingReview) {
+    throw createHttpError(409, "This order already has a review.");
+  }
+
+  const now = new Date();
+  const review = new ModeratorOrderReview({
+    booking_id: booking._id,
+    streamer_user_id: streamer._id,
+    moderator_user_id: booking.moderator_user_id,
+    rating: normalizedRating,
+    review_text: typeof reviewText === "string" ? reviewText.trim().slice(0, 1000) : "",
+    is_public: true,
+    created_at: now,
+    updated_at: now,
+  });
+
+  await review.save();
+
+  return {
+    success: true,
+    bookingId: booking._id,
+    review: serializeReview(review),
   };
 }
 
@@ -587,15 +740,19 @@ async function listHiredModerators({ clerkUserId }) {
     new Set(bookings.map((booking) => String(booking.moderator_user_id)).filter(Boolean)),
   );
 
-  const [moderators, moderatorProfiles] = await Promise.all([
+  const bookingIds = bookings.map((booking) => booking._id);
+
+  const [moderators, moderatorProfiles, reviews] = await Promise.all([
     User.find({ _id: { $in: moderatorUserIds } }).select("_id first_name last_name email"),
     ModeratorProfile.find({ user_id: { $in: moderatorUserIds } }).select("user_id public_slug"),
+    ModeratorOrderReview.find({ booking_id: { $in: bookingIds } }),
   ]);
 
   const moderatorById = new Map(moderators.map((moderator) => [String(moderator._id), moderator]));
   const moderatorProfileByUserId = new Map(
     moderatorProfiles.map((profile) => [String(profile.user_id), profile]),
   );
+  const reviewByBookingId = new Map(reviews.map((review) => [String(review.booking_id), review]));
 
   const rows = bookings.map((booking) => {
     const moderator = moderatorById.get(String(booking.moderator_user_id));
@@ -614,6 +771,12 @@ async function listHiredModerators({ clerkUserId }) {
       moderatorPublicSlug: profile && profile.public_slug ? profile.public_slug : null,
       paymentStatus: booking.payment_status || "unpaid",
       bookingStatus: booking.status || "requested",
+      orderStatus: normalizeOrderStatus(booking.order_status),
+      review: serializeReview(reviewByBookingId.get(String(booking._id)) || null),
+      canSubmitReview: normalizeOrderStatus(booking.order_status) === "accepted" && !reviewByBookingId.has(String(booking._id)),
+      decisionNote: booking.decision_note || null,
+      completedAt: booking.completed_at ? booking.completed_at.toISOString() : null,
+      decisionAt: booking.decision_at ? booking.decision_at.toISOString() : null,
       scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
       scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
       createdAt: booking.created_at ? booking.created_at.toISOString() : null,
@@ -637,11 +800,15 @@ async function listModeratorBookings({ clerkUserId }) {
     new Set(bookings.map((booking) => String(booking.requester_user_id)).filter(Boolean)),
   );
 
-  const requesters = await User.find({ _id: { $in: requesterUserIds } }).select(
-    "_id first_name last_name email",
-  );
+  const bookingIds = bookings.map((booking) => booking._id);
+
+  const [requesters, reviews] = await Promise.all([
+    User.find({ _id: { $in: requesterUserIds } }).select("_id first_name last_name email"),
+    ModeratorOrderReview.find({ booking_id: { $in: bookingIds } }),
+  ]);
 
   const requesterById = new Map(requesters.map((requester) => [String(requester._id), requester]));
+  const reviewByBookingId = new Map(reviews.map((review) => [String(review.booking_id), review]));
 
   const rows = bookings.map((booking) => {
     const requester = requesterById.get(String(booking.requester_user_id));
@@ -658,6 +825,12 @@ async function listModeratorBookings({ clerkUserId }) {
       streamerEmail: requester && requester.email ? String(requester.email).toLowerCase() : null,
       paymentStatus: booking.payment_status || "unpaid",
       bookingStatus: booking.status || "requested",
+      orderStatus: normalizeOrderStatus(booking.order_status),
+      review: serializeReview(reviewByBookingId.get(String(booking._id)) || null),
+      canMarkCompleted: normalizeOrderStatus(booking.order_status) === "pending" && booking.payment_status === "paid",
+      decisionNote: booking.decision_note || null,
+      completedAt: booking.completed_at ? booking.completed_at.toISOString() : null,
+      decisionAt: booking.decision_at ? booking.decision_at.toISOString() : null,
       scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
       scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
       createdAt: booking.created_at ? booking.created_at.toISOString() : null,
@@ -674,4 +847,7 @@ module.exports = {
   getBookingPaymentStatus,
   listHiredModerators,
   listModeratorBookings,
+  markBookingTaskCompleted,
+  submitBookingReview,
+  updateBookingOrderDecision,
 };

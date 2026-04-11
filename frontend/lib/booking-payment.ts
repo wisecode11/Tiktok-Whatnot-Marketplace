@@ -64,6 +64,7 @@ export interface BookingPaymentStatus {
   bookingId: string
   status: string
   paymentStatus: string
+  orderStatus: "pending" | "completed" | "accepted" | "rejected"
   amountCents: number
   platformFeeCents: number
   moderatorPayoutCents: number
@@ -71,6 +72,17 @@ export interface BookingPaymentStatus {
   scheduledStartAt: string | null
   scheduledEndAt: string | null
   notes: string | null
+  decisionNote: string | null
+  completedAt: string | null
+  decisionAt: string | null
+  createdAt: string | null
+}
+
+export interface BookingReview {
+  id: string
+  rating: number
+  reviewText: string
+  isPublic: boolean
   createdAt: string | null
 }
 
@@ -82,6 +94,12 @@ export interface HiredModeratorBooking {
   moderatorPublicSlug: string | null
   paymentStatus: string
   bookingStatus: string
+  orderStatus: "pending" | "completed" | "accepted" | "rejected"
+  review: BookingReview | null
+  canSubmitReview: boolean
+  decisionNote: string | null
+  completedAt: string | null
+  decisionAt: string | null
   scheduledStartAt: string | null
   scheduledEndAt: string | null
   createdAt: string | null
@@ -98,6 +116,12 @@ export interface ModeratorBookingItem {
   streamerEmail: string | null
   paymentStatus: string
   bookingStatus: string
+  orderStatus: "pending" | "completed" | "accepted" | "rejected"
+  review: BookingReview | null
+  canMarkCompleted: boolean
+  decisionNote: string | null
+  completedAt: string | null
+  decisionAt: string | null
   scheduledStartAt: string | null
   scheduledEndAt: string | null
   createdAt: string | null
@@ -105,6 +129,27 @@ export interface ModeratorBookingItem {
 
 export interface ModeratorBookingsResponse {
   bookings: ModeratorBookingItem[]
+}
+
+export interface BookingOrderDecisionResponse {
+  success: boolean
+  bookingId: string
+  orderStatus: "accepted" | "rejected"
+  decisionAt: string | null
+  decisionNote: string | null
+}
+
+export interface BookingCompleteTaskResponse {
+  success: boolean
+  bookingId: string
+  orderStatus: "completed"
+  completedAt: string | null
+}
+
+export interface SubmitBookingReviewResponse {
+  success: boolean
+  bookingId: string
+  review: BookingReview
 }
 
 export function createBookingPaymentIntent(
@@ -139,5 +184,36 @@ export function listModeratorBookings(token: string): Promise<ModeratorBookingsR
   return request<ModeratorBookingsResponse>("/api/booking-payments/moderator-bookings", {
     token,
     method: "GET",
+  })
+}
+
+export function markBookingTaskCompleted(token: string, bookingId: string): Promise<BookingCompleteTaskResponse> {
+  return request<BookingCompleteTaskResponse>(`/api/booking-payments/${encodeURIComponent(bookingId)}/complete`, {
+    token,
+    method: "POST",
+  })
+}
+
+export function decideBookingOrder(
+  token: string,
+  bookingId: string,
+  payload: { decision: "accepted" | "rejected"; note?: string },
+): Promise<BookingOrderDecisionResponse> {
+  return request<BookingOrderDecisionResponse>(`/api/booking-payments/${encodeURIComponent(bookingId)}/decision`, {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export function submitBookingReview(
+  token: string,
+  bookingId: string,
+  payload: { rating: number; reviewText?: string },
+): Promise<SubmitBookingReviewResponse> {
+  return request<SubmitBookingReviewResponse>(`/api/booking-payments/${encodeURIComponent(bookingId)}/review`, {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
   })
 }

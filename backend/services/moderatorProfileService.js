@@ -1,5 +1,6 @@
 const {
   ModeratorBooking,
+  ModeratorOrderReview,
   ModeratorProfile,
   ModeratorSchedule,
   User,
@@ -127,6 +128,121 @@ function serializePublicProfile(profile, availability) {
     ...serializeProfile(profile),
     availability,
   };
+}
+
+function roundRating(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.round(value * 10) / 10;
+}
+
+function applyReviewStatsToProfile(profile, stats) {
+  const ratingCount = Number(stats?.ratingCount || 0);
+  const averageRating = ratingCount > 0 ? roundRating(Number(stats?.averageRating || 0)) : null;
+
+  return {
+    ...profile,
+    averageRating,
+    ratingCount,
+  };
+}
+
+function formatReviewerName(user) {
+  if (!user) {
+    return "Anonymous buyer";
+  }
+
+  const firstName = normalizeString(user.first_name);
+  const lastName = normalizeString(user.last_name);
+
+  if (firstName && lastName) {
+    return `${firstName} ${lastName.charAt(0)}.`;
+  }
+
+  if (firstName) {
+    return firstName;
+  }
+
+  if (user.email) {
+    return String(user.email).split("@")[0] || "Anonymous buyer";
+  }
+
+  return "Anonymous buyer";
+}
+
+function serializePublicReview(review, reviewerName) {
+  return {
+    id: review._id,
+    bookingId: review.booking_id,
+    rating: review.rating,
+    reviewText: review.review_text || "",
+    reviewerName,
+    createdAt: review.created_at || null,
+  };
+}
+
+async function getReviewStatsByModeratorUserIds(moderatorUserIds = []) {
+  const normalizedIds = Array.from(new Set((moderatorUserIds || []).map((id) => String(id)).filter(Boolean)));
+
+  if (!normalizedIds.length) {
+    return new Map();
+  }
+
+  const stats = await ModeratorOrderReview.aggregate([
+    {
+      $match: {
+        moderator_user_id: { $in: normalizedIds },
+        is_public: true,
+      },
+    },
+    {
+      $group: {
+        _id: "$moderator_user_id",
+        averageRating: { $avg: "$rating" },
+        ratingCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  return new Map(stats.map((entry) => [String(entry._id), entry]));
+}
+
+async function getPublicReviewsForModeratorUserId(moderatorUserId, limit = 10) {
+  const normalizedUserId = normalizeString(moderatorUserId);
+
+  if (!normalizedUserId) {
+    return [];
+  }
+
+  const reviews = await ModeratorOrderReview.find({
+    moderator_user_id: normalizedUserId,
+    is_public: true,
+  })
+    .sort({ created_at: -1 })
+    .limit(limit)
+    .lean();
+
+  if (!reviews.length) {
+    return [];
+  }
+
+  const reviewerUserIds = Array.from(
+    new Set(reviews.map((review) => String(review.streamer_user_id)).filter(Boolean))
+  );
+
+  const reviewerUsers = await User.find(
+    { _id: { $in: reviewerUserIds } },
+    { first_name: 1, last_name: 1, email: 1 }
+  ).lean();
+
+  const reviewerById = new Map(reviewerUsers.map((user) => [String(user._id), user]));
+
+  return reviews.map((review) => {
+    const reviewer = reviewerById.get(String(review.streamer_user_id));
+    return serializePublicReview(review, formatReviewerName(reviewer));
+  });
 }
 
 async function ensureUniqueSlug(baseSlug, profileId) {
@@ -546,10 +662,22 @@ async function getPublicModeratorProfileBySlug({ slug }) {
     throw createHttpError(404, "Moderator profile not found.");
   }
 
-  const schedule = await ModeratorSchedule.findOne({ moderator_profile_id: profile._id });
+  const [schedule, reviewStatsByUserId, reviews] = await Promise.all([
+    ModeratorSchedule.findOne({ moderator_profile_id: profile._id }),
+    getReviewStatsByModeratorUserIds([profile.user_id]),
+    getPublicReviewsForModeratorUserId(profile.user_id, 12),
+  ]);
+
+  const reviewStats = reviewStatsByUserId.get(String(profile.user_id));
 
   return {
-    profile: serializePublicProfile(profile, serializeAvailability(schedule)),
+    profile: {
+      ...applyReviewStatsToProfile(
+        serializePublicProfile(profile, serializeAvailability(schedule)),
+        reviewStats
+      ),
+      reviews,
+    },
   };
 }
 
@@ -576,6 +704,13 @@ async function getPublicModeratorProfileByUserId({ userId }) {
     const displayName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
       || (user.email ? String(user.email).split("@")[0] : "Moderator");
 
+    const [reviewStatsByUserId, reviews] = await Promise.all([
+      getReviewStatsByModeratorUserIds([user._id]),
+      getPublicReviewsForModeratorUserId(user._id, 12),
+    ]);
+    const reviewStats = reviewStatsByUserId.get(String(user._id));
+    const ratingCount = Number(reviewStats?.ratingCount || 0);
+
     return {
       profile: {
         id: user._id,
@@ -586,8 +721,8 @@ async function getPublicModeratorProfileByUserId({ userId }) {
         yearsExperience: null,
         hourlyRateCents: null,
         responseTimeMinutes: null,
-        averageRating: null,
-        ratingCount: 0,
+        averageRating: ratingCount > 0 ? roundRating(Number(reviewStats?.averageRating || 0)) : null,
+        ratingCount,
         skills: [],
         availabilitySummary: "",
         publicSlug: null,
@@ -596,14 +731,26 @@ async function getPublicModeratorProfileByUserId({ userId }) {
         createdAt: user.created_at || null,
         updatedAt: user.updated_at || null,
         availability: serializeAvailability(null),
+        reviews,
       },
     };
   }
 
-  const schedule = await ModeratorSchedule.findOne({ moderator_profile_id: profile._id });
+  const [schedule, reviewStatsByUserId, reviews] = await Promise.all([
+    ModeratorSchedule.findOne({ moderator_profile_id: profile._id }),
+    getReviewStatsByModeratorUserIds([profile.user_id]),
+    getPublicReviewsForModeratorUserId(profile.user_id, 12),
+  ]);
+  const reviewStats = reviewStatsByUserId.get(String(profile.user_id));
 
   return {
-    profile: serializePublicProfile(profile, serializeAvailability(schedule)),
+    profile: {
+      ...applyReviewStatsToProfile(
+        serializePublicProfile(profile, serializeAvailability(schedule)),
+        reviewStats
+      ),
+      reviews,
+    },
   };
 }
 
@@ -754,6 +901,7 @@ async function listPublicModerators({ query = {} }) {
   const userIds = users.map((user) => user._id);
   const profiles = await ModeratorProfile.find({ user_id: { $in: userIds } });
   const profileByUserId = new Map(profiles.map((profile) => [String(profile.user_id), profile]));
+  const reviewStatsByUserId = await getReviewStatsByModeratorUserIds(userIds);
 
   // ── Pre-load schedules and booked-user-ids when slot filter is active ─────
   let bookedUserIdSet = new Set();
@@ -791,15 +939,16 @@ async function listPublicModerators({ query = {} }) {
   const moderators = users
     .map((user) => {
       const profile = profileByUserId.get(String(user._id));
+      const reviewStats = reviewStatsByUserId.get(String(user._id));
 
       if (profile) {
-        return serializeProfile(profile);
+        return applyReviewStatsToProfile(serializeProfile(profile), reviewStats);
       }
 
       const displayName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim()
         || (user.email ? String(user.email).split("@")[0] : "Moderator");
 
-      return {
+      return applyReviewStatsToProfile({
         id: user._id,
         userId: user._id,
         displayName,
@@ -817,7 +966,7 @@ async function listPublicModerators({ query = {} }) {
         isPublished: false,
         createdAt: user.created_at || null,
         updatedAt: user.updated_at || null,
-      };
+      }, reviewStats);
     })
     .filter((profile) => {
       // ── Slot-based availability filter ──────────────────────────────────

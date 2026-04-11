@@ -278,6 +278,37 @@ export default function SellerModeratorProfilePage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-border/50 bg-card/50">
+        <CardHeader>
+          <CardTitle className="text-lg">Recent Buyer Reviews</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {profile.reviews.length ? (
+            <div className="space-y-4">
+              {profile.reviews.map((review) => (
+                <div key={review.id} className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {renderRating(review.rating)}
+                      <span className="text-sm font-medium">{review.rating.toFixed(1)}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {review.createdAt ? new Date(review.createdAt).toLocaleDateString() : ""}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">{review.reviewerName}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {review.reviewText || "No written comment provided."}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No public reviews yet.</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
