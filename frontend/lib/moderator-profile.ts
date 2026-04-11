@@ -24,6 +24,15 @@ export interface ModeratorProfileResponse {
   }
 }
 
+export interface PublicModeratorReview {
+  id: string
+  bookingId: string
+  rating: number
+  reviewText: string
+  reviewerName: string
+  createdAt: string | null
+}
+
 export type PublicModeratorProfile = ModeratorProfileResponse["profile"] & {
   availability: {
     timezone: string
@@ -41,6 +50,7 @@ export type PublicModeratorProfile = ModeratorProfileResponse["profile"] & {
       reason: string
     }>
   }
+  reviews: PublicModeratorReview[]
 }
 
 export interface PublicModeratorProfileResponse {
@@ -187,7 +197,7 @@ export function updateMyModeratorAvailability(token: string, payload: UpdateMode
   return request<ModeratorAvailabilityResponse>("/api/moderator-profile/me/availability", {
     token,
     method: "PUT",
-    body: payload as Record<string, unknown>,
+    body: payload as unknown as Record<string, unknown>,
   })
 }
 

@@ -9,7 +9,7 @@ import {
   CalendarClock,
   CalendarDays,
   BadgeCheck,
-  Settings,
+  MessageSquare,
 } from "lucide-react"
 
 const navigation = [
@@ -18,6 +18,7 @@ const navigation = [
       { title: "Dashboard", href: "/moderator", icon: LayoutDashboard },
       { title: "Public Profile", href: "/moderator/public-profile", icon: BadgeCheck },
       { title: "Bookings", href: "/moderator/bookings", icon: CalendarDays, badge: 4 },
+      { title: "Team Chat", href: "/moderator/chat", icon: MessageSquare },
       { title: "Availability", href: "/moderator/availability", icon: CalendarClock },
     //   { title: "Settings", href: "/moderator/settings", icon: Settings },
     ],

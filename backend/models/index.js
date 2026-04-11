@@ -17,6 +17,11 @@ module.exports = {
   ModeratorSchedule: require('./ModeratorSchedule'),
   ModeratorBooking: require('./ModeratorBooking'),
   ModeratorPayout: require('./ModeratorPayout'),
+  ModeratorOrderReview: require('./ModeratorOrderReview'),
   KycVerification: require('./KycVerification'),
   StripeConnectAccount: require('./StripeConnectAccount'),
+
+  // Team chat
+  ChatThread: require('./ChatThread'),
+  ChatMessage: require('./ChatMessage'),
 };

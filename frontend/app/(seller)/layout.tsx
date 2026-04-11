@@ -11,6 +11,7 @@ import {
   UserSearch,
   Users,
   CreditCard,
+  MessageSquare,
   Settings,
   Rocket,
   HelpCircle,
@@ -22,6 +23,7 @@ const sellerNavigation = [
       { title: "Connect Platforms", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
+      { title: "Chat", href: "/seller/chat", icon: MessageSquare, requiresSubscription: true },
     ],
   },
   {
