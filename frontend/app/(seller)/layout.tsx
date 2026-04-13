@@ -8,6 +8,7 @@ import { Topbar } from "@/components/dashboard/topbar"
 import {
   LayoutDashboard,
   BarChart3,
+  CalendarDays,
   UserSearch,
   Users,
   CreditCard,
@@ -22,6 +23,7 @@ const sellerNavigation = [
     items: [
       { title: "Connect Platforms", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
+      { title: "Calendar", href: "/seller/calendar", icon: CalendarDays, requiresSubscription: true },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
       { title: "Chat", href: "/seller/chat", icon: MessageSquare, requiresSubscription: true },
     ],
