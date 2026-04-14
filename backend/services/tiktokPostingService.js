@@ -1,12 +1,10 @@
-const ConnectedAccount = require("../models/ConnectedAccount");
-const TikTokPost = require("../models/TikTokPost");
-const User = require("../models/Users");
+const { ConnectedAccount, TikTokPost, User } = require("../models");
 const { decryptText, encryptText } = require("../utils/crypto");
 
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/";
-const TIKTOK_VIDEO_DIRECT_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
-const TIKTOK_PHOTO_POST_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";
+const TIKTOK_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
+const TIKTOK_PHOTO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";
 const TIKTOK_POST_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
 
 function createHttpError(status, message, details) {
@@ -16,28 +14,29 @@ function createHttpError(status, message, details) {
   return error;
 }
 
-function getTikTokConfig() {
-  const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
-
-  if (!clientKey || !clientSecret) {
-    throw createHttpError(500, "TikTok integration is not configured on the server.");
+function toNullableNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
   }
 
-  return {
-    clientKey,
-    clientSecret,
-  };
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
 }
 
-async function findLocalUser(clerkUserId) {
-  const user = await User.findOne({ clerk_user_id: clerkUserId });
-
-  if (!user) {
-    throw createHttpError(404, "User account was not found.");
+function hasScope(scopes, requiredScope) {
+  if (!scopes || !requiredScope) {
+    return false;
   }
 
-  return user;
+  return String(scopes)
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .includes(requiredScope);
 }
 
 function parseTikTokApiError(payload) {
@@ -62,38 +61,25 @@ function parseTikTokApiError(payload) {
   return null;
 }
 
-function hasScope(scopes, requiredScope) {
-  if (!scopes || !requiredScope) {
-    return false;
+async function findLocalUser(clerkUserId) {
+  const user = await User.findOne({ clerk_user_id: clerkUserId });
+
+  if (!user) {
+    throw createHttpError(404, "User account was not found.");
   }
 
-  return String(scopes)
-    .split(/[\s,]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean)
-    .includes(requiredScope);
+  return user;
 }
 
-function getScopeString(account) {
-  return account && account.scopes_json && account.scopes_json.scope
-    ? String(account.scopes_json.scope)
-    : "";
-}
+function getTikTokConfig() {
+  const clientKey = process.env.TIKTOK_CLIENT_KEY;
+  const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
 
-function ensureTikTokScope(account, requiredScope) {
-  const scopeString = getScopeString(account);
-
-  if (!hasScope(scopeString, requiredScope)) {
-    throw createHttpError(
-      403,
-      `TikTok account is missing the ${requiredScope} scope. Reconnect your TikTok account to continue.`,
-      {
-        reconnectRequired: true,
-        requiredScope,
-        grantedScopes: scopeString || null,
-      },
-    );
+  if (!clientKey || !clientSecret) {
+    throw createHttpError(500, "TikTok integration is not configured on the server.");
   }
+
+  return { clientKey, clientSecret };
 }
 
 async function fetchTikTokToken(body) {
@@ -135,7 +121,6 @@ async function refreshTikTokAccessToken(account) {
   });
 
   const now = new Date();
-
   account.access_token_encrypted = encryptText(tokenPayload.access_token);
   account.refresh_token_encrypted = encryptText(tokenPayload.refresh_token || refreshToken);
   account.token_expires_at = tokenPayload.expires_in
@@ -143,26 +128,28 @@ async function refreshTikTokAccessToken(account) {
     : null;
   account.status = "connected";
   account.updated_at = now;
-  account.scopes_json = {
-    ...(account.scopes_json || {}),
-    scope: tokenPayload.scope || getScopeString(account) || null,
-    token_type: tokenPayload.token_type || (account.scopes_json && account.scopes_json.token_type) || null,
-  };
   account.metadata_json = {
     ...(account.metadata_json || {}),
-    open_id: tokenPayload.open_id || account.account_external_id || null,
-    refresh_expires_in: tokenPayload.refresh_expires_in || null,
     refreshed_at: now.toISOString(),
   };
 
   if (tokenPayload.open_id) {
     account.account_external_id = tokenPayload.open_id;
-    account.account_name = account.account_name || `@${tokenPayload.open_id}`;
+    if (!account.account_name) {
+      account.account_name = `@${tokenPayload.open_id}`;
+    }
   }
 
   await account.save();
 
   return decryptText(account.access_token_encrypted);
+}
+
+async function getConnectedTikTokAccount(clerkUserId) {
+  const user = await findLocalUser(clerkUserId);
+  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
+
+  return { user, account };
 }
 
 async function getValidTikTokAccessToken(account) {
@@ -180,7 +167,7 @@ async function getValidTikTokAccessToken(account) {
   return decryptText(account.access_token_encrypted);
 }
 
-async function fetchTikTokJson(accessToken, url, body) {
+async function postTikTokJson(url, accessToken, body = {}) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -188,7 +175,7 @@ async function fetchTikTokJson(accessToken, url, body) {
       "Content-Type": "application/json; charset=UTF-8",
       "Cache-Control": "no-cache",
     },
-    body: JSON.stringify(body || {}),
+    body: JSON.stringify(body),
   });
 
   const payload = await response.json().catch(() => ({}));
@@ -204,516 +191,424 @@ async function fetchTikTokJson(accessToken, url, body) {
   return payload;
 }
 
-async function callTikTokJson(account, url, body) {
+function serializePost(post) {
+  return {
+    id: post._id,
+    publishId: post.publish_id,
+    mediaType: post.media_type,
+    postMode: post.post_mode,
+    sourceType: post.source_type,
+    status: post.status,
+    failReason: post.fail_reason || null,
+    publiclyAvailablePostIds: Array.isArray(post.publicly_available_post_ids) ? post.publicly_available_post_ids : [],
+    mediaUrls: Array.isArray(post.media_urls) ? post.media_urls : [],
+    title: post.title || null,
+    description: post.description || null,
+    privacyLevel: post.privacy_level || null,
+    creatorUsername: post.creator_username || null,
+    creatorNickname: post.creator_nickname || null,
+    requestedAt: post.requested_at ? post.requested_at.toISOString() : null,
+    completedAt: post.completed_at ? post.completed_at.toISOString() : null,
+    lastStatusCheckedAt: post.last_status_checked_at ? post.last_status_checked_at.toISOString() : null,
+  };
+}
+
+function mapCreatorInfo(creatorPayload, account) {
+  const creator = creatorPayload && creatorPayload.data ? creatorPayload.data : {};
+
+  return {
+    connected: true,
+    creator: {
+      avatarUrl: creator.creator_avatar_url || null,
+      username: creator.creator_username || null,
+      nickname: creator.creator_nickname || null,
+      privacyLevelOptions: Array.isArray(creator.privacy_level_options) ? creator.privacy_level_options : [],
+      commentDisabled: Boolean(creator.comment_disabled),
+      duetDisabled: Boolean(creator.duet_disabled),
+      stitchDisabled: Boolean(creator.stitch_disabled),
+      maxVideoPostDurationSec: toNullableNumber(creator.max_video_post_duration_sec),
+    },
+    account: {
+      platform: account.platform,
+      username: account.account_name || null,
+      externalId: account.account_external_id || null,
+      scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
+      expiresAt: account.token_expires_at || null,
+    },
+  };
+}
+
+function ensureCreatorInfoPermissions(creatorInfo, privacyLevel) {
+  const options = creatorInfo && creatorInfo.creator && Array.isArray(creatorInfo.creator.privacyLevelOptions)
+    ? creatorInfo.creator.privacyLevelOptions
+    : [];
+
+  if (!privacyLevel) {
+    throw createHttpError(400, "privacyLevel is required.");
+  }
+
+  if (options.length && !options.includes(privacyLevel)) {
+    throw createHttpError(422, `privacyLevel '${privacyLevel}' is not allowed for this TikTok account.`);
+  }
+}
+
+function ensurePostingScope(accountScopes, scope) {
+  if (!hasScope(accountScopes, scope)) {
+    throw createHttpError(403, `TikTok scope '${scope}' is required. Reconnect TikTok and grant this scope.`);
+  }
+}
+
+async function getTikTokCreatorInfo({ clerkUserId }) {
+  const { account } = await getConnectedTikTokAccount(clerkUserId);
+
+  if (!account || !account.access_token_encrypted) {
+    return {
+      connected: false,
+      creator: {
+        avatarUrl: null,
+        username: null,
+        nickname: null,
+        privacyLevelOptions: [],
+        commentDisabled: false,
+        duetDisabled: false,
+        stitchDisabled: false,
+        maxVideoPostDurationSec: null,
+      },
+      account: {
+        platform: "tiktok",
+        username: null,
+        externalId: null,
+        scopes: null,
+        expiresAt: null,
+      },
+    };
+  }
+
   let accessToken = await getValidTikTokAccessToken(account);
 
   try {
-    return await fetchTikTokJson(accessToken, url, body);
+    const payload = await postTikTokJson(TIKTOK_CREATOR_INFO_URL, accessToken, {});
+    return mapCreatorInfo(payload, account);
   } catch (error) {
     if (error.status === 401) {
       accessToken = await refreshTikTokAccessToken(account);
-      return fetchTikTokJson(accessToken, url, body);
+      const payload = await postTikTokJson(TIKTOK_CREATOR_INFO_URL, accessToken, {});
+      return mapCreatorInfo(payload, account);
     }
 
     throw error;
   }
 }
 
-async function getTikTokPostingContext(clerkUserId) {
-  const user = await findLocalUser(clerkUserId);
-  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
-
-  if (!account || !account.access_token_encrypted) {
-    throw createHttpError(404, "TikTok account is not connected.");
-  }
-
-  return {
-    user,
-    account,
-  };
-}
-
-function normalizeOptionalString(value, maxLength) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (typeof maxLength === "number" && normalized.length > maxLength) {
-    throw createHttpError(400, `Field exceeds the maximum supported length of ${maxLength} characters.`);
-  }
-
-  return normalized;
-}
-
-function normalizeBoolean(value, defaultValue = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return defaultValue;
-}
-
-function normalizeOptionalInteger(value, fieldName) {
-  if (value == null || value === "") {
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw createHttpError(400, `${fieldName} must be a non-negative number.`);
-  }
-
-  return Math.floor(parsed);
-}
-
-function parseHttpsUrl(rawValue, fieldName) {
-  const value = normalizeOptionalString(rawValue);
-
-  if (!value) {
-    throw createHttpError(400, `${fieldName} is required.`);
-  }
-
-  let parsedUrl;
-
-  try {
-    parsedUrl = new URL(value);
-  } catch (error) {
-    throw createHttpError(400, `${fieldName} must be a valid URL.`);
-  }
-
-  if (parsedUrl.protocol !== "https:") {
-    throw createHttpError(400, `${fieldName} must use HTTPS.`);
-  }
-
-  return parsedUrl;
-}
-
-function getConfiguredMediaPrefixes() {
-  return String(process.env.TIKTOK_MEDIA_URL_PREFIXES || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map((value) => value.replace(/\/+$/, ""));
-}
-
-function getConfiguredMediaDomains() {
-  return String(process.env.TIKTOK_MEDIA_DOMAINS || "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function validateTikTokOwnedMediaUrl(rawValue, fieldName) {
-  const parsedUrl = parseHttpsUrl(rawValue, fieldName);
-  const normalizedUrl = parsedUrl.toString();
-  const configuredPrefixes = getConfiguredMediaPrefixes();
-  const configuredDomains = getConfiguredMediaDomains();
-
-  if (!configuredPrefixes.length && !configuredDomains.length) {
-    return normalizedUrl;
-  }
-
-  const matchesPrefix = configuredPrefixes.some((prefix) => normalizedUrl.startsWith(`${prefix}/`) || normalizedUrl === prefix);
-  const host = parsedUrl.hostname.toLowerCase();
-  const matchesDomain = configuredDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
-
-  if (!matchesPrefix && !matchesDomain) {
-    throw createHttpError(
-      400,
-      `${fieldName} must belong to a TikTok-verified domain or URL prefix configured on this server.`,
-      {
-        field: fieldName,
-        configuredPrefixes,
-        configuredDomains,
-      },
-    );
-  }
-
-  return normalizedUrl;
-}
-
-function normalizeCreatorInfo(payload) {
-  const data = payload && payload.data ? payload.data : {};
-
-  return {
-    avatarUrl: data.creator_avatar_url || null,
-    username: data.creator_username || null,
-    nickname: data.creator_nickname || null,
-    privacyLevelOptions: Array.isArray(data.privacy_level_options)
-      ? data.privacy_level_options.filter(Boolean)
-      : [],
-    commentDisabled: Boolean(data.comment_disabled),
-    duetDisabled: Boolean(data.duet_disabled),
-    stitchDisabled: Boolean(data.stitch_disabled),
-    maxVideoPostDurationSec: Number.isFinite(Number(data.max_video_post_duration_sec))
-      ? Number(data.max_video_post_duration_sec)
-      : null,
-  };
-}
-
-async function queryTikTokCreatorInfo(account) {
-  return callTikTokJson(account, TIKTOK_CREATOR_INFO_URL, {});
-}
-
-function resolvePrivacyLevel(privacyLevel, creatorInfo) {
-  const normalized = normalizeOptionalString(privacyLevel);
-
-  if (!normalized) {
-    throw createHttpError(400, "privacyLevel is required.");
-  }
-
-  const normalizedValue = normalized.toUpperCase();
-
-  if (!creatorInfo.privacyLevelOptions.includes(normalizedValue)) {
-    throw createHttpError(400, "privacyLevel must match one of TikTok's current privacy options for this creator.", {
-      provided: normalizedValue,
-      allowed: creatorInfo.privacyLevelOptions,
-    });
-  }
-
-  return normalizedValue;
-}
-
-function buildVideoInitRequest(input, creatorInfo) {
-  const title = normalizeOptionalString(input.title, 2200);
-  const videoUrl = validateTikTokOwnedMediaUrl(input.videoUrl, "videoUrl");
-  const privacyLevel = resolvePrivacyLevel(input.privacyLevel, creatorInfo);
-  const coverTimestampMs = normalizeOptionalInteger(input.videoCoverTimestampMs, "videoCoverTimestampMs");
-  const videoDurationSec = normalizeOptionalInteger(input.videoDurationSec, "videoDurationSec");
-
-  if (
-    videoDurationSec != null &&
-    creatorInfo.maxVideoPostDurationSec != null &&
-    videoDurationSec > creatorInfo.maxVideoPostDurationSec
-  ) {
-    throw createHttpError(400, "Video duration exceeds TikTok's current posting limit for this creator.", {
-      providedSeconds: videoDurationSec,
-      maxSeconds: creatorInfo.maxVideoPostDurationSec,
-    });
-  }
-
-  const postInfo = {
-    privacy_level: privacyLevel,
-    disable_duet: creatorInfo.duetDisabled ? true : normalizeBoolean(input.disableDuet, false),
-    disable_comment: creatorInfo.commentDisabled ? true : normalizeBoolean(input.disableComment, false),
-    disable_stitch: creatorInfo.stitchDisabled ? true : normalizeBoolean(input.disableStitch, false),
-    brand_content_toggle: normalizeBoolean(input.brandContentToggle, false),
-    brand_organic_toggle: normalizeBoolean(input.brandOrganicToggle, false),
-    is_aigc: normalizeBoolean(input.isAigc, false),
-  };
-
-  if (title) {
-    postInfo.title = title;
-  }
-
-  if (coverTimestampMs != null) {
-    postInfo.video_cover_timestamp_ms = coverTimestampMs;
-  }
-
-  return {
-    requestBody: {
-      post_info: postInfo,
-      source_info: {
-        source: "PULL_FROM_URL",
-        video_url: videoUrl,
-      },
-    },
-    metadata: {
-      title,
-      description: null,
-      privacyLevel,
-      mediaUrls: [videoUrl],
-    },
-  };
-}
-
-function buildPhotoInitRequest(input, creatorInfo) {
-  const title = normalizeOptionalString(input.title, 90);
-  const description = normalizeOptionalString(input.description, 4000);
-  const privacyLevel = resolvePrivacyLevel(input.privacyLevel, creatorInfo);
-  const photoUrls = Array.isArray(input.photoImages)
-    ? input.photoImages.map((url, index) => validateTikTokOwnedMediaUrl(url, `photoImages[${index}]`))
-    : [];
-
-  if (!photoUrls.length) {
-    throw createHttpError(400, "At least one photo URL is required.");
-  }
-
-  if (photoUrls.length > 35) {
-    throw createHttpError(400, "TikTok supports a maximum of 35 photos per post.");
-  }
-
-  const photoCoverIndex = normalizeOptionalInteger(input.photoCoverIndex, "photoCoverIndex");
-  const resolvedCoverIndex = photoCoverIndex == null ? 0 : photoCoverIndex;
-
-  if (resolvedCoverIndex < 0 || resolvedCoverIndex >= photoUrls.length) {
-    throw createHttpError(400, "photoCoverIndex must point to an item inside photoImages.");
-  }
-
-  const postInfo = {
-    privacy_level: privacyLevel,
-    disable_comment: creatorInfo.commentDisabled ? true : normalizeBoolean(input.disableComment, false),
-    auto_add_music: normalizeBoolean(input.autoAddMusic, false),
-    brand_content_toggle: normalizeBoolean(input.brandContentToggle, false),
-    brand_organic_toggle: normalizeBoolean(input.brandOrganicToggle, false),
-  };
-
-  if (title) {
-    postInfo.title = title;
-  }
-
-  if (description) {
-    postInfo.description = description;
-  }
-
-  return {
-    requestBody: {
-      media_type: "PHOTO",
-      post_mode: "DIRECT_POST",
-      post_info: postInfo,
-      source_info: {
-        source: "PULL_FROM_URL",
-        photo_cover_index: resolvedCoverIndex,
-        photo_images: photoUrls,
-      },
-    },
-    metadata: {
-      title,
-      description,
-      privacyLevel,
-      mediaUrls: photoUrls,
-    },
-  };
-}
-
-function serializeTikTokPost(record) {
-  return {
-    id: record._id,
-    publishId: record.publish_id,
-    mediaType: record.media_type,
-    postMode: record.post_mode,
-    sourceType: record.source_type,
-    status: record.status,
-    failReason: record.fail_reason || null,
-    publiclyAvailablePostIds: Array.isArray(record.publicly_available_post_ids)
-      ? record.publicly_available_post_ids
-      : [],
-    mediaUrls: Array.isArray(record.media_urls) ? record.media_urls : [],
-    title: record.title || null,
-    description: record.description || null,
-    privacyLevel: record.privacy_level || null,
-    creatorUsername: record.creator_username || null,
-    creatorNickname: record.creator_nickname || null,
-    requestedAt: record.requested_at || null,
-    completedAt: record.completed_at || null,
-    lastStatusCheckedAt: record.last_status_checked_at || null,
-  };
-}
-
-async function createTikTokPostRecord({
+async function upsertTikTokPostRecord({
   user,
   account,
-  publishId,
   mediaType,
-  metadata,
+  postMode,
+  sourceType,
+  publishId,
+  mediaUrls,
+  title,
+  description,
+  privacyLevel,
   creatorInfo,
-  requestBody,
-  responsePayload,
+  requestJson,
+  responseJson,
 }) {
   const now = new Date();
-  const record = new TikTokPost({
+  const existing = await TikTokPost.findOne({ publish_id: publishId, user_id: user._id });
+  const post = existing || new TikTokPost({
     user_id: user._id,
     workspace_id: account.workspace_id || null,
     connected_account_id: account._id,
     publish_id: publishId,
     media_type: mediaType,
-    post_mode: "DIRECT_POST",
-    source_type: "PULL_FROM_URL",
-    status: mediaType === "PHOTO" ? "PROCESSING_DOWNLOAD" : "PROCESSING_DOWNLOAD",
-    fail_reason: null,
-    publicly_available_post_ids: [],
-    media_urls: metadata.mediaUrls,
-    title: metadata.title || null,
-    description: metadata.description || null,
-    privacy_level: metadata.privacyLevel || null,
-    creator_username: creatorInfo.username || null,
-    creator_nickname: creatorInfo.nickname || null,
-    requested_at: now,
-    request_json: requestBody,
-    response_json: responsePayload,
-    metadata_json: {
-      tiktokLogId:
-        responsePayload &&
-        responsePayload.error &&
-        responsePayload.error.log_id
-          ? responsePayload.error.log_id
-          : null,
-    },
+    post_mode: postMode,
+    source_type: sourceType,
     created_at: now,
-    updated_at: now,
   });
 
-  await record.save();
-  return record;
+  post.status = "INIT_ACCEPTED";
+  post.fail_reason = null;
+  post.media_urls = Array.isArray(mediaUrls) ? mediaUrls : [];
+  post.title = title || null;
+  post.description = description || null;
+  post.privacy_level = privacyLevel || null;
+  post.creator_username = creatorInfo && creatorInfo.creator ? creatorInfo.creator.username || null : null;
+  post.creator_nickname = creatorInfo && creatorInfo.creator ? creatorInfo.creator.nickname || null : null;
+  post.requested_at = now;
+  post.request_json = requestJson || null;
+  post.response_json = responseJson || null;
+  post.updated_at = now;
+
+  await post.save();
+
+  return post;
 }
 
-function applyTikTokStatusToRecord(record, payload) {
-  const data = payload && payload.data ? payload.data : {};
-  const now = new Date();
-  const finalStatuses = new Set(["FAILED", "PUBLISH_COMPLETE"]);
-
-  if (data.status) {
-    record.status = data.status;
+async function publishTikTokVideo({
+  clerkUserId,
+  title,
+  privacyLevel,
+  videoUrl,
+  videoCoverTimestampMs,
+  videoDurationSec,
+  disableDuet = false,
+  disableComment = false,
+  disableStitch = false,
+  brandContentToggle = false,
+  brandOrganicToggle = false,
+  isAigc = false,
+}) {
+  if (!videoUrl || typeof videoUrl !== "string") {
+    throw createHttpError(400, "videoUrl is required.");
   }
 
-  record.fail_reason = data.fail_reason || null;
-  record.publicly_available_post_ids = Array.isArray(data.publicaly_available_post_id)
-    ? data.publicaly_available_post_id.map((value) => String(value))
-    : [];
-  record.last_status_checked_at = now;
-  record.response_json = payload;
-  record.updated_at = now;
+  const { user, account } = await getConnectedTikTokAccount(clerkUserId);
 
-  if (finalStatuses.has(record.status)) {
-    record.completed_at = record.completed_at || now;
+  if (!account || !account.access_token_encrypted) {
+    throw createHttpError(404, "TikTok account is not connected.");
   }
 
-  return record;
-}
+  const accountScopes = account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : "";
+  ensurePostingScope(accountScopes, "video.publish");
 
-async function getTikTokCreatorInfo({ clerkUserId }) {
-  const { account } = await getTikTokPostingContext(clerkUserId);
-  ensureTikTokScope(account, "video.publish");
+  const creatorInfo = await getTikTokCreatorInfo({ clerkUserId });
+  ensureCreatorInfoPermissions(creatorInfo, privacyLevel);
 
-  const creatorInfoPayload = await queryTikTokCreatorInfo(account);
-  const creatorInfo = normalizeCreatorInfo(creatorInfoPayload);
-
-  return {
-    connected: true,
-    creator: creatorInfo,
-    account: {
-      platform: account.platform,
-      username: account.account_name || null,
-      externalId: account.account_external_id || null,
-      scopes: getScopeString(account) || null,
-      expiresAt: account.token_expires_at || null,
+  const requestBody = {
+    post_info: {
+      title: title || undefined,
+      privacy_level: privacyLevel,
+      disable_duet: Boolean(disableDuet),
+      disable_comment: Boolean(disableComment),
+      disable_stitch: Boolean(disableStitch),
+      brand_content_toggle: Boolean(brandContentToggle),
+      brand_organic_toggle: Boolean(brandOrganicToggle),
+      is_aigc: Boolean(isAigc),
+    },
+    source_info: {
+      source: "PULL_FROM_URL",
+      video_url: videoUrl,
     },
   };
-}
 
-async function publishTikTokVideo({ clerkUserId, ...input }) {
-  const { user, account } = await getTikTokPostingContext(clerkUserId);
-  ensureTikTokScope(account, "video.publish");
-
-  const creatorInfoPayload = await queryTikTokCreatorInfo(account);
-  const creatorInfo = normalizeCreatorInfo(creatorInfoPayload);
-  const { requestBody, metadata } = buildVideoInitRequest(input, creatorInfo);
-  const responsePayload = await callTikTokJson(account, TIKTOK_VIDEO_DIRECT_POST_URL, requestBody);
-  const publishId = responsePayload && responsePayload.data ? responsePayload.data.publish_id : null;
-
-  if (!publishId) {
-    throw createHttpError(502, "TikTok did not return a publish ID for the video post.", responsePayload);
+  if (toNullableNumber(videoCoverTimestampMs) != null) {
+    requestBody.post_info.video_cover_timestamp_ms = toNullableNumber(videoCoverTimestampMs);
   }
 
-  const record = await createTikTokPostRecord({
+  if (toNullableNumber(videoDurationSec) != null) {
+    requestBody.source_info.video_duration = toNullableNumber(videoDurationSec);
+  }
+
+  let accessToken = await getValidTikTokAccessToken(account);
+  let payload;
+
+  try {
+    payload = await postTikTokJson(TIKTOK_VIDEO_INIT_URL, accessToken, requestBody);
+  } catch (error) {
+    if (error.status === 401) {
+      accessToken = await refreshTikTokAccessToken(account);
+      payload = await postTikTokJson(TIKTOK_VIDEO_INIT_URL, accessToken, requestBody);
+    } else {
+      throw error;
+    }
+  }
+
+  const publishId = payload && payload.data ? payload.data.publish_id : null;
+
+  if (!publishId) {
+    throw createHttpError(502, "TikTok did not return a publish_id.", payload);
+  }
+
+  const post = await upsertTikTokPostRecord({
     user,
     account,
-    publishId,
     mediaType: "VIDEO",
-    metadata,
+    postMode: "DIRECT_POST",
+    sourceType: "PULL_FROM_URL",
+    publishId,
+    mediaUrls: [videoUrl],
+    title,
+    description: null,
+    privacyLevel,
     creatorInfo,
-    requestBody,
-    responsePayload,
+    requestJson: requestBody,
+    responseJson: payload,
   });
 
   return {
     publishId,
-    creator: creatorInfo,
-    post: serializeTikTokPost(record),
+    creator: creatorInfo.creator,
+    post: serializePost(post),
   };
 }
 
-async function publishTikTokPhoto({ clerkUserId, ...input }) {
-  const { user, account } = await getTikTokPostingContext(clerkUserId);
-  ensureTikTokScope(account, "video.publish");
+async function publishTikTokPhoto({
+  clerkUserId,
+  title,
+  description,
+  privacyLevel,
+  photoImages,
+  photoCoverIndex = 0,
+  disableComment = false,
+  autoAddMusic = false,
+  brandContentToggle = false,
+  brandOrganicToggle = false,
+}) {
+  const normalizedImages = Array.isArray(photoImages)
+    ? photoImages.map((url) => String(url || "").trim()).filter(Boolean)
+    : [];
 
-  const creatorInfoPayload = await queryTikTokCreatorInfo(account);
-  const creatorInfo = normalizeCreatorInfo(creatorInfoPayload);
-  const { requestBody, metadata } = buildPhotoInitRequest(input, creatorInfo);
-  const responsePayload = await callTikTokJson(account, TIKTOK_PHOTO_POST_URL, requestBody);
-  const publishId = responsePayload && responsePayload.data ? responsePayload.data.publish_id : null;
-
-  if (!publishId) {
-    throw createHttpError(502, "TikTok did not return a publish ID for the photo post.", responsePayload);
+  if (!normalizedImages.length) {
+    throw createHttpError(400, "photoImages is required and must include at least one URL.");
   }
 
-  const record = await createTikTokPostRecord({
+  if (normalizedImages.length > 35) {
+    throw createHttpError(400, "photoImages supports up to 35 URLs.");
+  }
+
+  const { user, account } = await getConnectedTikTokAccount(clerkUserId);
+
+  if (!account || !account.access_token_encrypted) {
+    throw createHttpError(404, "TikTok account is not connected.");
+  }
+
+  const accountScopes = account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : "";
+
+  if (!hasScope(accountScopes, "video.publish") && !hasScope(accountScopes, "video.upload")) {
+    throw createHttpError(403, "TikTok scope 'video.publish' or 'video.upload' is required for photo posting.");
+  }
+
+  const creatorInfo = await getTikTokCreatorInfo({ clerkUserId });
+  ensureCreatorInfoPermissions(creatorInfo, privacyLevel);
+
+  const requestBody = {
+    media_type: "PHOTO",
+    post_mode: "DIRECT_POST",
+    post_info: {
+      title: title || undefined,
+      description: description || undefined,
+      privacy_level: privacyLevel,
+      disable_comment: Boolean(disableComment),
+      auto_add_music: Boolean(autoAddMusic),
+      brand_content_toggle: Boolean(brandContentToggle),
+      brand_organic_toggle: Boolean(brandOrganicToggle),
+    },
+    source_info: {
+      source: "PULL_FROM_URL",
+      photo_images: normalizedImages,
+      photo_cover_index: Math.max(0, Math.floor(Number(photoCoverIndex) || 0)),
+    },
+  };
+
+  let accessToken = await getValidTikTokAccessToken(account);
+  let payload;
+
+  try {
+    payload = await postTikTokJson(TIKTOK_PHOTO_INIT_URL, accessToken, requestBody);
+  } catch (error) {
+    if (error.status === 401) {
+      accessToken = await refreshTikTokAccessToken(account);
+      payload = await postTikTokJson(TIKTOK_PHOTO_INIT_URL, accessToken, requestBody);
+    } else {
+      throw error;
+    }
+  }
+
+  const publishId = payload && payload.data ? payload.data.publish_id : null;
+
+  if (!publishId) {
+    throw createHttpError(502, "TikTok did not return a publish_id.", payload);
+  }
+
+  const post = await upsertTikTokPostRecord({
     user,
     account,
-    publishId,
     mediaType: "PHOTO",
-    metadata,
+    postMode: "DIRECT_POST",
+    sourceType: "PULL_FROM_URL",
+    publishId,
+    mediaUrls: normalizedImages,
+    title,
+    description,
+    privacyLevel,
     creatorInfo,
-    requestBody,
-    responsePayload,
+    requestJson: requestBody,
+    responseJson: payload,
   });
 
   return {
     publishId,
-    creator: creatorInfo,
-    post: serializeTikTokPost(record),
+    creator: creatorInfo.creator,
+    post: serializePost(post),
   };
 }
 
 async function getTikTokPostStatus({ clerkUserId, publishId }) {
-  const normalizedPublishId = normalizeOptionalString(publishId);
-
-  if (!normalizedPublishId) {
+  if (!publishId || typeof publishId !== "string") {
     throw createHttpError(400, "publishId is required.");
   }
 
-  const { user, account } = await getTikTokPostingContext(clerkUserId);
+  const { user, account } = await getConnectedTikTokAccount(clerkUserId);
 
-  if (!hasScope(getScopeString(account), "video.publish") && !hasScope(getScopeString(account), "video.upload")) {
-    throw createHttpError(403, "TikTok account is missing the required posting scopes.", {
-      reconnectRequired: true,
-      requiredScopes: ["video.publish", "video.upload"],
-      grantedScopes: getScopeString(account) || null,
+  if (!account || !account.access_token_encrypted) {
+    throw createHttpError(404, "TikTok account is not connected.");
+  }
+
+  const post = await TikTokPost.findOne({ publish_id: publishId, user_id: user._id });
+
+  if (!post) {
+    throw createHttpError(404, "TikTok post record was not found for this user.");
+  }
+
+  let accessToken = await getValidTikTokAccessToken(account);
+  let payload;
+
+  try {
+    payload = await postTikTokJson(TIKTOK_POST_STATUS_URL, accessToken, {
+      publish_id: publishId,
     });
+  } catch (error) {
+    if (error.status === 401) {
+      accessToken = await refreshTikTokAccessToken(account);
+      payload = await postTikTokJson(TIKTOK_POST_STATUS_URL, accessToken, {
+        publish_id: publishId,
+      });
+    } else {
+      throw error;
+    }
   }
 
-  const record = await TikTokPost.findOne({ user_id: user._id, publish_id: normalizedPublishId });
+  const data = payload && payload.data ? payload.data : {};
+  const now = new Date();
+  const status = data.status || post.status || "INIT_ACCEPTED";
+  const failReason = data.fail_reason || null;
+  const publiclyAvailablePostIds = Array.isArray(data.publicly_available_post_ids)
+    ? data.publicly_available_post_ids
+    : [];
 
-  if (!record) {
-    throw createHttpError(404, "TikTok post was not found for this user.");
+  post.status = status;
+  post.fail_reason = failReason;
+  post.publicly_available_post_ids = publiclyAvailablePostIds;
+  post.last_status_checked_at = now;
+  post.updated_at = now;
+  post.response_json = payload;
+
+  if (status === "PUBLISH_COMPLETE") {
+    post.completed_at = now;
   }
 
-  const responsePayload = await callTikTokJson(account, TIKTOK_POST_STATUS_URL, {
-    publish_id: normalizedPublishId,
-  });
-
-  applyTikTokStatusToRecord(record, responsePayload);
-  await record.save();
-
-  const data = responsePayload && responsePayload.data ? responsePayload.data : {};
+  await post.save();
 
   return {
-    post: serializeTikTokPost(record),
+    post: serializePost(post),
     status: {
-      status: data.status || record.status,
-      failReason: data.fail_reason || null,
-      uploadedBytes: Number.isFinite(Number(data.uploaded_bytes)) ? Number(data.uploaded_bytes) : null,
-      downloadedBytes: Number.isFinite(Number(data.downloaded_bytes)) ? Number(data.downloaded_bytes) : null,
-      publiclyAvailablePostIds: Array.isArray(data.publicaly_available_post_id)
-        ? data.publicaly_available_post_id.map((value) => String(value))
-        : [],
+      status,
+      failReason,
+      uploadedBytes: toNullableNumber(data.uploaded_bytes),
+      downloadedBytes: toNullableNumber(data.downloaded_bytes),
+      publiclyAvailablePostIds,
     },
   };
 }

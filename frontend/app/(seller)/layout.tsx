@@ -16,6 +16,7 @@ import {
   Settings,
   Rocket,
   HelpCircle,
+  Video,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -25,6 +26,7 @@ const sellerNavigation = [
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Calendar", href: "/seller/calendar", icon: CalendarDays, requiresSubscription: true },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
+      { title: "Publish", href: "/seller/publish", icon: Video, requiresSubscription: true },
       { title: "Chat", href: "/seller/chat", icon: MessageSquare, requiresSubscription: true },
     ],
   },
