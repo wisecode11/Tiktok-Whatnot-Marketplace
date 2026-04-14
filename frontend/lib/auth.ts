@@ -112,6 +112,8 @@ export interface TikTokCreatorInfoResponse {
     duetDisabled: boolean
     stitchDisabled: boolean
     maxVideoPostDurationSec: number | null
+    canPost: boolean
+    cannotPostReason: string | null
   }
   account: {
     platform: string
@@ -119,6 +121,7 @@ export interface TikTokCreatorInfoResponse {
     externalId: string | null
     scopes: string | null
     expiresAt: string | null
+    isAudited: boolean
   }
 }
 
@@ -392,7 +395,7 @@ export async function createTikTokVideoPost(token: string, payload: CreateTikTok
   return request<TikTokPublishResponse>("/api/integrations/tiktok/posts/video", {
     token,
     method: "POST",
-    body: payload as Record<string, unknown>,
+    body: payload as unknown as Record<string, unknown>,
   })
 }
 
@@ -400,7 +403,7 @@ export async function createTikTokPhotoPost(token: string, payload: CreateTikTok
   return request<TikTokPublishResponse>("/api/integrations/tiktok/posts/photo", {
     token,
     method: "POST",
-    body: payload as Record<string, unknown>,
+    body: payload as unknown as Record<string, unknown>,
   })
 }
 
