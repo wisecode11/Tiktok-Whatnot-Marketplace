@@ -51,7 +51,7 @@ function getTikTokConfig() {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
   const redirectUri = process.env.TIKTOK_REDIRECT_URI || `${getBackendUrl()}/api/integrations/tiktok/callback`;
-  const scopes = process.env.TIKTOK_SCOPES || "user.info.basic";
+  const scopes = process.env.TIKTOK_SCOPES || "user.info.basic,video.publish,video.upload";
   const stateSecret = process.env.TIKTOK_STATE_SECRET || process.env.APP_ENCRYPTION_KEY;
 
   if (!clientKey || !clientSecret) {

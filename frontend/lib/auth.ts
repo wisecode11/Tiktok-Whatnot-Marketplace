@@ -101,6 +101,90 @@ export interface TikTokVideoAnalyticsResponse {
   }
 }
 
+export interface TikTokCreatorInfoResponse {
+  connected: boolean
+  creator: {
+    avatarUrl: string | null
+    username: string | null
+    nickname: string | null
+    privacyLevelOptions: string[]
+    commentDisabled: boolean
+    duetDisabled: boolean
+    stitchDisabled: boolean
+    maxVideoPostDurationSec: number | null
+  }
+  account: {
+    platform: string
+    username: string | null
+    externalId: string | null
+    scopes: string | null
+    expiresAt: string | null
+  }
+}
+
+export interface TikTokPostRecord {
+  id: string
+  publishId: string
+  mediaType: "VIDEO" | "PHOTO"
+  postMode: "DIRECT_POST" | "MEDIA_UPLOAD"
+  sourceType: "PULL_FROM_URL" | "FILE_UPLOAD"
+  status: string
+  failReason: string | null
+  publiclyAvailablePostIds: string[]
+  mediaUrls: string[]
+  title: string | null
+  description: string | null
+  privacyLevel: string | null
+  creatorUsername: string | null
+  creatorNickname: string | null
+  requestedAt: string | null
+  completedAt: string | null
+  lastStatusCheckedAt: string | null
+}
+
+export interface CreateTikTokVideoPostPayload {
+  title?: string
+  privacyLevel: string
+  videoUrl: string
+  videoCoverTimestampMs?: number
+  videoDurationSec?: number
+  disableDuet?: boolean
+  disableComment?: boolean
+  disableStitch?: boolean
+  brandContentToggle?: boolean
+  brandOrganicToggle?: boolean
+  isAigc?: boolean
+}
+
+export interface CreateTikTokPhotoPostPayload {
+  title?: string
+  description?: string
+  privacyLevel: string
+  photoImages: string[]
+  photoCoverIndex?: number
+  disableComment?: boolean
+  autoAddMusic?: boolean
+  brandContentToggle?: boolean
+  brandOrganicToggle?: boolean
+}
+
+export interface TikTokPublishResponse {
+  publishId: string
+  creator: TikTokCreatorInfoResponse["creator"]
+  post: TikTokPostRecord
+}
+
+export interface TikTokPostStatusResponse {
+  post: TikTokPostRecord
+  status: {
+    status: string
+    failReason: string | null
+    uploadedBytes: number | null
+    downloadedBytes: number | null
+    publiclyAvailablePostIds: string[]
+  }
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -298,6 +382,34 @@ export async function getStripeStatus(token: string) {
 
 export async function getTikTokProfile(token: string) {
   return request<TikTokProfileResponse>("/api/integrations/tiktok/profile", { token })
+}
+
+export async function getTikTokCreatorInfo(token: string) {
+  return request<TikTokCreatorInfoResponse>("/api/integrations/tiktok/creator-info", { token })
+}
+
+export async function createTikTokVideoPost(token: string, payload: CreateTikTokVideoPostPayload) {
+  return request<TikTokPublishResponse>("/api/integrations/tiktok/posts/video", {
+    token,
+    method: "POST",
+    body: payload as Record<string, unknown>,
+  })
+}
+
+export async function createTikTokPhotoPost(token: string, payload: CreateTikTokPhotoPostPayload) {
+  return request<TikTokPublishResponse>("/api/integrations/tiktok/posts/photo", {
+    token,
+    method: "POST",
+    body: payload as Record<string, unknown>,
+  })
+}
+
+export async function getTikTokPostStatus(token: string, publishId: string) {
+  return request<TikTokPostStatusResponse>("/api/integrations/tiktok/posts/status", {
+    token,
+    method: "POST",
+    body: { publishId },
+  })
 }
 
 export async function getTikTokVideoAnalytics(token: string, params?: { cursor?: number; maxCount?: number }) {

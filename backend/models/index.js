@@ -5,6 +5,7 @@ module.exports = {
   SellerWorkspace: require('./SellerWorkspace'),
   WorkspaceMembership: require('./WorkspaceMembership'),
   ConnectedAccount: require('./ConnectedAccount'),
+  TikTokPost: require('./TikTokPost'),
 
   // Billing / Subscription
   SubscriptionInvoice: require('./SubscriptionInvoice'),
