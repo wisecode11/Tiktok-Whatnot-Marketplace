@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { AlertCircle, CheckCircle2, RefreshCw, UploadCloud } from "lucide-react"
 
@@ -73,9 +73,10 @@ export default function SellerPublishPage() {
     videoUrl: "",
     videoDurationSec: "",
     videoCoverTimestampMs: "",
-    disableDuet: false,
-    disableComment: false,
-    disableStitch: false,
+    allowDuet: false,
+    allowComment: false,
+    allowStitch: false,
+    discloseCommercialContent: false,
     brandContentToggle: false,
     brandOrganicToggle: false,
     isAigc: false,
@@ -85,11 +86,13 @@ export default function SellerPublishPage() {
     description: "",
     photoImages: "",
     photoCoverIndex: "0",
-    disableComment: false,
+    allowComment: false,
     autoAddMusic: true,
+    discloseCommercialContent: false,
     brandContentToggle: false,
     brandOrganicToggle: false,
   })
+  const [consentChecked, setConsentChecked] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -111,7 +114,13 @@ export default function SellerPublishPage() {
         }
 
         setCreatorInfo(result)
-        setPrivacyLevel((current) => current || result.creator.privacyLevelOptions[0] || "")
+        setPrivacyLevel((current) => {
+          if (!current) {
+            return ""
+          }
+
+          return result.creator.privacyLevelOptions.includes(current) ? current : ""
+        })
       } catch (error) {
         if (cancelled) {
           return
@@ -154,7 +163,111 @@ export default function SellerPublishPage() {
     }
   }
 
+  const isUnauditedClient = Boolean(creatorInfo && !creatorInfo.account.isAudited)
+  const commercialEnabled = mediaType === "VIDEO" ? videoForm.discloseCommercialContent : photoForm.discloseCommercialContent
+  const brandContentToggle = mediaType === "VIDEO" ? videoForm.brandContentToggle : photoForm.brandContentToggle
+  const brandOrganicToggle = mediaType === "VIDEO" ? videoForm.brandOrganicToggle : photoForm.brandOrganicToggle
+  const activePhotoUrls = useMemo(
+    () =>
+      photoForm.photoImages
+        .split(/\r?\n/)
+        .map((url) => url.trim())
+        .filter(Boolean),
+    [photoForm.photoImages],
+  )
+
+  const consentText =
+    commercialEnabled && brandContentToggle
+      ? "By posting, you agree to TikTok's Branded Content Policy and Music Usage Confirmation"
+      : "By posting, you agree to TikTok's Music Usage Confirmation"
+
+  const validationMessage = useMemo(() => {
+    if (!creatorInfo?.connected) {
+      return "Connect TikTok with posting scopes before submitting."
+    }
+
+    if (creatorInfo.creator.canPost === false) {
+      return creatorInfo.creator.cannotPostReason || "TikTok says this creator cannot post right now. Please try later."
+    }
+
+    if (!privacyLevel) {
+      return "Select a privacy level before posting."
+    }
+
+    if (isUnauditedClient && privacyLevel !== "SELF_ONLY") {
+      return "This app is unaudited on TikTok. You must use SELF_ONLY privacy."
+    }
+
+    if (commercialEnabled && !brandContentToggle && !brandOrganicToggle) {
+      return "Commercial content is enabled, so select Your brand, Branded content, or both."
+    }
+
+    if (brandContentToggle && privacyLevel === "SELF_ONLY") {
+      return "Branded content cannot be posted with SELF_ONLY privacy."
+    }
+
+    if (!consentChecked) {
+      return "Accept the posting declaration before submitting."
+    }
+
+    if (mediaType === "VIDEO") {
+      if (!videoForm.videoUrl.trim()) {
+        return "Video URL is required."
+      }
+
+      if (!videoForm.videoUrl.trim().startsWith("https://")) {
+        return "Video URL must use https://"
+      }
+
+      const parsedDuration = Number(videoForm.videoDurationSec)
+
+      if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+        return "Video duration in seconds is required."
+      }
+
+      if (
+        creatorInfo.creator.maxVideoPostDurationSec != null &&
+        parsedDuration > creatorInfo.creator.maxVideoPostDurationSec
+      ) {
+        return `Video exceeds max duration (${creatorInfo.creator.maxVideoPostDurationSec}s).`
+      }
+
+      return null
+    }
+
+    if (!activePhotoUrls.length) {
+      return "Add at least one photo URL."
+    }
+
+    if (activePhotoUrls.length > 35) {
+      return "TikTok supports up to 35 photos."
+    }
+
+    if (activePhotoUrls.some((url) => !url.startsWith("https://"))) {
+      return "All photo URLs must use https://"
+    }
+
+    return null
+  }, [
+    activePhotoUrls,
+    brandContentToggle,
+    brandOrganicToggle,
+    commercialEnabled,
+    consentChecked,
+    creatorInfo,
+    isUnauditedClient,
+    mediaType,
+    privacyLevel,
+    videoForm.videoDurationSec,
+    videoForm.videoUrl,
+  ])
+
   async function handleSubmit() {
+    if (validationMessage) {
+      setErrorMessage(validationMessage)
+      return
+    }
+
     try {
       setIsSubmitting(true)
       setErrorMessage(null)
@@ -171,11 +284,11 @@ export default function SellerPublishPage() {
           videoUrl: videoForm.videoUrl,
           videoDurationSec: videoForm.videoDurationSec ? Number(videoForm.videoDurationSec) : undefined,
           videoCoverTimestampMs: videoForm.videoCoverTimestampMs ? Number(videoForm.videoCoverTimestampMs) : undefined,
-          disableDuet: videoForm.disableDuet,
-          disableComment: videoForm.disableComment,
-          disableStitch: videoForm.disableStitch,
-          brandContentToggle: videoForm.brandContentToggle,
-          brandOrganicToggle: videoForm.brandOrganicToggle,
+          disableDuet: !videoForm.allowDuet,
+          disableComment: !videoForm.allowComment,
+          disableStitch: !videoForm.allowStitch,
+          brandContentToggle: videoForm.discloseCommercialContent ? videoForm.brandContentToggle : false,
+          brandOrganicToggle: videoForm.discloseCommercialContent ? videoForm.brandOrganicToggle : false,
           isAigc: videoForm.isAigc,
         })
       } else {
@@ -183,15 +296,12 @@ export default function SellerPublishPage() {
           title: photoForm.title || undefined,
           description: photoForm.description || undefined,
           privacyLevel,
-          photoImages: photoForm.photoImages
-            .split(/\r?\n/)
-            .map((url) => url.trim())
-            .filter(Boolean),
+          photoImages: activePhotoUrls,
           photoCoverIndex: photoForm.photoCoverIndex ? Number(photoForm.photoCoverIndex) : 0,
-          disableComment: photoForm.disableComment,
+          disableComment: !photoForm.allowComment,
           autoAddMusic: photoForm.autoAddMusic,
-          brandContentToggle: photoForm.brandContentToggle,
-          brandOrganicToggle: photoForm.brandOrganicToggle,
+          brandContentToggle: photoForm.discloseCommercialContent ? photoForm.brandContentToggle : false,
+          brandOrganicToggle: photoForm.discloseCommercialContent ? photoForm.brandOrganicToggle : false,
         })
       }
 
@@ -205,7 +315,7 @@ export default function SellerPublishPage() {
     }
   }
 
-  const canSubmit = Boolean(creatorInfo && privacyLevel && !isLoadingCreatorInfo)
+  const canSubmit = Boolean(creatorInfo && !validationMessage && !isLoadingCreatorInfo)
   const currentStatus = latestStatus?.status.status || latestPublish?.post.status || null
 
   return (
@@ -232,6 +342,24 @@ export default function SellerPublishPage() {
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Publish request created</AlertTitle>
           <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {validationMessage ? (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Action required before publishing</AlertTitle>
+          <AlertDescription>{validationMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {isUnauditedClient ? (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Unaudited TikTok app restrictions</AlertTitle>
+          <AlertDescription>
+            Direct Post is currently restricted to SELF_ONLY privacy. The creator account must also be private at posting time.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -266,7 +394,14 @@ export default function SellerPublishPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {creatorInfo?.creator.privacyLevelOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
+                      <SelectItem
+                        key={option}
+                        value={option}
+                        disabled={
+                          (isUnauditedClient && option !== "SELF_ONLY") ||
+                          (brandContentToggle && option === "SELF_ONLY")
+                        }
+                      >
                         {option}
                       </SelectItem>
                     ))}
@@ -325,27 +460,30 @@ export default function SellerPublishPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="video-comments">Disable comments</Label>
+                    <Label htmlFor="video-comments">Allow comments</Label>
                     <Switch
                       id="video-comments"
-                      checked={videoForm.disableComment}
-                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, disableComment: Boolean(checked) }))}
+                      checked={videoForm.allowComment}
+                      disabled={Boolean(creatorInfo?.creator.commentDisabled)}
+                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, allowComment: Boolean(checked) }))}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="video-duet">Disable duet</Label>
+                    <Label htmlFor="video-duet">Allow duet</Label>
                     <Switch
                       id="video-duet"
-                      checked={videoForm.disableDuet}
-                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, disableDuet: Boolean(checked) }))}
+                      checked={videoForm.allowDuet}
+                      disabled={Boolean(creatorInfo?.creator.duetDisabled)}
+                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, allowDuet: Boolean(checked) }))}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="video-stitch">Disable stitch</Label>
+                    <Label htmlFor="video-stitch">Allow stitch</Label>
                     <Switch
                       id="video-stitch"
-                      checked={videoForm.disableStitch}
-                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, disableStitch: Boolean(checked) }))}
+                      checked={videoForm.allowStitch}
+                      disabled={Boolean(creatorInfo?.creator.stitchDisabled)}
+                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, allowStitch: Boolean(checked) }))}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
@@ -356,23 +494,68 @@ export default function SellerPublishPage() {
                       onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, isAigc: Boolean(checked) }))}
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="video-brand-content">Paid partnership</Label>
+                  <div className="flex items-center justify-between rounded-lg border p-3 md:col-span-2">
+                    <Label htmlFor="video-commercial">Commercial content disclosure</Label>
                     <Switch
-                      id="video-brand-content"
-                      checked={videoForm.brandContentToggle}
-                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, brandContentToggle: Boolean(checked) }))}
+                      id="video-commercial"
+                      checked={videoForm.discloseCommercialContent}
+                      onCheckedChange={(checked) =>
+                        setVideoForm((current) => ({
+                          ...current,
+                          discloseCommercialContent: Boolean(checked),
+                          brandContentToggle: Boolean(checked) ? current.brandContentToggle : false,
+                          brandOrganicToggle: Boolean(checked) ? current.brandOrganicToggle : false,
+                        }))
+                      }
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="video-brand-organic">Promotes creator business</Label>
-                    <Switch
-                      id="video-brand-organic"
-                      checked={videoForm.brandOrganicToggle}
-                      onCheckedChange={(checked) => setVideoForm((current) => ({ ...current, brandOrganicToggle: Boolean(checked) }))}
-                    />
+
+                  {videoForm.discloseCommercialContent ? (
+                    <>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <Label htmlFor="video-brand-organic">Your brand</Label>
+                        <Switch
+                          id="video-brand-organic"
+                          checked={videoForm.brandOrganicToggle}
+                          onCheckedChange={(checked) =>
+                            setVideoForm((current) => ({ ...current, brandOrganicToggle: Boolean(checked) }))
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <Label htmlFor="video-brand-content">Branded content</Label>
+                        <Switch
+                          id="video-brand-content"
+                          checked={videoForm.brandContentToggle}
+                          onCheckedChange={(checked) => {
+                            const next = Boolean(checked)
+                            setVideoForm((current) => ({ ...current, brandContentToggle: next }))
+                            if (next && privacyLevel === "SELF_ONLY") {
+                              const nextPrivacy =
+                                creatorInfo?.creator.privacyLevelOptions.find((option) => option !== "SELF_ONLY") || ""
+                              setPrivacyLevel(nextPrivacy)
+                            }
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  <div className="rounded-lg border p-3 md:col-span-2">
+                    <p className="text-sm text-muted-foreground">
+                      Do not add logos, watermarks, links, or promotional overlays in image/video content.
+                    </p>
                   </div>
                 </div>
+
+                {videoForm.videoUrl.trim() ? (
+                  <div className="rounded-lg border p-3 text-sm">
+                    <p className="mb-2 font-medium">Preview</p>
+                    <a className="text-primary underline" href={videoForm.videoUrl.trim()} target="_blank" rel="noreferrer">
+                      {videoForm.videoUrl.trim()}
+                    </a>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-4">
@@ -423,11 +606,12 @@ export default function SellerPublishPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="photo-comments">Disable comments</Label>
+                    <Label htmlFor="photo-comments">Allow comments</Label>
                     <Switch
                       id="photo-comments"
-                      checked={photoForm.disableComment}
-                      onCheckedChange={(checked) => setPhotoForm((current) => ({ ...current, disableComment: Boolean(checked) }))}
+                      checked={photoForm.allowComment}
+                      disabled={Boolean(creatorInfo?.creator.commentDisabled)}
+                      onCheckedChange={(checked) => setPhotoForm((current) => ({ ...current, allowComment: Boolean(checked) }))}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
@@ -438,25 +622,91 @@ export default function SellerPublishPage() {
                       onCheckedChange={(checked) => setPhotoForm((current) => ({ ...current, autoAddMusic: Boolean(checked) }))}
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="photo-brand-content">Paid partnership</Label>
+                  <div className="flex items-center justify-between rounded-lg border p-3 md:col-span-2">
+                    <Label htmlFor="photo-commercial">Commercial content disclosure</Label>
                     <Switch
-                      id="photo-brand-content"
-                      checked={photoForm.brandContentToggle}
-                      onCheckedChange={(checked) => setPhotoForm((current) => ({ ...current, brandContentToggle: Boolean(checked) }))}
+                      id="photo-commercial"
+                      checked={photoForm.discloseCommercialContent}
+                      onCheckedChange={(checked) =>
+                        setPhotoForm((current) => ({
+                          ...current,
+                          discloseCommercialContent: Boolean(checked),
+                          brandContentToggle: Boolean(checked) ? current.brandContentToggle : false,
+                          brandOrganicToggle: Boolean(checked) ? current.brandOrganicToggle : false,
+                        }))
+                      }
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <Label htmlFor="photo-brand-organic">Promotes creator business</Label>
-                    <Switch
-                      id="photo-brand-organic"
-                      checked={photoForm.brandOrganicToggle}
-                      onCheckedChange={(checked) => setPhotoForm((current) => ({ ...current, brandOrganicToggle: Boolean(checked) }))}
-                    />
+
+                  {photoForm.discloseCommercialContent ? (
+                    <>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <Label htmlFor="photo-brand-organic">Your brand</Label>
+                        <Switch
+                          id="photo-brand-organic"
+                          checked={photoForm.brandOrganicToggle}
+                          onCheckedChange={(checked) =>
+                            setPhotoForm((current) => ({ ...current, brandOrganicToggle: Boolean(checked) }))
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <Label htmlFor="photo-brand-content">Branded content</Label>
+                        <Switch
+                          id="photo-brand-content"
+                          checked={photoForm.brandContentToggle}
+                          onCheckedChange={(checked) => {
+                            const next = Boolean(checked)
+                            setPhotoForm((current) => ({ ...current, brandContentToggle: next }))
+                            if (next && privacyLevel === "SELF_ONLY") {
+                              const nextPrivacy =
+                                creatorInfo?.creator.privacyLevelOptions.find((option) => option !== "SELF_ONLY") || ""
+                              setPrivacyLevel(nextPrivacy)
+                            }
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : null}
+
+                  <div className="rounded-lg border p-3 md:col-span-2">
+                    <p className="text-sm text-muted-foreground">
+                      Do not add logos, watermarks, links, or promotional overlays in image/video content.
+                    </p>
                   </div>
                 </div>
+
+                {activePhotoUrls.length ? (
+                  <div className="rounded-lg border p-3 text-sm">
+                    <p className="mb-2 font-medium">Preview</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {activePhotoUrls.slice(0, 6).map((url) => (
+                        <img
+                          key={url}
+                          src={url}
+                          alt="To-be-posted TikTok media"
+                          className="h-28 w-full rounded-md border object-cover"
+                          loading="lazy"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
+
+            <div className="flex items-start gap-3 rounded-lg border p-3">
+              <input
+                id="posting-consent"
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(event) => setConsentChecked(event.target.checked)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="posting-consent" className="text-sm leading-relaxed">
+                {consentText}
+              </Label>
+            </div>
 
             <Button onClick={() => void handleSubmit()} disabled={!canSubmit || isSubmitting} className="w-full sm:w-auto">
               {isSubmitting ? "Submitting to TikTok..." : `Post ${mediaType.toLowerCase()} to TikTok`}
@@ -490,6 +740,16 @@ export default function SellerPublishPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Max video duration</span>
                     <span className="font-medium">{creatorInfo.creator.maxVideoPostDurationSec != null ? `${creatorInfo.creator.maxVideoPostDurationSec}s` : "Unavailable"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">TikTok app audit</span>
+                    <span className="font-medium">{creatorInfo.account.isAudited ? "Audited" : "Unaudited"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Posting availability</span>
+                    <span className="max-w-[14rem] text-right font-medium break-words">
+                      {creatorInfo.creator.canPost ? "Allowed" : creatorInfo.creator.cannotPostReason || "Blocked temporarily"}
+                    </span>
                   </div>
                   <div className="space-y-2">
                     <p className="text-muted-foreground">Privacy options</p>

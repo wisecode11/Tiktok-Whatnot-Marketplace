@@ -6,6 +6,7 @@ const TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/cre
 const TIKTOK_VIDEO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
 const TIKTOK_PHOTO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";
 const TIKTOK_POST_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
+const TIKTOK_DIRECT_POST_AUDITED = String(process.env.TIKTOK_DIRECT_POST_AUDITED || "false").toLowerCase() === "true";
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -185,6 +186,7 @@ async function postTikTokJson(url, accessToken, body = {}) {
     const message = apiError
       ? apiError.message
       : payload.error_description || payload.message || "TikTok request failed.";
+    console.error("[TikTok API Error]", JSON.stringify({ url, httpStatus: response.status, errorCode: apiError && apiError.code, message }, null, 2));
     throw createHttpError(response.status || 502, message, apiError ? apiError.details : payload);
   }
 
@@ -227,6 +229,12 @@ function mapCreatorInfo(creatorPayload, account) {
       duetDisabled: Boolean(creator.duet_disabled),
       stitchDisabled: Boolean(creator.stitch_disabled),
       maxVideoPostDurationSec: toNullableNumber(creator.max_video_post_duration_sec),
+      canPost: typeof creator.can_post === "boolean" ? creator.can_post : true,
+      cannotPostReason:
+        creator.cannot_post_reason ||
+        creator.cannot_post_reason_detail ||
+        creator.posting_restriction_reason ||
+        null,
     },
     account: {
       platform: account.platform,
@@ -234,6 +242,7 @@ function mapCreatorInfo(creatorPayload, account) {
       externalId: account.account_external_id || null,
       scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
       expiresAt: account.token_expires_at || null,
+      isAudited: TIKTOK_DIRECT_POST_AUDITED,
     },
   };
 }
@@ -258,6 +267,81 @@ function ensurePostingScope(accountScopes, scope) {
   }
 }
 
+function ensureHttpsUrl(value, label) {
+  let parsed;
+
+  try {
+    parsed = new URL(String(value || ""));
+  } catch (_error) {
+    throw createHttpError(400, `${label} must be a valid URL.`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw createHttpError(400, `${label} must use https://`);
+  }
+
+  return parsed.toString();
+}
+
+async function verifyMediaUrlReachable(url, label) {
+  try {
+    const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
+
+    if (response.status === 404) {
+      throw createHttpError(
+        400,
+        `${label} returned 404 Not Found. The file does not exist at that URL. Please verify the path and try again.`,
+      );
+    }
+
+    if (!response.ok) {
+      throw createHttpError(
+        400,
+        `${label} is not publicly reachable (HTTP ${response.status}). TikTok must be able to download the file.`,
+      );
+    }
+  } catch (error) {
+    if (error.status) {
+      throw error;
+    }
+
+    throw createHttpError(
+      400,
+      `${label} could not be reached: ${error.message}. Ensure the URL is publicly accessible.`,
+    );
+  }
+}
+
+function ensureUnauditedPrivacyRestrictions(privacyLevel) {
+  if (!TIKTOK_DIRECT_POST_AUDITED && privacyLevel !== "SELF_ONLY") {
+    throw createHttpError(
+      422,
+      "This TikTok app is currently unaudited. Direct Post is restricted to SELF_ONLY privacy until the app audit is approved.",
+      {
+        guidance: "Set privacy to SELF_ONLY and ensure the TikTok account is private before posting.",
+      },
+    );
+  }
+}
+
+function ensureCommercialPrivacyRules({ privacyLevel, brandContentToggle }) {
+  if (brandContentToggle && privacyLevel === "SELF_ONLY") {
+    throw createHttpError(
+      422,
+      "Branded content visibility cannot be SELF_ONLY. Choose PUBLIC_TO_EVERYONE or MUTUAL_FOLLOW_FRIENDS.",
+    );
+  }
+}
+
+function ensureCreatorCanPost(creatorInfo) {
+  if (creatorInfo && creatorInfo.creator && creatorInfo.creator.canPost === false) {
+    throw createHttpError(
+      429,
+      creatorInfo.creator.cannotPostReason || "TikTok temporarily blocked posting for this creator. Please try again later.",
+    );
+  }
+}
+
 async function getTikTokCreatorInfo({ clerkUserId }) {
   const { account } = await getConnectedTikTokAccount(clerkUserId);
 
@@ -273,6 +357,8 @@ async function getTikTokCreatorInfo({ clerkUserId }) {
         duetDisabled: false,
         stitchDisabled: false,
         maxVideoPostDurationSec: null,
+        canPost: false,
+        cannotPostReason: "Connect TikTok to load creator posting permissions.",
       },
       account: {
         platform: "tiktok",
@@ -280,6 +366,7 @@ async function getTikTokCreatorInfo({ clerkUserId }) {
         externalId: null,
         scopes: null,
         expiresAt: null,
+        isAudited: TIKTOK_DIRECT_POST_AUDITED,
       },
     };
   }
@@ -364,6 +451,10 @@ async function publishTikTokVideo({
     throw createHttpError(400, "videoUrl is required.");
   }
 
+  if (toNullableNumber(videoDurationSec) == null) {
+    throw createHttpError(400, "videoDurationSec is required to validate TikTok duration limits.");
+  }
+
   const { user, account } = await getConnectedTikTokAccount(clerkUserId);
 
   if (!account || !account.access_token_encrypted) {
@@ -372,24 +463,44 @@ async function publishTikTokVideo({
 
   const accountScopes = account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : "";
   ensurePostingScope(accountScopes, "video.publish");
+  ensureUnauditedPrivacyRestrictions(privacyLevel);
+  ensureCommercialPrivacyRules({ privacyLevel, brandContentToggle });
 
   const creatorInfo = await getTikTokCreatorInfo({ clerkUserId });
   ensureCreatorInfoPermissions(creatorInfo, privacyLevel);
+  ensureCreatorCanPost(creatorInfo);
+
+  if (
+    creatorInfo.creator.maxVideoPostDurationSec != null &&
+    toNullableNumber(videoDurationSec) != null &&
+    Number(videoDurationSec) > creatorInfo.creator.maxVideoPostDurationSec
+  ) {
+    throw createHttpError(
+      422,
+      `Video duration exceeds TikTok limit for this account (${creatorInfo.creator.maxVideoPostDurationSec}s).`,
+    );
+  }
+
+  const normalizedVideoUrl = ensureHttpsUrl(videoUrl, "videoUrl");
+  await verifyMediaUrlReachable(normalizedVideoUrl, "videoUrl");
+  const effectiveDisableComment = creatorInfo.creator.commentDisabled ? true : Boolean(disableComment);
+  const effectiveDisableDuet = creatorInfo.creator.duetDisabled ? true : Boolean(disableDuet);
+  const effectiveDisableStitch = creatorInfo.creator.stitchDisabled ? true : Boolean(disableStitch);
 
   const requestBody = {
     post_info: {
       title: title || undefined,
       privacy_level: privacyLevel,
-      disable_duet: Boolean(disableDuet),
-      disable_comment: Boolean(disableComment),
-      disable_stitch: Boolean(disableStitch),
+      disable_duet: effectiveDisableDuet,
+      disable_comment: effectiveDisableComment,
+      disable_stitch: effectiveDisableStitch,
       brand_content_toggle: Boolean(brandContentToggle),
       brand_organic_toggle: Boolean(brandOrganicToggle),
       is_aigc: Boolean(isAigc),
     },
     source_info: {
       source: "PULL_FROM_URL",
-      video_url: videoUrl,
+      video_url: normalizedVideoUrl,
     },
   };
 
@@ -428,7 +539,7 @@ async function publishTikTokVideo({
     postMode: "DIRECT_POST",
     sourceType: "PULL_FROM_URL",
     publishId,
-    mediaUrls: [videoUrl],
+    mediaUrls: [normalizedVideoUrl],
     title,
     description: null,
     privacyLevel,
@@ -457,7 +568,7 @@ async function publishTikTokPhoto({
   brandOrganicToggle = false,
 }) {
   const normalizedImages = Array.isArray(photoImages)
-    ? photoImages.map((url) => String(url || "").trim()).filter(Boolean)
+    ? photoImages.map((url) => String(url || "").trim()).filter(Boolean).map((url) => ensureHttpsUrl(url, "photoImages"))
     : [];
 
   if (!normalizedImages.length) {
@@ -467,6 +578,8 @@ async function publishTikTokPhoto({
   if (normalizedImages.length > 35) {
     throw createHttpError(400, "photoImages supports up to 35 URLs.");
   }
+
+  await Promise.all(normalizedImages.map((url) => verifyMediaUrlReachable(url, url)));
 
   const { user, account } = await getConnectedTikTokAccount(clerkUserId);
 
@@ -480,8 +593,13 @@ async function publishTikTokPhoto({
     throw createHttpError(403, "TikTok scope 'video.publish' or 'video.upload' is required for photo posting.");
   }
 
+  ensureUnauditedPrivacyRestrictions(privacyLevel);
+  ensureCommercialPrivacyRules({ privacyLevel, brandContentToggle });
+
   const creatorInfo = await getTikTokCreatorInfo({ clerkUserId });
   ensureCreatorInfoPermissions(creatorInfo, privacyLevel);
+  ensureCreatorCanPost(creatorInfo);
+  const effectiveDisableComment = creatorInfo.creator.commentDisabled ? true : Boolean(disableComment);
 
   const requestBody = {
     media_type: "PHOTO",
@@ -490,7 +608,7 @@ async function publishTikTokPhoto({
       title: title || undefined,
       description: description || undefined,
       privacy_level: privacyLevel,
-      disable_comment: Boolean(disableComment),
+      disable_comment: effectiveDisableComment,
       auto_add_music: Boolean(autoAddMusic),
       brand_content_toggle: Boolean(brandContentToggle),
       brand_organic_toggle: Boolean(brandOrganicToggle),
