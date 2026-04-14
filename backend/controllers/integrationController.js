@@ -7,6 +7,12 @@ const {
   getTikTokVideoAnalytics,
   handleTikTokCallback,
 } = require("../services/integrationService");
+const {
+  getTikTokCreatorInfo,
+  getTikTokPostStatus,
+  publishTikTokPhoto,
+  publishTikTokVideo,
+} = require("../services/tiktokPostingService");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -73,6 +79,52 @@ async function getTikTokVideoAnalyticsData(req, res) {
   }
 }
 
+async function getTikTokCreatorInfoData(req, res) {
+  try {
+    const result = await getTikTokCreatorInfo({ clerkUserId: req.auth.userId });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function createTikTokVideoPost(req, res) {
+  try {
+    const result = await publishTikTokVideo({
+      clerkUserId: req.auth.userId,
+      ...(req.body || {}),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function createTikTokPhotoPost(req, res) {
+  try {
+    const result = await publishTikTokPhoto({
+      clerkUserId: req.auth.userId,
+      ...(req.body || {}),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getTikTokPostStatusData(req, res) {
+  try {
+    const publishId = req.body && req.body.publishId ? req.body.publishId : req.query.publishId;
+    const result = await getTikTokPostStatus({
+      clerkUserId: req.auth.userId,
+      publishId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function removeConnection(req, res) {
   try {
     const result = await disconnectPlatform({
@@ -99,6 +151,10 @@ async function tiktokCallback(req, res) {
 
 module.exports = {
   checkStripeStatus,
+  createTikTokPhotoPost,
+  createTikTokVideoPost,
+  getTikTokCreatorInfoData,
+  getTikTokPostStatusData,
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
   listConnections,

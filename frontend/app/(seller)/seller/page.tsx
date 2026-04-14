@@ -67,6 +67,12 @@ const quickActions = [
     icon: LayoutDashboard,
   },
   {
+    title: "Publish to TikTok",
+    description: "Direct-post verified media URLs to TikTok.",
+    href: "/seller/publish",
+    icon: Video,
+  },
+  {
     title: "Open Launch Pad",
     description: "Manage platform connections and reconnect accounts.",
     href: "/launch-pad?role=streamer",
