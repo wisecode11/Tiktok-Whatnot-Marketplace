@@ -10,6 +10,7 @@ import {
   CalendarDays,
   BadgeCheck,
   MessageSquare,
+  Sparkles,
 } from "lucide-react"
 
 const navigation = [
@@ -20,7 +21,12 @@ const navigation = [
       { title: "Bookings", href: "/moderator/bookings", icon: CalendarDays, badge: 4 },
       { title: "Team Chat", href: "/moderator/chat", icon: MessageSquare },
       { title: "Availability", href: "/moderator/availability", icon: CalendarClock },
-    //   { title: "Settings", href: "/moderator/settings", icon: Settings },
+    ],
+  },
+  {
+    label: "AI Features",
+    items: [
+      { title: "AI Features", href: "/moderator/ai-features", icon: Sparkles },
     ],
   },
 ]
