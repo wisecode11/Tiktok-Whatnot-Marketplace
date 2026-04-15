@@ -283,7 +283,7 @@ function ensureHttpsUrl(value, label) {
   return parsed.toString();
 }
 
-async function verifyMediaUrlReachable(url, label) {
+async function verifyMediaUrlReachable(url, label, mediaType) {
   try {
     const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
 
@@ -299,6 +299,28 @@ async function verifyMediaUrlReachable(url, label) {
         400,
         `${label} is not publicly reachable (HTTP ${response.status}). TikTok must be able to download the file.`,
       );
+    }
+
+    const contentLength = Number(response.headers.get("content-length") || 0);
+
+    if (Number.isFinite(contentLength) && contentLength <= 0) {
+      throw createHttpError(400, `${label} is empty (content-length is 0). Use a real media file URL.`);
+    }
+
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+
+    if (mediaType === "PHOTO") {
+      const isSupportedPhotoType =
+        contentType.startsWith("image/jpeg") ||
+        contentType.startsWith("image/jpg") ||
+        contentType.startsWith("image/webp");
+
+      if (!isSupportedPhotoType) {
+        throw createHttpError(
+          400,
+          `${label} has unsupported content-type '${contentType || "unknown"}'. For TikTok photo post use JPEG/JPG/WEBP URL.`,
+        );
+      }
     }
   } catch (error) {
     if (error.status) {
@@ -482,7 +504,7 @@ async function publishTikTokVideo({
   }
 
   const normalizedVideoUrl = ensureHttpsUrl(videoUrl, "videoUrl");
-  await verifyMediaUrlReachable(normalizedVideoUrl, "videoUrl");
+  await verifyMediaUrlReachable(normalizedVideoUrl, "videoUrl", "VIDEO");
   const effectiveDisableComment = creatorInfo.creator.commentDisabled ? true : Boolean(disableComment);
   const effectiveDisableDuet = creatorInfo.creator.duetDisabled ? true : Boolean(disableDuet);
   const effectiveDisableStitch = creatorInfo.creator.stitchDisabled ? true : Boolean(disableStitch);
@@ -579,7 +601,7 @@ async function publishTikTokPhoto({
     throw createHttpError(400, "photoImages supports up to 35 URLs.");
   }
 
-  await Promise.all(normalizedImages.map((url) => verifyMediaUrlReachable(url, url)));
+  await Promise.all(normalizedImages.map((url) => verifyMediaUrlReachable(url, url, "PHOTO")));
 
   const { user, account } = await getConnectedTikTokAccount(clerkUserId);
 

@@ -247,6 +247,10 @@ export default function SellerPublishPage() {
       return "All photo URLs must use https://"
     }
 
+    if (activePhotoUrls.some((url) => !/\.(jpe?g|webp)(\?|#|$)/i.test(url))) {
+      return "For TikTok photo posts, use JPEG/JPG/WEBP image URLs (PNG is commonly rejected with file_format_check_failed)."
+    }
+
     return null
   }, [
     activePhotoUrls,
