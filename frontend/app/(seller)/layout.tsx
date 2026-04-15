@@ -17,6 +17,7 @@ import {
   Rocket,
   HelpCircle,
   Video,
+  Sparkles,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -35,6 +36,12 @@ const sellerNavigation = [
     items: [
       { title: "Find Moderators", href: "/seller/moderators", icon: UserSearch, requiresSubscription: true },
       { title: "Hired Moderators", href: "/seller/hired-moderators", icon: Users, requiresSubscription: true },
+    ],
+  },
+  {
+    label: "AI Features",
+    items: [
+      { title: "AI Features", href: "/seller/ai-features", icon: Sparkles, requiresSubscription: true },
     ],
   },
   {
