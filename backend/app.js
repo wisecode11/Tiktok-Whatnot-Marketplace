@@ -12,6 +12,7 @@ const chatRoutes = require("./routes/chatRoutes");
 const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
 const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
+const aiRoutes = require("./routes/aiRoutes");
 const { initializeChatSocket } = require("./socket/chatSocket");
 const models = require("./models");
 
@@ -50,6 +51,7 @@ app.use("/api/booking-payments", bookingPaymentRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/moderator-profile", moderatorProfileRoutes);
+app.use("/api/ai", aiRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, models: Object.keys(models).length });
@@ -57,7 +59,7 @@ app.get("/health", (req, res) => {
 
 async function start() {
   await connectDB(process.env.MONGODB_URI || "mongodb://localhost:27017/sellerhub");
-  const port = process.env.PORT || 5000;
+  const port = process.env.PORT || 5001;
   const server = http.createServer(app);
   initializeChatSocket({ server, allowedOrigins });
   server.listen(port, () => console.log(`Server running on ${port}`));
