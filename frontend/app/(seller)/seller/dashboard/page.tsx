@@ -33,9 +33,11 @@ import {
 import {
   AuthApiError,
   getConnectedAccounts,
+  getWhatnotInventorySnapshot,
   getTikTokProfile,
   waitForSessionToken,
   type ConnectedAccountResponse,
+  type WhatnotInventorySnapshotResponse,
   type TikTokProfileResponse,
 } from "@/lib/auth"
 
@@ -82,6 +84,7 @@ function hasTikTokScope(scopes: string | null | undefined, requiredScope: string
 export default function SellerDashboard() {
   const { getToken, isLoaded } = useAuth()
   const [tiktokProfile, setTikTokProfile] = useState<TikTokProfileResponse | null>(null)
+  const [whatnotSnapshot, setWhatnotSnapshot] = useState<WhatnotInventorySnapshotResponse | null>(null)
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccountResponse["accounts"]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -99,9 +102,10 @@ export default function SellerDashboard() {
         setErrorMessage(null)
 
         const token = await waitForSessionToken(getToken)
-        const [profileResult, accountsResult] = await Promise.allSettled([
+        const [profileResult, accountsResult, whatnotResult] = await Promise.allSettled([
           getTikTokProfile(token),
           getConnectedAccounts(token),
+          getWhatnotInventorySnapshot(token, { first: 5 }),
         ])
 
         if (!isCancelled) {
@@ -117,7 +121,17 @@ export default function SellerDashboard() {
             setConnectedAccounts([])
           }
 
-          if (profileResult.status === "rejected" && accountsResult.status === "rejected") {
+          if (whatnotResult.status === "fulfilled") {
+            setWhatnotSnapshot(whatnotResult.value)
+          } else {
+            setWhatnotSnapshot(null)
+          }
+
+          if (
+            profileResult.status === "rejected" &&
+            accountsResult.status === "rejected" &&
+            whatnotResult.status === "rejected"
+          ) {
             throw profileResult.reason
           }
         }
@@ -145,6 +159,7 @@ export default function SellerDashboard() {
       isCancelled = true
     }
   }, [getToken, isLoaded])
+
 
   const platformAccounts = useMemo(() => {
     return ["tiktok", "whatnot"].map((platformId) => {
@@ -259,15 +274,23 @@ export default function SellerDashboard() {
   }, [hasStatsScope, isTikTokConnected, tiktokProfile])
 
   const commerceStats = useMemo(() => {
+    const whatnotProductsCount = whatnotSnapshot?.data?.products?.edges?.length ?? null
+    const whatnotProductsValue =
+      whatnotProductsCount != null
+        ? `${whatnotProductsCount.toLocaleString()} items`
+        : whatnotSnapshot?.connected
+          ? "Not available"
+          : "Account not connected"
+
     const value = isTikTokConnected ? "Not available" : "Account not connected"
 
     return [
-      { title: "Orders", value, icon: PackageSearch },
+      { title: "Whatnot Products", value: whatnotProductsValue, icon: PackageSearch },
       { title: "Revenue", value, icon: CircleDollarSign },
       { title: "Avg Order Value", value, icon: DollarSign },
       { title: "Stream Duration", value, icon: Clock },
     ]
-  }, [isTikTokConnected])
+  }, [isTikTokConnected, whatnotSnapshot])
 
   return (
     <div className="space-y-6">
@@ -493,14 +516,16 @@ export default function SellerDashboard() {
                   <PlugZap className="h-4 w-4 text-primary" />
                   Live from current APIs
                 </div>
-                <p className="mt-2">TikTok profile, account identity, followers, following, likes, and public video count.</p>
+                <p className="mt-2">TikTok profile, account identity, followers, following, likes, and public video count. Whatnot inventory now uses the official GraphQL endpoint first.</p>
               </div>
               <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2 font-medium text-foreground">
                   <Radio className="h-4 w-4 text-primary" />
-                  Not available from this API
+                  Whatnot fallback policy
                 </div>
-                <p className="mt-2">Orders, revenue, average order value, stream duration, schedule data, and activity feed are not provided by the connected TikTok user info endpoint.</p>
+                <p className="mt-2">
+                  Current source: {whatnotSnapshot?.source || "none"}. Fallback to structured mock data is only used for Whatnot access-denied or empty responses. Technical errors fail fast for debugging.
+                </p>
               </div>
             </div>
           </CardContent>
