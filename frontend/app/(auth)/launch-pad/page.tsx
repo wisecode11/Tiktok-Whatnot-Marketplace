@@ -53,7 +53,6 @@ const streamerPlatforms: Platform[] = [
     description: "Connect your TikTok Shop seller account",
     connected: false,
     connecting: false,
-    required: true,
   },
   {
     id: "whatnot",
@@ -91,6 +90,7 @@ function LaunchPadContent() {
   const [feedbackMessage, setFeedbackMessage] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [autoConnectTriggered, setAutoConnectTriggered] = useState(false)
+  const isStreamer = role === "streamer"
 
   useEffect(() => {
     const platform = searchParams.get("platform")
@@ -138,7 +138,8 @@ function LaunchPadContent() {
     }
 
     if (status === "connected") {
-      setFeedbackMessage(`${platform === "tiktok" ? "TikTok Shop" : platform} connected successfully.`)
+      const label = platform === "tiktok" ? "TikTok Shop" : platform === "whatnot" ? "Whatnot" : platform
+      setFeedbackMessage(`${label} connected successfully.`)
       setErrorMessage("")
       return
     }
@@ -203,7 +204,9 @@ function LaunchPadContent() {
   }, [getToken, isLoaded])
 
   const connectedCount = platforms.filter((p) => p.connected).length
-  const hasRequiredPlatform = platforms.some((p) => p.required && p.connected)
+  const hasRequiredPlatform = isStreamer
+    ? platforms.some((p) => p.connected)
+    : platforms.some((p) => p.required && p.connected)
   const progress = (connectedCount / platforms.length) * 100
 
   const handleConnect = async (platformId: string) => {
@@ -217,7 +220,7 @@ function LaunchPadContent() {
     setErrorMessage("")
 
     try {
-      if (platformId === "tiktok" || platformId === "stripe") {
+      if (platformId === "tiktok" || platformId === "stripe" || platformId === "whatnot") {
         const token = await waitForSessionToken(getToken)
         const result = await startPlatformConnection(token, platformId, role as AppRole)
         window.location.href = result.authorizationUrl
@@ -271,12 +274,18 @@ function LaunchPadContent() {
     setFeedbackMessage("")
 
     try {
-      if (platformId === "tiktok" || platformId === "stripe") {
+      if (platformId === "tiktok" || platformId === "stripe" || platformId === "whatnot") {
         const token = await waitForSessionToken(getToken)
         await disconnectPlatform(token, platformId)
       }
 
-      const label = platformId === "tiktok" ? "TikTok Shop" : platformId === "stripe" ? "Stripe Payments" : platformId
+      const label = platformId === "tiktok"
+        ? "TikTok Shop"
+        : platformId === "stripe"
+          ? "Stripe Payments"
+          : platformId === "whatnot"
+            ? "Whatnot"
+            : platformId
 
       setPlatforms((prev) =>
         prev.map((p) =>
@@ -302,7 +311,6 @@ function LaunchPadContent() {
     }
   }
 
-  const isStreamer = role === "streamer"
   const Icon = isStreamer ? Video : Users
   const title = isStreamer ? "Streamer" : "Moderator"
   const dashboardPath = isStreamer ? "/seller" : "/moderator"
@@ -449,7 +457,7 @@ function LaunchPadContent() {
               <p className="mt-1 text-warning/80">
                 {role === "moderator"
                   ? "Please connect your Stripe account to enable payouts before launching your dashboard."
-                  : "Please connect at least TikTok Shop to continue. This is required for the core platform functionality."}
+                  : "Please connect at least one platform (TikTok Shop or Whatnot) to continue."}
               </p>
             </div>
           </CardContent>

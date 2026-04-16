@@ -101,6 +101,40 @@ export interface TikTokVideoAnalyticsResponse {
   }
 }
 
+export interface WhatnotProductEdge {
+  cursor: string | null
+  node: {
+    id: string | null
+    title: string | null
+    description: string | null
+  }
+}
+
+export interface WhatnotInventorySnapshotResponse {
+  connected: boolean
+  source: "live" | "mock" | "none"
+  fallbackReason: "access_denied" | "empty_response" | null
+  account: {
+    platform: string
+    status: string
+    username: string | null
+    externalId: string | null
+    expiresAt: string | null
+    scopes: string | null
+  } | null
+  data: {
+    products: {
+      pageInfo: {
+        hasNextPage: boolean
+        hasPreviousPage: boolean
+        startCursor: string | null
+        endCursor: string | null
+      }
+      edges: WhatnotProductEdge[]
+    }
+  }
+}
+
 export interface TikTokCreatorInfoResponse {
   connected: boolean
   creator: {
@@ -430,4 +464,19 @@ export async function getTikTokVideoAnalytics(token: string, params?: { cursor?:
   const path = query ? `/api/integrations/tiktok/video-analytics?${query}` : "/api/integrations/tiktok/video-analytics"
 
   return request<TikTokVideoAnalyticsResponse>(path, { token })
+}
+
+export async function getWhatnotInventorySnapshot(token: string, params?: { first?: number }) {
+  const search = new URLSearchParams()
+
+  if (typeof params?.first === "number") {
+    search.set("first", String(params.first))
+  }
+
+  const query = search.toString()
+  const path = query
+    ? `/api/integrations/whatnot/inventory-snapshot?${query}`
+    : "/api/integrations/whatnot/inventory-snapshot"
+
+  return request<WhatnotInventorySnapshotResponse>(path, { token })
 }

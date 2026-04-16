@@ -12,6 +12,25 @@ const TIKTOK_REVOKE_URL = "https://open.tiktokapis.com/v2/oauth/revoke/";
 const TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/";
 const TIKTOK_VIDEO_LIST_URL = "https://open.tiktokapis.com/v2/video/list/";
 const TIKTOK_VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/";
+const WHATNOT_DEFAULT_API_BASE_URL = "https://api.whatnot.com";
+const WHATNOT_DEFAULT_GRAPHQL_QUERY = `query GetProducts($first: Int!) {
+  products(first: $first) {
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
+    edges {
+      cursor
+      node {
+        id
+        title
+        description
+      }
+    }
+  }
+}`;
 const TIKTOK_BASIC_USER_INFO_FIELDS = "open_id,union_id,avatar_url";
 const TIKTOK_STATS_USER_INFO_FIELDS = "open_id,union_id,avatar_url,follower_count,following_count,likes_count,video_count";
 const TIKTOK_VIDEO_LIST_DEFAULT_FIELDS = "id,title,create_time,cover_image_url,share_url";
@@ -69,6 +88,106 @@ function getTikTokConfig() {
     scopes,
     stateSecret,
   };
+}
+
+function getWhatnotConfig() {
+  const apiBaseUrl = process.env.WHATNOT_API_BASE_URL || WHATNOT_DEFAULT_API_BASE_URL;
+  const clientId = process.env.WHATNOT_CLIENT_ID;
+  const clientSecret = process.env.WHATNOT_CLIENT_SECRET;
+  const redirectUri = process.env.WHATNOT_REDIRECT_URI || `${getBackendUrl()}/api/integrations/whatnot/callback`;
+  const scopes = process.env.WHATNOT_SCOPES || "read:inventory read:orders";
+  const stateSecret = getWhatnotStateSecret();
+
+  if (!clientId || !clientSecret) {
+    const missing = [
+      !clientId ? "WHATNOT_CLIENT_ID" : null,
+      !clientSecret ? "WHATNOT_CLIENT_SECRET" : null,
+    ].filter(Boolean);
+    throw createHttpError(
+      500,
+      `Whatnot integration is not configured on the server. Missing: ${missing.join(", ")}.`,
+      { missingEnv: missing },
+    );
+  }
+
+  if (!stateSecret) {
+    throw createHttpError(500, "WHATNOT_STATE_SECRET or APP_ENCRYPTION_KEY is required.");
+  }
+
+  return {
+    apiBaseUrl,
+    authorizeUrl: `${apiBaseUrl}/seller-api/rest/oauth/authorize`,
+    tokenUrl: `${apiBaseUrl}/seller-api/rest/oauth/token`,
+    graphqlUrl: process.env.WHATNOT_GRAPHQL_URL || `${apiBaseUrl}/seller-api/graphql`,
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes,
+    stateSecret,
+  };
+}
+
+function getWhatnotStateSecret() {
+  const stateSecret = process.env.WHATNOT_STATE_SECRET || process.env.APP_ENCRYPTION_KEY;
+
+  if (!stateSecret) {
+    throw createHttpError(500, "WHATNOT_STATE_SECRET or APP_ENCRYPTION_KEY is required.");
+  }
+
+  return stateSecret;
+}
+
+function isEnabledFlag(value, defaultValue) {
+  if (value == null || String(value).trim() === "") {
+    return defaultValue;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function isWhatnotMockOAuthEnabled() {
+  const defaultValue = process.env.NODE_ENV !== "production";
+  return isEnabledFlag(process.env.WHATNOT_ENABLE_OAUTH_MOCK, defaultValue);
+}
+
+function isWhatnotMockTokenExchangeEnabled() {
+  const defaultValue = process.env.NODE_ENV !== "production";
+  return isEnabledFlag(process.env.WHATNOT_ENABLE_MOCK_TOKEN_EXCHANGE, defaultValue);
+}
+
+function getWhatnotMockTokenPayload() {
+  const raw = process.env.WHATNOT_MOCK_TOKEN_RESPONSE;
+  const fallback = {
+    token_type: "Bearer",
+    access_token: "wn_access_tk_test_mock_access_token",
+    refresh_token: "wn_refresh_tk_test_mock_refresh_token",
+    expires_in: 86400,
+    scope: process.env.WHATNOT_SCOPES || "read:inventory read:orders",
+  };
+
+  if (!raw) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return fallback;
+    }
+
+    return {
+      token_type: parsed.token_type || fallback.token_type,
+      access_token: parsed.access_token || fallback.access_token,
+      refresh_token: parsed.refresh_token || fallback.refresh_token,
+      expires_in: Number.isFinite(Number(parsed.expires_in))
+        ? Number(parsed.expires_in)
+        : fallback.expires_in,
+      scope: parsed.scope || fallback.scope,
+    };
+  } catch (_error) {
+    return fallback;
+  }
 }
 
 function normalizePlatform(platform) {
@@ -141,15 +260,13 @@ function createPkcePair() {
   };
 }
 
-function signState(payload) {
-  const { stateSecret } = getTikTokConfig();
+function signOAuthState(payload, stateSecret) {
   const body = toBase64Url(encryptText(JSON.stringify(payload)));
   const signature = crypto.createHmac("sha256", stateSecret).update(body).digest("hex");
   return `${body}.${signature}`;
 }
 
-function parseState(state) {
-  const { stateSecret } = getTikTokConfig();
+function parseOAuthState(state, { stateSecret, requireCodeVerifier = false }) {
   const [body, signature] = String(state || "").split(".");
 
   if (!body || !signature) {
@@ -165,7 +282,11 @@ function parseState(state) {
   const encryptedPayload = fromBase64Url(body);
   const payload = JSON.parse(decryptText(encryptedPayload));
 
-  if (!payload || !payload.clerkUserId || !payload.platform || !payload.role || !payload.timestamp || !payload.codeVerifier) {
+  if (!payload || !payload.clerkUserId || !payload.platform || !payload.role || !payload.timestamp) {
+    throw createHttpError(400, "OAuth state is incomplete.");
+  }
+
+  if (requireCodeVerifier && !payload.codeVerifier) {
     throw createHttpError(400, "OAuth state is incomplete.");
   }
 
@@ -213,6 +334,31 @@ async function fetchTikTokToken(body) {
 
   if (!response.ok || payload.error) {
     throw createHttpError(502, payload.error_description || payload.error || "TikTok token exchange failed.", payload);
+  }
+
+  return payload;
+}
+
+async function fetchWhatnotToken(body) {
+  const { tokenUrl, clientSecret } = getWhatnotConfig();
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Cache-Control": "no-cache",
+      Authorization: `Bearer ${clientSecret}`,
+    },
+    body: new URLSearchParams(body).toString(),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw createHttpError(
+      response.status || 502,
+      payload.error_description || payload.error || payload.message || "Whatnot token exchange failed.",
+      payload,
+    );
   }
 
   return payload;
@@ -293,6 +439,56 @@ function parseTikTokApiError(payload) {
   }
 
   return null;
+}
+
+function isWhatnotAccessDenied(responseStatus, payload) {
+  if (responseStatus === 401 || responseStatus === 403) {
+    return true;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const errors = Array.isArray(payload.errors) ? payload.errors : [];
+
+  return errors.some((entry) => {
+    const code = entry && entry.extensions && entry.extensions.code
+      ? String(entry.extensions.code).toLowerCase()
+      : "";
+    const message = entry && entry.message ? String(entry.message).toLowerCase() : "";
+
+    return (
+      code === "unauthenticated" ||
+      code === "forbidden" ||
+      message.includes("unauthorized") ||
+      message.includes("forbidden") ||
+      message.includes("access")
+    );
+  });
+}
+
+function getWhatnotMockInventoryData() {
+  return {
+    products: {
+      pageInfo: {
+        hasNextPage: false,
+        hasPreviousPage: false,
+        startCursor: null,
+        endCursor: null,
+      },
+      edges: [
+        {
+          cursor: "mock-cursor-1",
+          node: {
+            id: "mock-product-1",
+            title: "Mock Vintage Hoodie",
+            description: "Mock Whatnot product while API access approval is pending.",
+          },
+        },
+      ],
+    },
+  };
 }
 
 async function refreshTikTokAccessToken(account) {
@@ -596,6 +792,165 @@ async function getTikTokProfile({ clerkUserId }) {
   };
 }
 
+async function refreshWhatnotAccessToken(account) {
+  if (!account || !account.refresh_token_encrypted) {
+    throw createHttpError(401, "Whatnot refresh token is missing. Please reconnect your Whatnot account.");
+  }
+
+  const refreshToken = decryptText(account.refresh_token_encrypted);
+
+  if (!refreshToken) {
+    throw createHttpError(401, "Whatnot refresh token is unavailable. Please reconnect your Whatnot account.");
+  }
+
+  const { clientId } = getWhatnotConfig();
+  const tokenPayload = await fetchWhatnotToken({
+    client_id: clientId,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const now = new Date();
+  account.access_token_encrypted = encryptText(tokenPayload.access_token);
+  account.refresh_token_encrypted = encryptText(tokenPayload.refresh_token || refreshToken);
+  account.token_expires_at = tokenPayload.expires_in
+    ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
+    : null;
+  account.status = "connected";
+  account.updated_at = now;
+  account.metadata_json = {
+    ...(account.metadata_json || {}),
+    refreshed_at: now.toISOString(),
+    token_type: tokenPayload.token_type || "Bearer",
+  };
+
+  await account.save();
+
+  return decryptText(account.access_token_encrypted);
+}
+
+async function getValidWhatnotAccessToken(account) {
+  if (!account || !account.access_token_encrypted) {
+    throw createHttpError(404, "Whatnot account is not connected.");
+  }
+
+  const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).getTime() : null;
+  const isExpired = expiresAt ? expiresAt <= Date.now() + 60 * 1000 : false;
+
+  if (isExpired) {
+    return refreshWhatnotAccessToken(account);
+  }
+
+  return decryptText(account.access_token_encrypted);
+}
+
+async function fetchWhatnotGraphql(accessToken, query, variables = {}) {
+  const { graphqlUrl } = getWhatnotConfig();
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  return {
+    status: response.status,
+    ok: response.ok,
+    payload,
+  };
+}
+
+async function getWhatnotInventorySnapshot({ clerkUserId, first = 5 }) {
+  const user = await findLocalUser(clerkUserId);
+  const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "whatnot" });
+
+  if (!account || !account.access_token_encrypted) {
+    return {
+      connected: false,
+      source: "none",
+      fallbackReason: null,
+      account: null,
+      data: getWhatnotMockInventoryData(),
+    };
+  }
+
+  const safeFirst = Number.isFinite(Number(first))
+    ? Math.min(25, Math.max(1, Math.floor(Number(first))))
+    : 5;
+
+  let accessToken = await getValidWhatnotAccessToken(account);
+  let response = await fetchWhatnotGraphql(accessToken, WHATNOT_DEFAULT_GRAPHQL_QUERY, { first: safeFirst });
+
+  if (response.status === 401) {
+    accessToken = await refreshWhatnotAccessToken(account);
+    response = await fetchWhatnotGraphql(accessToken, WHATNOT_DEFAULT_GRAPHQL_QUERY, { first: safeFirst });
+  }
+
+  const hasEmptyData = !response.payload || typeof response.payload !== "object" || !response.payload.data;
+
+  if (!response.ok || Array.isArray(response.payload && response.payload.errors)) {
+    if (isWhatnotAccessDenied(response.status, response.payload)) {
+      return {
+        connected: true,
+        source: "mock",
+        fallbackReason: "access_denied",
+        account: {
+          platform: account.platform,
+          status: account.status,
+          username: account.account_name || null,
+          externalId: account.account_external_id || null,
+          expiresAt: account.token_expires_at || null,
+          scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
+        },
+        data: getWhatnotMockInventoryData(),
+      };
+    }
+
+    throw createHttpError(
+      response.status || 502,
+      "Whatnot GraphQL request failed.",
+      response.payload,
+    );
+  }
+
+  if (hasEmptyData) {
+    return {
+      connected: true,
+      source: "mock",
+      fallbackReason: "empty_response",
+      account: {
+        platform: account.platform,
+        status: account.status,
+        username: account.account_name || null,
+        externalId: account.account_external_id || null,
+        expiresAt: account.token_expires_at || null,
+        scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
+      },
+      data: getWhatnotMockInventoryData(),
+    };
+  }
+
+  return {
+    connected: true,
+    source: "live",
+    fallbackReason: null,
+    account: {
+      platform: account.platform,
+      status: account.status,
+      username: account.account_name || null,
+      externalId: account.account_external_id || null,
+      expiresAt: account.token_expires_at || null,
+      scopes: account.scopes_json && account.scopes_json.scope ? account.scopes_json.scope : null,
+    },
+    data: response.payload.data,
+  };
+}
+
 async function getTikTokVideoAnalytics({ clerkUserId, cursor = null, maxCount }) {
   const user = await findLocalUser(clerkUserId);
   const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
@@ -876,22 +1231,26 @@ async function createConnectionSession({ clerkUserId, role, platform }) {
     return createStripeConnectSession({ clerkUserId, role });
   }
 
+  if (normalizedPlatform === "whatnot") {
+    return createWhatnotConnectionSession({ clerkUserId, role });
+  }
+
   if (normalizedPlatform !== "tiktok") {
-    throw createHttpError(400, "Only TikTok and Stripe connections are implemented right now.");
+    throw createHttpError(400, "Only TikTok, Whatnot, and Stripe connections are implemented right now.");
   }
 
   await findLocalUser(clerkUserId);
 
   const { clientKey, redirectUri, scopes } = getTikTokConfig();
   const pkce = createPkcePair();
-  const state = signState({
+  const state = signOAuthState({
     clerkUserId,
     role,
     platform: normalizedPlatform,
     codeVerifier: pkce.verifier,
     nonce: crypto.randomBytes(12).toString("hex"),
     timestamp: Date.now(),
-  });
+  }, getTikTokConfig().stateSecret);
 
   const authorizationUrl = new URL(TIKTOK_AUTHORIZE_URL);
   authorizationUrl.searchParams.set("client_key", clientKey);
@@ -902,6 +1261,64 @@ async function createConnectionSession({ clerkUserId, role, platform }) {
   authorizationUrl.searchParams.set("code_challenge", pkce.challenge);
   authorizationUrl.searchParams.set("code_challenge_method", "S256");
   authorizationUrl.searchParams.set("disable_auto_auth", "0");
+
+  return {
+    authorizationUrl: authorizationUrl.toString(),
+  };
+}
+
+async function createWhatnotConnectionSession({ clerkUserId, role }) {
+  await findLocalUser(clerkUserId);
+
+  const allowMockOAuth = isWhatnotMockOAuthEnabled();
+  let resolvedConfig;
+
+  try {
+    resolvedConfig = getWhatnotConfig();
+  } catch (configError) {
+    if (!allowMockOAuth) {
+      throw configError;
+    }
+
+    resolvedConfig = {
+      authorizeUrl: `${getBackendUrl()}/api/integrations/whatnot/callback`,
+      clientId: "mock_client_id",
+      redirectUri: process.env.WHATNOT_REDIRECT_URI || `${getBackendUrl()}/api/integrations/whatnot/callback`,
+      scopes: process.env.WHATNOT_SCOPES || "read:inventory read:orders",
+      stateSecret: getWhatnotStateSecret(),
+      isMockOAuthStart: true,
+    };
+  }
+
+  const {
+    authorizeUrl,
+    clientId,
+    redirectUri,
+    scopes,
+    stateSecret,
+    isMockOAuthStart = false,
+  } = resolvedConfig;
+
+  const state = signOAuthState({
+    clerkUserId,
+    role,
+    platform: "whatnot",
+    nonce: crypto.randomBytes(12).toString("hex"),
+    timestamp: Date.now(),
+  }, stateSecret);
+
+  const authorizationUrl = new URL(authorizeUrl);
+  if (isMockOAuthStart) {
+    // Simulate provider approval callback to complete end-to-end OAuth handling in development.
+    authorizationUrl.searchParams.set("code", "mock_authorization_code");
+    authorizationUrl.searchParams.set("state", state);
+  } else {
+    authorizationUrl.searchParams.set("client_id", clientId);
+    authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+    authorizationUrl.searchParams.set("response_type", "code");
+    authorizationUrl.searchParams.set("state", state);
+    authorizationUrl.searchParams.set("scope", scopes);
+  }
 
   return {
     authorizationUrl: authorizationUrl.toString(),
@@ -1023,7 +1440,10 @@ async function handleTikTokCallback({ code, state, error, errorDescription }) {
   let payload;
 
   try {
-    payload = parseState(state);
+    payload = parseOAuthState(state, {
+      stateSecret: getTikTokConfig().stateSecret,
+      requireCodeVerifier: true,
+    });
   } catch (stateError) {
     return {
       redirectUrl: buildFrontendRedirect({
@@ -1112,6 +1532,139 @@ async function handleTikTokCallback({ code, state, error, errorDescription }) {
   }
 }
 
+async function handleWhatnotCallback({ code, state, error, errorDescription }) {
+  let payload;
+
+  try {
+    payload = parseOAuthState(state, {
+      stateSecret: getWhatnotStateSecret(),
+      requireCodeVerifier: false,
+    });
+  } catch (stateError) {
+    return {
+      redirectUrl: buildFrontendRedirect({
+        role: "streamer",
+        platform: "whatnot",
+        status: "error",
+        message: stateError.message,
+      }),
+    };
+  }
+
+  if (error) {
+    return {
+      redirectUrl: buildFrontendRedirect({
+        role: payload.role,
+        platform: payload.platform,
+        status: "error",
+        message: errorDescription || error,
+      }),
+    };
+  }
+
+  if (!code) {
+    return {
+      redirectUrl: buildFrontendRedirect({
+        role: payload.role,
+        platform: payload.platform,
+        status: "error",
+        message: "Missing Whatnot authorization code.",
+      }),
+    };
+  }
+
+  try {
+    const user = await findLocalUser(payload.clerkUserId);
+    const allowMockTokenExchange = isWhatnotMockTokenExchangeEnabled();
+
+    let resolvedConfig;
+
+    try {
+      resolvedConfig = getWhatnotConfig();
+    } catch (configError) {
+      if (!allowMockTokenExchange) {
+        throw configError;
+      }
+
+      resolvedConfig = {
+        clientId: "mock_client_id",
+        redirectUri: process.env.WHATNOT_REDIRECT_URI || `${getBackendUrl()}/api/integrations/whatnot/callback`,
+        scopes: process.env.WHATNOT_SCOPES || "read:inventory read:orders",
+      };
+    }
+
+    const { clientId, redirectUri, scopes } = resolvedConfig;
+
+    let tokenPayload;
+    let initialExchangeError = null;
+    let usedMockTokenExchange = false;
+
+    try {
+      tokenPayload = await fetchWhatnotToken({
+        client_id: clientId,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+      });
+    } catch (exchangeError) {
+      initialExchangeError = exchangeError && exchangeError.message
+        ? exchangeError.message
+        : "Whatnot token exchange failed.";
+
+      if (!allowMockTokenExchange) {
+        throw exchangeError;
+      }
+
+      tokenPayload = getWhatnotMockTokenPayload();
+      usedMockTokenExchange = true;
+    }
+
+    const now = new Date();
+    const account =
+      (await ConnectedAccount.findOne({ user_id: user._id, platform: payload.platform })) ||
+      new ConnectedAccount({ user_id: user._id, platform: payload.platform, created_at: now });
+
+    account.account_name = account.account_name || "@whatnot";
+    account.access_token_encrypted = encryptText(tokenPayload.access_token);
+    account.refresh_token_encrypted = encryptText(tokenPayload.refresh_token);
+    account.token_expires_at = tokenPayload.expires_in
+      ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000)
+      : null;
+    account.scopes_json = {
+      scope: tokenPayload.scope || scopes,
+      token_type: tokenPayload.token_type || "Bearer",
+    };
+    account.status = "connected";
+    account.metadata_json = {
+      ...(account.metadata_json || {}),
+      connected_at: now.toISOString(),
+      oauth_provider: "whatnot",
+      oauth_mode: usedMockTokenExchange ? "mock_token_exchange" : "live_token_exchange",
+      oauth_exchange_error: initialExchangeError,
+    };
+    account.updated_at = now;
+
+    await account.save();
+
+    return {
+      redirectUrl: buildFrontendRedirect({
+        role: payload.role,
+        platform: payload.platform,
+        status: "connected",
+      }),
+    };
+  } catch (callbackError) {
+    return {
+      redirectUrl: buildFrontendRedirect({
+        role: payload.role,
+        platform: payload.platform,
+        status: "error",
+        message: callbackError.message,
+      }),
+    };
+  }
+}
+
 async function disconnectPlatform({ clerkUserId, platform }) {
   const normalizedPlatform = normalizePlatform(platform);
 
@@ -1174,7 +1727,9 @@ module.exports = {
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
+  handleWhatnotCallback,
   handleTikTokCallback,
 };
