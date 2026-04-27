@@ -3,8 +3,10 @@ const {
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
+  handleWhatnotCallback,
   handleTikTokCallback,
   saveGetSessionApiData,
   saveWhatnotSellerSession,
@@ -75,6 +77,18 @@ async function getTikTokVideoAnalyticsData(req, res) {
       clerkUserId: req.auth.userId,
       cursor: req.query && req.query.cursor ? Number(req.query.cursor) : null,
       maxCount: req.query && req.query.maxCount ? Number(req.query.maxCount) : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getWhatnotInventorySnapshotData(req, res) {
+  try {
+    const result = await getWhatnotInventorySnapshot({
+      clerkUserId: req.auth.userId,
+      first: req.query && req.query.first ? Number(req.query.first) : undefined,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -193,10 +207,22 @@ async function tiktokCallback(req, res) {
   return res.redirect(result.redirectUrl);
 }
 
+async function whatnotCallback(req, res) {
+  const result = await handleWhatnotCallback({
+    code: req.query.code,
+    state: req.query.state,
+    error: req.query.error,
+    errorDescription: req.query.error_description,
+  });
+
+  return res.redirect(result.redirectUrl);
+}
+
 module.exports = {
   checkStripeStatus,
   createTikTokPhotoPost,
   createTikTokVideoPost,
+  getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
   getTikTokProfileData,
@@ -206,6 +232,7 @@ module.exports = {
   saveGetSessionApiDataEntry,
   saveWhatnotSessionData,
   startConnection,
+  whatnotCallback,
   tiktokCallback,
   updateWhatnotBio,
 };

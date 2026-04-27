@@ -64,7 +64,7 @@ app.get("/health", (req, res) => {
 
 async function start() {
   await connectDB(process.env.MONGODB_URI || "mongodb://localhost:27017/sellerhub");
-  const port = process.env.PORT || 5001;
+  const port = process.env.PORT || 5000;
   const server = http.createServer(app);
   initializeChatSocket({ server, allowedOrigins });
   initializeWhatnotExtensionBridge({ server });
