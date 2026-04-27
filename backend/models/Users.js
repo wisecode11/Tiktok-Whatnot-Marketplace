@@ -10,10 +10,15 @@ const UserSchema = new mongoose.Schema({
   password_hash: String,
   first_name: String,
   last_name: String,
+  parent_seller_user_id: {
+    type: String,
+    ref: "User",
+    default: null,
+  },
 
   user_type: {
     type: String,
-    enum: ["seller", "moderator", "admin"],
+    enum: ["seller", "moderator", "admin", "staff"],
   },
 
   status: {

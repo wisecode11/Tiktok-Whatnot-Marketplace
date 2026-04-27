@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Video,
   Sparkles,
+  UserPlus,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -47,6 +48,7 @@ const sellerNavigation = [
   {
     label: "Account",
     items: [
+      { title: "Manage Staff", href: "/seller/manage-staff", icon: UserPlus },
       { title: "Subscription", href: "/seller/subscription", icon: CreditCard },
       { title: "Settings", href: "/seller/settings", icon: Settings },
     ],

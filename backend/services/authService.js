@@ -6,18 +6,21 @@ const ConnectedAccount = require("../models/ConnectedAccount");
 const ROLE_MAP = {
   streamer: "seller",
   seller: "seller",
+  staff: "staff",
   moderator: "moderator",
   admin: "admin",
 };
 
 const FRONTEND_ROLE_MAP = {
   seller: "streamer",
+  staff: "staff",
   moderator: "moderator",
   admin: "admin",
 };
 
 const DASHBOARD_PATHS = {
   streamer: "/seller",
+  staff: "/staff",
   moderator: "/moderator",
   admin: "/admin",
 };
@@ -39,7 +42,16 @@ function normalizeRole(role) {
   }
 
   const normalized = role.trim().toLowerCase();
-  return ROLE_MAP[normalized] ? FRONTEND_ROLE_MAP[ROLE_MAP[normalized]] : null;
+
+  if (normalized === "seller") {
+    return "streamer";
+  }
+
+  if (["streamer", "staff", "moderator", "admin"].includes(normalized)) {
+    return normalized;
+  }
+
+  return null;
 }
 
 function toDatabaseRole(role) {
@@ -56,7 +68,11 @@ function getLaunchPadPath(role) {
 }
 
 function getSignupRedirect(role) {
-  return role === "admin" ? getDashboardPath(role) : getLaunchPadPath(role);
+  if (role === "admin" || role === "staff") {
+    return getDashboardPath(role);
+  }
+
+  return getLaunchPadPath(role);
 }
 
 async function getLoginRedirect(user) {
@@ -146,6 +162,10 @@ async function upsertUserFromClerk({ clerkUserId, role }) {
   user.first_name = clerkUser.firstName || user.first_name || "";
   user.last_name = clerkUser.lastName || user.last_name || "";
   user.user_type = userType;
+  user.parent_seller_user_id =
+    userType === "staff"
+      ? (clerkUser.privateMetadata && clerkUser.privateMetadata.parentSellerUserId) || user.parent_seller_user_id || null
+      : null;
   user.status = user.status || "active";
   user.updated_at = now;
 
@@ -182,7 +202,14 @@ async function loginWithRole({ clerkUserId, role }) {
 
   const actualRole = FRONTEND_ROLE_MAP[user.user_type];
 
-  if (actualRole !== normalizedRole) {
+  if (user.user_type === "staff") {
+    if (normalizedRole !== "staff") {
+      throw createHttpError(403, "This account belongs to the staff portal.", {
+        actualRole: "staff",
+        redirectTo: getDashboardPath("staff"),
+      });
+    }
+  } else if (actualRole !== normalizedRole) {
     throw createHttpError(403, `This account belongs to the ${actualRole} portal.`, {
       actualRole,
       redirectTo: getDashboardPath(actualRole),

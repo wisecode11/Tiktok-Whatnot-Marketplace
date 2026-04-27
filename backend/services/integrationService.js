@@ -2,8 +2,11 @@ const crypto = require("crypto");
 
 const Stripe = require("stripe");
 const ConnectedAccount = require("../models/ConnectedAccount");
+const GetSessionApiData = require("../models/GetSessionApiData");
+const SellerSession = require("../models/SellerSession");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
+const { requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
 const { decryptText, encryptText } = require("../utils/crypto");
 
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
@@ -1169,6 +1172,134 @@ async function disconnectPlatform({ clerkUserId, platform }) {
   return { success: true };
 }
 
+function resolveWhatnotUserId(sessionPayload) {
+  if (!sessionPayload || typeof sessionPayload !== "object") {
+    return null;
+  }
+
+  return (
+    sessionPayload.user_id ||
+    sessionPayload.userId ||
+    sessionPayload.id ||
+    (sessionPayload.user && (sessionPayload.user.id || sessionPayload.user.user_id)) ||
+    null
+  );
+}
+
+function resolveWhatnotUsername(sessionPayload) {
+  if (!sessionPayload || typeof sessionPayload !== "object") {
+    return null;
+  }
+
+  return (
+    sessionPayload.username ||
+    sessionPayload.handle ||
+    (sessionPayload.user && (sessionPayload.user.username || sessionPayload.user.handle)) ||
+    null
+  );
+}
+
+async function saveWhatnotSellerSession({
+  clerkUserId = null,
+  auth = {},
+  sessionData = {},
+  tabId = null,
+  source = "whatnot-extension",
+}) {
+  const now = new Date();
+
+  const record = new SellerSession({
+    platform: "whatnot",
+    clerk_user_id: clerkUserId || null,
+    whatnot_user_id: resolveWhatnotUserId(sessionData),
+    whatnot_username: resolveWhatnotUsername(sessionData),
+    csrf_token: auth && auth.csrf_token ? auth.csrf_token : null,
+    session_extension_token: auth && auth.session_extension_token ? auth.session_extension_token : null,
+    access_token: auth && auth.access_token ? auth.access_token : null,
+    cookies_present: (auth && auth.cookie_state) || {},
+    session_payload: sessionData && typeof sessionData === "object" ? sessionData : {},
+    source: source || "whatnot-extension",
+    extension_tab_id: Number.isFinite(Number(tabId)) ? Number(tabId) : null,
+    connected_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+
+  await record.save();
+
+  return {
+    id: record._id,
+    createdAt: record.created_at,
+  };
+}
+
+async function saveGetSessionApiData({
+  responsePayload = {},
+  tabId = null,
+  source = "whatnot-extension",
+}) {
+  const now = new Date();
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+
+  const record = new GetSessionApiData({
+    platform: "whatnot",
+    source: source || "whatnot-extension",
+    csrf_token: payload.csrf_token || null,
+    session_extension_token: payload.session_extension_token || null,
+    response_payload: payload,
+    extension_tab_id: Number.isFinite(Number(tabId)) ? Number(tabId) : null,
+    created_at: now,
+    updated_at: now,
+  });
+
+  await record.save();
+
+  return {
+    id: record._id,
+    createdAt: record.created_at,
+  };
+}
+
+async function updateWhatnotBioFromPlatform({ bio }) {
+  const nextBio = typeof bio === "string" ? bio.trim() : "";
+
+  if (!nextBio) {
+    throw createHttpError(400, "Bio is required.");
+  }
+
+  const latestSession = await SellerSession.findOne({ platform: "whatnot" }).sort({ created_at: -1 });
+  if (!latestSession) {
+    throw createHttpError(404, "No Whatnot session found. Please reconnect Whatnot from extension.");
+  }
+
+  if (!latestSession.csrf_token) {
+    throw createHttpError(400, "Whatnot CSRF token is missing. Reconnect Whatnot from extension.");
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "update_bio_from_platform",
+    bio: nextBio,
+  });
+
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  const hasGraphqlErrors = Array.isArray(body && body.errors) && body.errors.length > 0;
+  const isSuccess = actionResult && actionResult.success && !hasGraphqlErrors && body && body.data && body.data.updateProfile;
+
+  if (!isSuccess) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      "Whatnot bio update failed through extension.",
+      body,
+    );
+  }
+
+  return {
+    success: true,
+    bio: nextBio,
+    response: body,
+  };
+}
+
 module.exports = {
   checkStripeAccountStatus,
   createConnectionSession,
@@ -1177,4 +1308,7 @@ module.exports = {
   getTikTokProfile,
   getTikTokVideoAnalytics,
   handleTikTokCallback,
+  updateWhatnotBioFromPlatform,
+  saveGetSessionApiData,
+  saveWhatnotSellerSession,
 };

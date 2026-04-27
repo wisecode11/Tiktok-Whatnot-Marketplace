@@ -17,7 +17,7 @@ const WorkspaceMembershipSchema = new mongoose.Schema({
 
   role: {
     type: String,
-    enum: ["admin", "host", "inventory_manager"],
+    enum: ["admin", "host", "inventory_manager", "staff"],
   },
 
   permissions_json: {
