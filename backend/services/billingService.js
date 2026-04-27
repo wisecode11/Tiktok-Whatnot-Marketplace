@@ -275,7 +275,7 @@ async function findSellerUser(clerkUserId) {
     throw createHttpError(404, "User account was not found.");
   }
 
-  if (user.user_type !== "seller") {
+  if (!["seller", "staff"].includes(user.user_type)) {
     throw createHttpError(403, "Billing is only available for seller accounts.");
   }
 
@@ -283,10 +283,20 @@ async function findSellerUser(clerkUserId) {
 }
 
 async function ensureWorkspaceForSeller(user) {
-  const existing = await SellerWorkspace.findOne({ owner_user_id: user._id });
+  const ownerUserId = user.user_type === "staff" ? user.parent_seller_user_id : user._id;
+
+  if (!ownerUserId) {
+    throw createHttpError(400, "This staff account is not attached to a seller workspace.");
+  }
+
+  const existing = await SellerWorkspace.findOne({ owner_user_id: ownerUserId });
 
   if (existing) {
     return existing;
+  }
+
+  if (user.user_type === "staff") {
+    throw createHttpError(404, "Seller workspace was not found for this staff account.");
   }
 
   const now = new Date();

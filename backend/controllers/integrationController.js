@@ -8,6 +8,9 @@ const {
   getTikTokVideoAnalytics,
   handleWhatnotCallback,
   handleTikTokCallback,
+  saveGetSessionApiData,
+  saveWhatnotSellerSession,
+  updateWhatnotBioFromPlatform,
 } = require("../services/integrationService");
 const {
   getTikTokCreatorInfo,
@@ -152,6 +155,47 @@ async function removeConnection(req, res) {
   }
 }
 
+async function saveWhatnotSessionData(req, res) {
+  try {
+    const result = await saveWhatnotSellerSession({
+      clerkUserId: req.auth && req.auth.userId ? req.auth.userId : null,
+      auth: req.body && req.body.auth ? req.body.auth : {},
+      sessionData: req.body && req.body.sessionData ? req.body.sessionData : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(201).json({ success: true, sellerSessionId: result.id, createdAt: result.createdAt });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function saveGetSessionApiDataEntry(req, res) {
+  try {
+    const result = await saveGetSessionApiData({
+      responsePayload: req.body && req.body.responsePayload ? req.body.responsePayload : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(201).json({ success: true, getSessionApiDataId: result.id, createdAt: result.createdAt });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function updateWhatnotBio(req, res) {
+  try {
+    const result = await updateWhatnotBioFromPlatform({
+      bio: req.body && req.body.bio ? req.body.bio : "",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function tiktokCallback(req, res) {
   const result = await handleTikTokCallback({
     code: req.query.code,
@@ -185,7 +229,10 @@ module.exports = {
   getTikTokVideoAnalyticsData,
   listConnections,
   removeConnection,
+  saveGetSessionApiDataEntry,
+  saveWhatnotSessionData,
   startConnection,
   whatnotCallback,
   tiktokCallback,
+  updateWhatnotBio,
 };

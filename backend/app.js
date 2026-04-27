@@ -13,7 +13,9 @@ const { stripeWebhook } = require("./controllers/billingController");
 const integrationRoutes = require("./routes/integrationRoutes");
 const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
 const aiRoutes = require("./routes/aiRoutes");
+const staffRoutes = require("./routes/staffRoutes");
 const { initializeChatSocket } = require("./socket/chatSocket");
+const { initializeWhatnotExtensionBridge } = require("./socket/whatnotExtensionBridge");
 const models = require("./models");
 
 const app = express();
@@ -30,7 +32,9 @@ const allowedOrigins = Array.from(
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      const isChromeExtensionOrigin = typeof origin === "string" && origin.startsWith("chrome-extension://");
+
+      if (!origin || isChromeExtensionOrigin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
@@ -52,6 +56,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/integrations", integrationRoutes);
 app.use("/api/moderator-profile", moderatorProfileRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/staff", staffRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, models: Object.keys(models).length });
@@ -62,6 +67,7 @@ async function start() {
   const port = process.env.PORT || 5000;
   const server = http.createServer(app);
   initializeChatSocket({ server, allowedOrigins });
+  initializeWhatnotExtensionBridge({ server });
   server.listen(port, () => console.log(`Server running on ${port}`));
 }
 

@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Whatnot API Connector",
+  "version": "1.0.0",
+  "description": "Authenticate and proxy Whatnot APIs for platform integration",
+  "permissions": [
+    "cookies",
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.whatnot.com/*",
+    "http://localhost:3000/*",
+    "http://localhost:5001/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.whatnot.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Whatnot Connector"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "inject.js"
+      ],
+      "matches": [
+        "https://www.whatnot.com/*"
+      ]
+    }
+  ]
+}

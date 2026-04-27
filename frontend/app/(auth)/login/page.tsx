@@ -1,10 +1,10 @@
 "use client"
 
-import { Suspense, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { SignIn, useAuth, useClerk, useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Shield, Radio, Users, Loader2 } from "lucide-react"
+import { Shield, Radio, Users, Loader2, UserCog } from "lucide-react"
 import { BrandLogo } from "../../../components/brand-logo"
 import { buildPath, getDashboardPath, normalizeRole, type AppRole } from "@/lib/auth"
 import { cn } from "@/lib/utils"
@@ -35,6 +35,18 @@ const clerkAppearance = {
   },
 } as const
 
+const staffOnlyClerkAppearance = {
+  ...clerkAppearance,
+  elements: {
+    ...clerkAppearance.elements,
+    socialButtonsBlockButton: "hidden",
+    socialButtonsBlock: "hidden",
+    dividerRow: "hidden",
+    dividerLine: "hidden",
+    dividerText: "hidden",
+  },
+} as const
+
 type Role = AppRole | null
 
 function LoginContent() {
@@ -44,6 +56,18 @@ function LoginContent() {
   const { user } = useUser()
   const initialRole = normalizeRole(searchParams.get("role"))
   const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    // Clear stale Clerk hash routes (for example #/factor-two) when role changes.
+    if (window.location.hash) {
+      const nextUrl = `${window.location.pathname}${window.location.search}`
+      window.history.replaceState(null, "", nextUrl)
+    }
+  }, [selectedRole])
 
   const signUpUrl = useMemo(() => {
     return buildPath("/signup", { role: selectedRole })
@@ -83,6 +107,12 @@ function LoginContent() {
       activeClassName: "border-primary/40 bg-primary/[0.08] text-primary shadow-[0_10px_30px_-22px_var(--color-primary)]",
     },
     {
+      id: "staff",
+      label: "Staff",
+      icon: UserCog,
+      activeClassName: "border-emerald-400/40 bg-emerald-500/10 text-emerald-700 shadow-[0_10px_30px_-22px_rgba(16,185,129,0.55)] dark:text-emerald-300",
+    },
+    {
       id: "moderator",
       label: "Moderator",
       icon: Users,
@@ -117,7 +147,7 @@ function LoginContent() {
 
         <div className="mb-6 space-y-3">
           <p className="text-sm font-semibold text-foreground">Choose your role</p>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {roleOptions.map((role) => {
               const isActive = selectedRole === role.id
               const Icon = role.icon
@@ -184,14 +214,14 @@ function LoginContent() {
         ) : selectedRole ? (
           <div className="w-full">
             <SignIn
-              key={`sign-in-${selectedRole}`}
-              routing="hash"
+              key={`sign-in-${selectedRole}-${isSignedIn ? "signed" : "guest"}`}
+              routing="virtual"
               signUpUrl={signUpUrl}
               signUpFallbackRedirectUrl={completionUrl}
               signUpForceRedirectUrl={completionUrl}
               fallbackRedirectUrl={completionUrl}
               forceRedirectUrl={completionUrl}
-              appearance={clerkAppearance}
+              appearance={selectedRole === "staff" ? staffOnlyClerkAppearance : clerkAppearance}
             />
           </div>
         ) : (
@@ -208,14 +238,20 @@ function LoginContent() {
         </div>
 
         <p className="mt-5 text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
-          <Link href={signUpUrl} className="font-medium text-primary hover:underline">
-            Create account
-          </Link>
+          {selectedRole === "staff" ? (
+            "Staff accounts are created by your streamer admin."
+          ) : (
+            <>
+              Don&apos;t have an account?{" "}
+              <Link href={signUpUrl} className="font-medium text-primary hover:underline">
+                Create account
+              </Link>
+            </>
+          )}
         </p>
 
         <p className="mt-2 text-center text-xs text-muted-foreground/90">
-          Choose Streamer, Moderator, or Admin before continuing.
+          Choose Streamer, Staff, Moderator, or Admin before continuing.
         </p>
       </div>
     </div>

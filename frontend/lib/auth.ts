@@ -1,4 +1,4 @@
-export type AppRole = "streamer" | "moderator" | "admin"
+export type AppRole = "streamer" | "staff" | "moderator" | "admin"
 
 export interface AuthUserProfile {
   id: string
@@ -7,7 +7,7 @@ export interface AuthUserProfile {
   firstName: string
   lastName: string
   role: AppRole
-  backendRole: "seller" | "moderator" | "admin"
+  backendRole: "seller" | "staff" | "moderator" | "admin"
   status: string
   dashboardPath: string
 }
@@ -222,6 +222,21 @@ export interface TikTokPostStatusResponse {
   }
 }
 
+export interface WhatnotBioUpdateResponse {
+  success: boolean
+  bio: string
+  response: {
+    data?: {
+      updateProfile?: {
+        id?: string | null
+        bio?: string | null
+        __typename?: string
+      } | null
+    }
+    errors?: Array<{ message?: string }>
+  }
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -245,6 +260,10 @@ export function normalizeRole(role: string | null | undefined): AppRole | null {
 
   if (value === "seller" || value === "streamer") {
     return "streamer"
+  }
+
+  if (value === "staff") {
+    return "staff"
   }
 
   if (value === "moderator" || value === "admin") {
@@ -279,11 +298,15 @@ export function getDashboardPath(role: AppRole) {
     return "/moderator"
   }
 
+  if (role === "staff") {
+    return "/staff"
+  }
+
   return "/seller"
 }
 
 export function getSignupRedirectPath(role: AppRole) {
-  if (role === "admin") {
+  if (role === "admin" || role === "staff") {
     return getDashboardPath(role)
   }
 

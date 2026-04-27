@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Whatnot Connector</title>
+    <style>
+      body {
+        width: 360px;
+        padding: 16px;
+        font-family: Arial, sans-serif;
+      }
+      .status {
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+      }
+      .connected {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .disconnected {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 6px;
+        padding: 10px;
+        margin: 6px 0;
+        cursor: pointer;
+      }
+      .connect-btn { background: #007bff; color: #fff; }
+      .copy-btn { background: #28a745; color: #fff; }
+      .api-btn { background: #6f42c1; color: #fff; }
+      .token-info {
+        background: #f8f9fa;
+        padding: 8px;
+        border-radius: 6px;
+        margin-top: 8px;
+        font-family: monospace;
+        font-size: 11px;
+        word-break: break-all;
+      }
+      #response {
+        margin-top: 10px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        padding: 8px;
+        max-height: 180px;
+        overflow: auto;
+        font-size: 11px;
+        display: none;
+        white-space: pre-wrap;
+      }
+      .input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        padding: 8px;
+        margin-top: 6px;
+        margin-bottom: 6px;
+      }
+      textarea.input {
+        min-height: 90px;
+        resize: vertical;
+        font-family: monospace;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Whatnot Connector</h3>
+    <div id="status" class="status disconnected">
+      Status: <strong id="status-text">Disconnected</strong>
+    </div>
+    <button id="connect-btn" class="connect-btn">Connect Whatnot</button>
+
+    <div id="token-container" style="display:none;">
+      <div class="token-info"><strong>CSRF</strong><br /><span id="csrf-token">-</span></div>
+      <div class="token-info"><strong>Session Extension Token</strong><br /><span id="session-token">-</span></div>
+      <div class="token-info"><strong>Cookies Present</strong><br /><span id="cookie-status">-</span></div>
+      <button id="copy-tokens" class="copy-btn">Copy Tokens</button>
+    </div>
+
+    <h4>API Demo</h4>
+    <button id="demo-session" class="api-btn">GET Session API</button>
+    <button id="demo-graphql" class="api-btn">POST GetSellerLiveReadiness</button>
+    <input id="bio-input" class="input" type="text" placeholder="Enter bio text for user update..." />
+    <button id="demo-update-bio" class="api-btn">POST UpdateProfileMutation</button>
+    <textarea id="custom-payload" class="input" placeholder="Optional: paste exact GraphQL payload JSON from your platform"></textarea>
+    <button id="demo-custom-post" class="api-btn">POST Custom GraphQL Payload</button>
+
+    <div id="response"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

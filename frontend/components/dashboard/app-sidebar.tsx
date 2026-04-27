@@ -97,7 +97,12 @@ export function AppSidebar({
   const hasActiveSubscription = subscriptionAccess?.hasActiveSubscription ?? true
   const isLoading = subscriptionAccess?.isLoading ?? false
   const isModerator = authenticatedUser?.backendRole === "moderator"
-  const isSeller = authenticatedUser?.backendRole === "seller"
+  const isSeller = authenticatedUser?.backendRole === "seller" || authenticatedUser?.backendRole === "staff"
+  const accountProfileHref = isModerator
+    ? "/moderator/profile"
+    : pathname.startsWith("/staff")
+      ? "/staff/profile"
+      : "/seller/profile"
 
   useEffect(() => {
     let cancelled = false
@@ -335,7 +340,7 @@ export function AppSidebar({
                 ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href={isModerator ? "/moderator/profile" : pathname}>
+                  <Link href={accountProfileHref}>
                     <User className="mr-2 h-4 w-4" />
                     Profile
                   </Link>
