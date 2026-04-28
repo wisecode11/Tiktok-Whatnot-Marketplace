@@ -3,6 +3,7 @@ const {
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getWhatnotExtensionConnectionStatus,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
@@ -89,6 +90,17 @@ async function getWhatnotInventorySnapshotData(req, res) {
     const result = await getWhatnotInventorySnapshot({
       clerkUserId: req.auth.userId,
       first: req.query && req.query.first ? Number(req.query.first) : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getWhatnotExtensionStatusData(req, res) {
+  try {
+    const result = await getWhatnotExtensionConnectionStatus({
+      clerkUserId: req.auth.userId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -232,6 +244,7 @@ module.exports = {
   createTikTokPhotoPost,
   createTikTokVideoPost,
   getWhatnotInventorySnapshotData,
+  getWhatnotExtensionStatusData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
   getTikTokProfileData,

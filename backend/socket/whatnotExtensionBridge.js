@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { WebSocketServer, WebSocket } = require("ws");
 
 let extensionSocket = null;
+let extensionAuthState = null;
 const pendingRequests = new Map();
 
 function createHttpError(status, message, details) {
@@ -54,6 +55,10 @@ function initializeWhatnotExtensionBridge({ server }) {
 
         if (type === "auth") {
           extensionSocket = socket;
+          extensionAuthState = {
+            payload,
+            receivedAt: Date.now(),
+          };
           return;
         }
 
@@ -84,6 +89,7 @@ function initializeWhatnotExtensionBridge({ server }) {
     socket.on("close", () => {
       if (extensionSocket === socket) {
         extensionSocket = null;
+        extensionAuthState = null;
       }
       rejectAllPending(createHttpError(503, "Whatnot extension disconnected."));
     });
@@ -91,11 +97,19 @@ function initializeWhatnotExtensionBridge({ server }) {
     socket.on("error", () => {
       if (extensionSocket === socket) {
         extensionSocket = null;
+        extensionAuthState = null;
       }
     });
   });
 
   return wss;
+}
+
+function getWhatnotExtensionBridgeState() {
+  return {
+    isOnline: Boolean(extensionSocket && extensionSocket.readyState === WebSocket.OPEN),
+    extensionAuthState,
+  };
 }
 
 async function requestWhatnotAction(payload, timeoutMs = 25000) {
@@ -125,6 +139,7 @@ async function requestWhatnotAction(payload, timeoutMs = 25000) {
 }
 
 module.exports = {
+  getWhatnotExtensionBridgeState,
   initializeWhatnotExtensionBridge,
   requestWhatnotAction,
 };

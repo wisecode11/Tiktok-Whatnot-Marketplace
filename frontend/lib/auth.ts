@@ -238,6 +238,20 @@ export interface WhatnotBioUpdateResponse {
   }
 }
 
+export interface WhatnotExtensionStatusResponse {
+  connected: boolean
+  extensionInstalled: boolean
+  bridgeOnline: boolean
+  hasSavedSession: boolean
+  status: "connected" | "disconnected" | "not_installed"
+  savedSession: {
+    connectedAt: string | null
+    updatedAt: string | null
+    whatnotUsername: string | null
+    extensionTabId: number | null
+  } | null
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -510,5 +524,11 @@ export async function updateWhatnotProfileBio(token: string, bio: string) {
     token,
     method: "POST",
     body: { bio },
+  })
+}
+
+export async function getWhatnotExtensionStatus(token: string) {
+  return request<WhatnotExtensionStatusResponse>("/api/integrations/whatnot/extension-status", {
+    token,
   })
 }
