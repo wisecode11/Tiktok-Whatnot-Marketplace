@@ -157,15 +157,24 @@ async function removeConnection(req, res) {
 
 async function saveWhatnotSessionData(req, res) {
   try {
+    const bodyClerkUserId = req.body && typeof req.body.clerkUserId === "string"
+      ? req.body.clerkUserId.trim()
+      : null;
     const result = await saveWhatnotSellerSession({
-      clerkUserId: req.auth && req.auth.userId ? req.auth.userId : null,
+      clerkUserId: bodyClerkUserId || (req.auth && req.auth.userId ? req.auth.userId : null),
       auth: req.body && req.body.auth ? req.body.auth : {},
       sessionData: req.body && req.body.sessionData ? req.body.sessionData : {},
       tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
       source: req.body && req.body.source ? req.body.source : "whatnot-extension",
     });
 
-    return res.status(201).json({ success: true, sellerSessionId: result.id, createdAt: result.createdAt });
+    return res.status(result.created ? 201 : 200).json({
+      success: true,
+      sellerSessionId: result.id,
+      created: result.created,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt,
+    });
   } catch (error) {
     return sendError(res, error);
   }

@@ -224,6 +224,7 @@ export interface TikTokPostStatusResponse {
 
 export interface WhatnotBioUpdateResponse {
   success: boolean
+  message?: string
   bio: string
   response: {
     data?: {
@@ -502,4 +503,12 @@ export async function getWhatnotInventorySnapshot(token: string, params?: { firs
     : "/api/integrations/whatnot/inventory-snapshot"
 
   return request<WhatnotInventorySnapshotResponse>(path, { token })
+}
+
+export async function updateWhatnotProfileBio(token: string, bio: string) {
+  return request<WhatnotBioUpdateResponse>("/api/integrations/whatnot/profile/bio", {
+    token,
+    method: "POST",
+    body: { bio },
+  })
 }

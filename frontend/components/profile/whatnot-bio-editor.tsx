@@ -47,7 +47,7 @@ export default function WhatnotBioEditor({
       setBio(result.bio || nextBio)
       toast({
         title: "Bio updated",
-        description: "Your Whatnot bio was updated in real time.",
+        description: result.message || "Your Whatnot bio was updated in real time.",
       })
     } catch (error) {
       toast({

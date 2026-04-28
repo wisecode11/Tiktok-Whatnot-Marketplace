@@ -8,6 +8,7 @@ class WhatnotConnectorPopup {
     this.nodes.connectBtn = document.getElementById("connect-btn");
     this.nodes.status = document.getElementById("status");
     this.nodes.statusText = document.getElementById("status-text");
+    this.nodes.userIdInput = document.getElementById("user-id-input");
     this.nodes.tokenContainer = document.getElementById("token-container");
     this.nodes.csrfToken = document.getElementById("csrf-token");
     this.nodes.sessionToken = document.getElementById("session-token");
@@ -39,10 +40,18 @@ class WhatnotConnectorPopup {
   async connect() {
     try {
       const tab = await this.getActiveWhatnotTab();
+      const clerkUserId = (this.nodes.userIdInput.value || "").trim();
+      if (!clerkUserId) {
+        throw new Error("Please enter Clerk User ID first.");
+      }
       this.nodes.connectBtn.disabled = true;
       this.nodes.connectBtn.textContent = "Connecting...";
 
-      const result = await chrome.runtime.sendMessage({ action: "connect_whatnot", tabId: tab.id });
+      const result = await chrome.runtime.sendMessage({
+        action: "connect_whatnot",
+        tabId: tab.id,
+        clerkUserId,
+      });
       if (!result?.success) {
         throw new Error(result?.error || "Connection failed");
       }
@@ -310,6 +319,9 @@ class WhatnotConnectorPopup {
   async refreshStatus() {
     const status = await chrome.runtime.sendMessage({ action: "get_status" });
     this.setConnected(Boolean(status?.connected));
+    if (this.nodes.userIdInput && status?.clerkUserId) {
+      this.nodes.userIdInput.value = status.clerkUserId;
+    }
     if (status?.auth) {
       this.applyTokens(status.auth);
     }

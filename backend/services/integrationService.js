@@ -1760,29 +1760,60 @@ async function saveWhatnotSellerSession({
   source = "whatnot-extension",
 }) {
   const now = new Date();
+  const whatnotUserId = resolveWhatnotUserId(sessionData);
+  const whatnotUsername = resolveWhatnotUsername(sessionData);
+  const sessionExtensionToken = auth && auth.session_extension_token ? auth.session_extension_token : null;
+  const csrfToken = auth && auth.csrf_token ? auth.csrf_token : null;
+  const accessToken = auth && auth.access_token ? auth.access_token : null;
+  const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
 
-  const record = new SellerSession({
-    platform: "whatnot",
-    clerk_user_id: clerkUserId || null,
-    whatnot_user_id: resolveWhatnotUserId(sessionData),
-    whatnot_username: resolveWhatnotUsername(sessionData),
-    csrf_token: auth && auth.csrf_token ? auth.csrf_token : null,
-    session_extension_token: auth && auth.session_extension_token ? auth.session_extension_token : null,
-    access_token: auth && auth.access_token ? auth.access_token : null,
-    cookies_present: (auth && auth.cookie_state) || {},
-    session_payload: sessionData && typeof sessionData === "object" ? sessionData : {},
-    source: source || "whatnot-extension",
-    extension_tab_id: Number.isFinite(Number(tabId)) ? Number(tabId) : null,
-    connected_at: now,
-    created_at: now,
-    updated_at: now,
-  });
+  const identityFilters = [{ clerk_user_id: clerkUserId || null }, { whatnot_user_id: whatnotUserId }];
+  if (sessionExtensionToken) {
+    identityFilters.push({ session_extension_token: sessionExtensionToken });
+  }
+  if (csrfToken) {
+    identityFilters.push({ csrf_token: csrfToken });
+  }
+
+  const usableFilters = identityFilters.filter((entry) => Object.values(entry)[0]);
+
+  let record = null;
+  if (usableFilters.length) {
+    record = await SellerSession.findOne({
+      platform: "whatnot",
+      $or: usableFilters,
+    }).sort({ updated_at: -1 });
+  }
+
+  const isNewRecord = !record;
+
+  if (!record) {
+    record = new SellerSession({
+      platform: "whatnot",
+      created_at: now,
+    });
+  }
+
+  record.clerk_user_id = clerkUserId || record.clerk_user_id || null;
+  record.whatnot_user_id = whatnotUserId || record.whatnot_user_id || null;
+  record.whatnot_username = whatnotUsername || record.whatnot_username || null;
+  record.csrf_token = csrfToken || record.csrf_token || null;
+  record.session_extension_token = sessionExtensionToken || record.session_extension_token || null;
+  record.access_token = accessToken || record.access_token || null;
+  record.cookies_present = (auth && auth.cookie_state) || {};
+  record.session_payload = sessionData && typeof sessionData === "object" ? sessionData : {};
+  record.source = source || "whatnot-extension";
+  record.extension_tab_id = extensionTabId;
+  record.connected_at = now;
+  record.updated_at = now;
 
   await record.save();
 
   return {
     id: record._id,
     createdAt: record.created_at,
+    updatedAt: record.updated_at,
+    created: isNewRecord,
   };
 }
 
@@ -1820,15 +1851,6 @@ async function updateWhatnotBioFromPlatform({ bio }) {
     throw createHttpError(400, "Bio is required.");
   }
 
-  const latestSession = await SellerSession.findOne({ platform: "whatnot" }).sort({ created_at: -1 });
-  if (!latestSession) {
-    throw createHttpError(404, "No Whatnot session found. Please reconnect Whatnot from extension.");
-  }
-
-  if (!latestSession.csrf_token) {
-    throw createHttpError(400, "Whatnot CSRF token is missing. Reconnect Whatnot from extension.");
-  }
-
   const actionResult = await requestWhatnotAction({
     action: "update_bio_from_platform",
     bio: nextBio,
@@ -1839,15 +1861,19 @@ async function updateWhatnotBioFromPlatform({ bio }) {
   const isSuccess = actionResult && actionResult.success && !hasGraphqlErrors && body && body.data && body.data.updateProfile;
 
   if (!isSuccess) {
+    const errorMessage = actionResult && actionResult.error
+      ? actionResult.error
+      : "Whatnot bio update failed through extension.";
     throw createHttpError(
       (actionResult && actionResult.status) || 502,
-      "Whatnot bio update failed through extension.",
-      body,
+      errorMessage,
+      body && Object.keys(body).length ? body : actionResult,
     );
   }
 
   return {
     success: true,
+    message: "Whatnot bio updated successfully.",
     bio: nextBio,
     response: body,
   };

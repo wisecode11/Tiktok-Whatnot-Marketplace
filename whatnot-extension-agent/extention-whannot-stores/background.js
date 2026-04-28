@@ -1,6 +1,7 @@
 const state = {
   connected: false,
   tabId: null,
+  clerkUserId: null,
   auth: null,
   lastObservedApi: null,
   observedGraphqlTemplates: {},
@@ -8,19 +9,20 @@ const state = {
 };
 
 let ws = null;
-const MARKETPLACE_API_BASE = "http://localhost:5001";
+let stateHydrated = false;
+const MARKETPLACE_API_BASE = "http://localhost:5000";
 const WHATNOT_EXTENSION_API_KEY = "";
-const BACKEND_SOCKET_URL = "ws://localhost:5001/ws/whatnot-extension";
+const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({
-    wn_state: state
-  });
-  setBackendSocket(BACKEND_SOCKET_URL);
+  state.backendSocketUrl = BACKEND_SOCKET_URL;
+  stateHydrated = true;
+  void persistState();
+  void setBackendSocket(BACKEND_SOCKET_URL);
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  setBackendSocket(BACKEND_SOCKET_URL);
+  void ensureStateHydrated();
 });
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -31,18 +33,25 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 async function handleMessage(request) {
+  await ensureStateHydrated();
+
   switch (request.action) {
     case "connect_whatnot":
-      return connectWhatnot(request.tabId);
+      return connectWhatnot(request.tabId, request.clerkUserId);
     case "execute_api":
       return executeApi(request.tabId, request.options);
     case "get_status":
       return {
         connected: state.connected,
+        clerkUserId: state.clerkUserId,
         auth: state.auth,
         lastObservedApi: state.lastObservedApi,
         observedGraphqlTemplates: state.observedGraphqlTemplates
       };
+    case "set_clerk_user":
+      state.clerkUserId = normalizeClerkUserId(request.clerkUserId);
+      await persistState();
+      return { success: true, clerkUserId: state.clerkUserId };
     case "observed_api":
       return onObservedApi(request.payload);
     case "platform_action_request":
@@ -56,17 +65,30 @@ async function handleMessage(request) {
   }
 }
 
-async function connectWhatnot(tabId) {
+async function connectWhatnot(tabId, clerkUserId = null) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     setBackendSocket(BACKEND_SOCKET_URL);
   }
 
-  const tab = await chrome.tabs.get(tabId);
+  if (typeof clerkUserId === "string") {
+    state.clerkUserId = normalizeClerkUserId(clerkUserId);
+  }
+
+  if (!state.clerkUserId) {
+    return { success: false, error: "Missing Clerk user ID. Add user ID in extension popup first." };
+  }
+
+  const resolvedTabId = await resolveWhatnotTabId(tabId);
+  if (!resolvedTabId) {
+    return { success: false, error: "Unable to find or open a Whatnot tab." };
+  }
+
+  const tab = await chrome.tabs.get(resolvedTabId);
   if (!tab.url || !tab.url.includes("whatnot.com")) {
     return { success: false, error: "Active tab must be whatnot.com" };
   }
 
-  const sessionResult = await chrome.tabs.sendMessage(tabId, { action: "read_session_tokens" });
+  const sessionResult = await chrome.tabs.sendMessage(resolvedTabId, { action: "read_session_tokens" });
   if (!sessionResult?.success) {
     return { success: false, error: sessionResult?.error || "Unable to read session endpoint" };
   }
@@ -76,25 +98,26 @@ async function connectWhatnot(tabId) {
     readCookieValue("__Secure-access-token")
   ]);
   state.connected = true;
-  state.tabId = tabId;
+  state.tabId = resolvedTabId;
   state.auth = {
     csrf_token: sessionResult.data?.csrf_token || null,
     session_extension_token: sessionResult.data?.session_extension_token || null,
     access_token: accessToken || null,
     cookie_state: cookies
   };
-  await chrome.storage.local.set({ wn_state: state });
-  sendSocketMessage("auth", { auth: state.auth, tabId });
+  await persistState();
+  sendSocketMessage("auth", { auth: state.auth, tabId: resolvedTabId });
   await saveSellerSessionToMarketplace({
+    clerkUserId: state.clerkUserId,
     auth: state.auth,
     sessionData: sessionResult.data || {},
-    tabId
+    tabId: resolvedTabId
   });
 
-  return { success: true, auth: state.auth };
+  return { success: true, auth: state.auth, tabId: resolvedTabId };
 }
 
-async function saveSellerSessionToMarketplace({ auth, sessionData, tabId }) {
+async function saveSellerSessionToMarketplace({ clerkUserId, auth, sessionData, tabId }) {
   const headers = {
     "content-type": "application/json"
   };
@@ -108,6 +131,7 @@ async function saveSellerSessionToMarketplace({ auth, sessionData, tabId }) {
       headers,
       body: JSON.stringify({
         source: "whatnot-extension",
+        clerkUserId: normalizeClerkUserId(clerkUserId),
         tabId,
         auth,
         sessionData
@@ -143,18 +167,35 @@ async function saveGetSessionApiDataToMarketplace(payload) {
 }
 
 async function executeApi(tabId, options) {
-  const targetTabId = tabId || state.tabId;
+  let targetTabId = tabId || state.tabId;
   if (!targetTabId) {
-    return { success: false, error: "No connected Whatnot tab" };
+    const connected = await ensureConnectedWhatnotSession();
+    if (!connected.success) {
+      return { success: false, error: connected.error || "No connected Whatnot tab." };
+    }
+    targetTabId = connected.tabId;
   }
 
-  const result = await chrome.tabs.sendMessage(targetTabId, {
-    action: "run_whatnot_api",
-    options
-  });
+  let result = null;
+  try {
+    result = await chrome.tabs.sendMessage(targetTabId, {
+      action: "run_whatnot_api",
+      options
+    });
+  } catch (_error) {
+    const connected = await ensureConnectedWhatnotSession(targetTabId);
+    if (!connected.success) {
+      return { success: false, error: connected.error || "Unable to reconnect Whatnot tab." };
+    }
+    targetTabId = connected.tabId;
+    result = await chrome.tabs.sendMessage(targetTabId, {
+      action: "run_whatnot_api",
+      options
+    });
+  }
 
   if (isAuthFailure(result)) {
-    const refreshed = await connectWhatnot(targetTabId);
+    const refreshed = await ensureConnectedWhatnotSession(targetTabId);
     if (!refreshed.success) {
       sendSocketMessage("relogin_required", { reason: "auth_refresh_failed" });
       return { success: false, error: "Auth refresh failed, relogin needed." };
@@ -196,8 +237,14 @@ async function executeUpdateBioFromPlatform(payload) {
     return { success: false, error: "Bio is required." };
   }
 
-  if (!state.tabId) {
-    return { success: false, error: "No connected Whatnot tab. Connect extension first." };
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return {
+        success: false,
+        error: autoConnected.error || "No connected Whatnot tab. Connect extension first."
+      };
+    }
   }
 
   const csrfToken = String(state?.auth?.csrf_token || "").trim();
@@ -278,7 +325,7 @@ async function readCookieValue(name) {
 async function onObservedApi(payload) {
   state.lastObservedApi = payload;
   captureGraphqlTemplate(payload);
-  await chrome.storage.local.set({ wn_state: state });
+  await persistState();
   sendSocketMessage("action_response", {
     status: payload.status >= 200 && payload.status < 300 ? "success" : "error",
     observed: true,
@@ -406,7 +453,7 @@ function setBackendSocket(url) {
       if (msg.type === "force_relogin") {
         state.connected = false;
         state.auth = null;
-        await chrome.storage.local.set({ wn_state: state });
+        await persistState();
         return;
       }
       if (msg.type === "action_request") {
@@ -435,4 +482,113 @@ function sendSocketMessage(type, payload) {
       payload
     })
   );
+}
+
+function normalizeClerkUserId(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized || null;
+}
+
+async function ensureStateHydrated() {
+  if (stateHydrated) {
+    return;
+  }
+
+  const stored = await chrome.storage.local.get("wn_state");
+  const cachedState = stored && stored.wn_state ? stored.wn_state : null;
+
+  if (cachedState && typeof cachedState === "object") {
+    state.connected = Boolean(cachedState.connected);
+    state.tabId = cachedState.tabId ?? null;
+    state.clerkUserId = normalizeClerkUserId(cachedState.clerkUserId);
+    state.auth = cachedState.auth || null;
+    state.lastObservedApi = cachedState.lastObservedApi || null;
+    state.observedGraphqlTemplates = cachedState.observedGraphqlTemplates || {};
+    state.backendSocketUrl = cachedState.backendSocketUrl || BACKEND_SOCKET_URL;
+  } else {
+    state.backendSocketUrl = BACKEND_SOCKET_URL;
+  }
+
+  stateHydrated = true;
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    setBackendSocket(state.backendSocketUrl || BACKEND_SOCKET_URL);
+  }
+}
+
+async function persistState() {
+  await chrome.storage.local.set({ wn_state: state });
+}
+
+async function ensureConnectedWhatnotSession(preferredTabId = null) {
+  const connection = await connectWhatnot(preferredTabId || state.tabId);
+  if (connection.success) {
+    return connection;
+  }
+
+  const fallbackTabId = await resolveWhatnotTabId(null, true);
+  if (!fallbackTabId) {
+    return connection;
+  }
+
+  return connectWhatnot(fallbackTabId);
+}
+
+async function resolveWhatnotTabId(preferredTabId, allowAutoCreate = true) {
+  if (preferredTabId != null) {
+    try {
+      const preferredTab = await chrome.tabs.get(preferredTabId);
+      if (preferredTab?.url && preferredTab.url.includes("whatnot.com")) {
+        return preferredTabId;
+      }
+    } catch (_error) {
+      // Ignore invalid tabs and continue with discovery.
+    }
+  }
+
+  const activeWhatnotTabs = await chrome.tabs.query({ active: true, currentWindow: true, url: ["*://www.whatnot.com/*"] });
+  if (activeWhatnotTabs.length) {
+    return activeWhatnotTabs[0].id;
+  }
+
+  const openWhatnotTabs = await chrome.tabs.query({ url: ["*://www.whatnot.com/*"] });
+  if (openWhatnotTabs.length) {
+    return openWhatnotTabs[0].id;
+  }
+
+  if (!allowAutoCreate) {
+    return null;
+  }
+
+  const createdTab = await chrome.tabs.create({ url: "https://www.whatnot.com/", active: true });
+  if (!createdTab || !createdTab.id) {
+    return null;
+  }
+
+  await waitForTabComplete(createdTab.id);
+  return createdTab.id;
+}
+
+function waitForTabComplete(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const onUpdated = (updatedTabId, info) => {
+      if (updatedTabId === tabId && info.status === "complete") {
+        finish();
+      }
+    };
+
+    const timer = setTimeout(() => finish(), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
 }

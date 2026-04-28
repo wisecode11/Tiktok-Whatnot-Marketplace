@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react"
 import { useAuth } from "@clerk/nextjs"
 import Link from "next/link"
+import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
 import { BRAND_HANDLE_PREFIX, BRAND_NAME } from "@/lib/brand"
 import { RoleGate } from "@/components/auth/role-gate"
@@ -11,8 +12,17 @@ import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Progress } from "@/components/ui/progress"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   ArrowRight,
   Check,
+  Copy,
   ExternalLink,
   Loader2,
   Rocket,
@@ -24,6 +34,7 @@ import {
 import { cn } from "@/lib/utils"
 import {
   disconnectPlatform,
+  getCurrentUserProfile,
   getClerkErrorMessage,
   getConnectedAccounts,
   getStripeStatus,
@@ -90,6 +101,9 @@ function LaunchPadContent() {
   const [feedbackMessage, setFeedbackMessage] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [autoConnectTriggered, setAutoConnectTriggered] = useState(false)
+  const [isWhatnotDialogOpen, setIsWhatnotDialogOpen] = useState(false)
+  const [licenseKey, setLicenseKey] = useState("")
+  const [copiedLicenseKey, setCopiedLicenseKey] = useState(false)
   const isStreamer = role === "streamer"
 
   useEffect(() => {
@@ -163,15 +177,19 @@ function LaunchPadContent() {
 
       try {
         const token = await waitForSessionToken(getToken)
-        const result = await getConnectedAccounts(token)
+        const [connectionsResult, currentUserResult] = await Promise.all([
+          getConnectedAccounts(token),
+          getCurrentUserProfile(token),
+        ])
 
         if (cancelled) {
           return
         }
 
+        setLicenseKey(currentUserResult.user.clerkUserId || "")
         setPlatforms((prev) =>
           prev.map((platform) => {
-            const connection = result.accounts.find((account) => account.platform === platform.id && account.connected)
+            const connection = connectionsResult.accounts.find((account) => account.platform === platform.id && account.connected)
 
             if (!connection) {
               return { ...platform, connected: false, connecting: false, username: undefined }
@@ -210,6 +228,11 @@ function LaunchPadContent() {
   const progress = (connectedCount / platforms.length) * 100
 
   const handleConnect = async (platformId: string) => {
+    if (platformId === "whatnot") {
+      setIsWhatnotDialogOpen(true)
+      return
+    }
+
     setPlatforms((prev) =>
       prev.map((p) =>
         p.id === platformId ? { ...p, connecting: true } : p
@@ -249,6 +272,16 @@ function LaunchPadContent() {
       )
       setErrorMessage(getClerkErrorMessage(error))
     }
+  }
+
+  const handleCopyLicenseKey = async () => {
+    if (!licenseKey) {
+      return
+    }
+
+    await navigator.clipboard.writeText(licenseKey)
+    setCopiedLicenseKey(true)
+    setTimeout(() => setCopiedLicenseKey(false), 1500)
   }
 
   useEffect(() => {
@@ -528,6 +561,81 @@ function LaunchPadContent() {
           View our setup guide
         </Link>
       </p>
+
+      <Dialog open={isWhatnotDialogOpen} onOpenChange={setIsWhatnotDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Connect Whatnot to {BRAND_NAME}</DialogTitle>
+            <DialogDescription>
+              Complete these steps to connect your Whatnot account with our marketplace extension flow.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border border-border/70 bg-muted/30 p-4">
+            <div className="flex items-center justify-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background p-2">
+                <Image
+                  src="/whatnotImage.png"
+                  alt="Whatnot logo"
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 object-contain"
+                />
+              </div>
+              <ArrowRight className="h-5 w-5 text-muted-foreground" />
+              <div className="flex h-12 min-w-44 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 font-semibold">
+                <Image
+                  src="/icon.svg"
+                  alt={`${BRAND_NAME} logo`}
+                  width={20}
+                  height={20}
+                  className="h-5 w-5 object-contain"
+                />
+                <span>{BRAND_NAME}</span>
+              </div>
+            </div>
+          </div>
+
+          <Button asChild className="w-full">
+            <a href="/downloads/whatnot-extension-updated.zip" download>
+              Download extension
+            </a>
+          </Button>
+
+          <div className="rounded-lg border border-border/70 bg-background p-4">
+            <p className="text-sm font-medium">License key (Clerk User ID)</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs">
+                {licenseKey || "Unable to load license key. Refresh and try again."}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCopyLicenseKey()}
+                disabled={!licenseKey}
+              >
+                <Copy className="mr-1 h-4 w-4" />
+                {copiedLicenseKey ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </div>
+
+          <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+            <li>Download the extension using the button above.</li>
+            <li>Open `whatnot.com` and sign in with your Whatnot account.</li>
+            <li>Open extension popup and paste the license key (Clerk User ID).</li>
+            <li>In extension, click `Connect Whatnot`.</li>
+            <li>Return to launch pad and continue your setup.</li>
+          </ol>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsWhatnotDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
