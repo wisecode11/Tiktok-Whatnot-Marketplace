@@ -37,6 +37,7 @@ import {
   getCurrentUserProfile,
   getClerkErrorMessage,
   getConnectedAccounts,
+  getWhatnotExtensionStatus,
   getStripeStatus,
   normalizeRole,
   startPlatformConnection,
@@ -54,6 +55,7 @@ interface Platform {
   username?: string
   required?: boolean
   error?: string
+  ctaLabel?: string
 }
 
 const streamerPlatforms: Platform[] = [
@@ -177,9 +179,10 @@ function LaunchPadContent() {
 
       try {
         const token = await waitForSessionToken(getToken)
-        const [connectionsResult, currentUserResult] = await Promise.all([
+        const [connectionsResult, currentUserResult, whatnotStatusResult] = await Promise.all([
           getConnectedAccounts(token),
           getCurrentUserProfile(token),
+          getWhatnotExtensionStatus(token),
         ])
 
         if (cancelled) {
@@ -189,10 +192,31 @@ function LaunchPadContent() {
         setLicenseKey(currentUserResult.user.clerkUserId || "")
         setPlatforms((prev) =>
           prev.map((platform) => {
+            if (platform.id === "whatnot") {
+              const isConnected = whatnotStatusResult.connected
+              const isInstalled = whatnotStatusResult.extensionInstalled
+              return {
+                ...platform,
+                connected: isConnected,
+                connecting: false,
+                username: isConnected
+                  ? whatnotStatusResult.savedSession?.whatnotUsername || "@whatnot_connected"
+                  : undefined,
+                ctaLabel: isInstalled
+                  ? "Connect Extension to Whatnot Account"
+                  : "Connect Whatnot",
+                error: isConnected
+                  ? undefined
+                  : isInstalled
+                    ? "Extension detected. Open it and connect your Whatnot account."
+                    : "Extension not detected. Install the extension, then connect your Whatnot account.",
+              }
+            }
+
             const connection = connectionsResult.accounts.find((account) => account.platform === platform.id && account.connected)
 
             if (!connection) {
-              return { ...platform, connected: false, connecting: false, username: undefined }
+              return { ...platform, connected: false, connecting: false, username: undefined, error: undefined }
             }
 
             return {
@@ -200,6 +224,7 @@ function LaunchPadContent() {
               connected: true,
               connecting: false,
               username: connection.username || `@${BRAND_HANDLE_PREFIX}_${platform.id}`,
+              error: undefined,
             }
           }),
         )
@@ -215,9 +240,13 @@ function LaunchPadContent() {
     }
 
     void loadConnections()
+    const intervalId = window.setInterval(() => {
+      void loadConnections()
+    }, 10000)
 
     return () => {
       cancelled = true
+      window.clearInterval(intervalId)
     }
   }, [getToken, isLoaded])
 
@@ -431,7 +460,7 @@ function LaunchPadContent() {
                     </p>
                   ) : (
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {platform.description}
+                      {platform.error || platform.description}
                     </p>
                   )}
                 </div>
@@ -469,7 +498,9 @@ function LaunchPadContent() {
                     ) : (
                       <>
                         <ExternalLink className="h-4 w-4" />
-                        Connect {platform.name}
+                        {platform.id === "whatnot"
+                          ? platform.ctaLabel || "Connect Whatnot"
+                          : `Connect ${platform.name}`}
                       </>
                     )}
                   </Button>

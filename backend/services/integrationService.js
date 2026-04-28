@@ -6,7 +6,7 @@ const GetSessionApiData = require("../models/GetSessionApiData");
 const SellerSession = require("../models/SellerSession");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
-const { requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
+const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
 const { decryptText, encryptText } = require("../utils/crypto");
 
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
@@ -1722,6 +1722,13 @@ async function disconnectPlatform({ clerkUserId, platform }) {
     });
   }
 
+  if (normalizedPlatform === "whatnot") {
+    await SellerSession.deleteMany({
+      platform: "whatnot",
+      clerk_user_id: clerkUserId,
+    });
+  }
+
   return { success: true };
 }
 
@@ -1879,11 +1886,62 @@ async function updateWhatnotBioFromPlatform({ bio }) {
   };
 }
 
+async function getWhatnotExtensionConnectionStatus({ clerkUserId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  const latestSession = await SellerSession.findOne({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+  }).sort({ updated_at: -1 });
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+  const hasLiveAuthTokens = Boolean(
+    authPayload &&
+      authPayload.auth &&
+      (authPayload.auth.csrf_token || authPayload.auth.session_extension_token),
+  );
+
+  const bridgeConnectedForUser = Boolean(
+    bridgeState &&
+      bridgeState.isOnline &&
+      authClerkUserId &&
+      authClerkUserId === normalizedClerkUserId,
+  );
+  const extensionInstalled = Boolean(bridgeConnectedForUser || latestSession);
+  const connected = Boolean(bridgeConnectedForUser && hasLiveAuthTokens && latestSession);
+
+  return {
+    connected,
+    extensionInstalled,
+    bridgeOnline: Boolean(bridgeState && bridgeState.isOnline),
+    hasSavedSession: Boolean(latestSession),
+    status: connected ? "connected" : extensionInstalled ? "disconnected" : "not_installed",
+    savedSession: latestSession
+      ? {
+          connectedAt: latestSession.connected_at || null,
+          updatedAt: latestSession.updated_at || null,
+          whatnotUsername: latestSession.whatnot_username || null,
+          extensionTabId: latestSession.extension_tab_id ?? null,
+        }
+      : null,
+  };
+}
+
 module.exports = {
   checkStripeAccountStatus,
   createConnectionSession,
   disconnectPlatform,
   getConnectedAccounts,
+  getWhatnotExtensionConnectionStatus,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,

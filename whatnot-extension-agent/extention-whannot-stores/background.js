@@ -106,7 +106,11 @@ async function connectWhatnot(tabId, clerkUserId = null) {
     cookie_state: cookies
   };
   await persistState();
-  sendSocketMessage("auth", { auth: state.auth, tabId: resolvedTabId });
+  sendSocketMessage("auth", {
+    auth: state.auth,
+    tabId: resolvedTabId,
+    clerkUserId: state.clerkUserId
+  });
   await saveSellerSessionToMarketplace({
     clerkUserId: state.clerkUserId,
     auth: state.auth,
@@ -442,7 +446,13 @@ function setBackendSocket(url) {
     return { success: false, error: err.message };
   }
 
-  ws.onopen = () => sendSocketMessage("auth", { status: "extension_online" });
+  ws.onopen = () =>
+    sendSocketMessage("auth", {
+      status: "extension_online",
+      clerkUserId: state.clerkUserId,
+      auth: state.auth,
+      tabId: state.tabId
+    });
   ws.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);

@@ -4,6 +4,7 @@ const {
   checkStripeStatus,
   createTikTokPhotoPost,
   createTikTokVideoPost,
+  getWhatnotExtensionStatusData,
   getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -43,6 +44,7 @@ router.get("/tiktok/creator-info", authenticateRequest, getTikTokCreatorInfoData
 router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
+router.get("/whatnot/extension-status", authenticateRequest, getWhatnotExtensionStatusData);
 router.post("/tiktok/posts/photo", authenticateRequest, createTikTokPhotoPost);
 router.post("/tiktok/posts/status", authenticateRequest, getTikTokPostStatusData);
 router.post("/tiktok/posts/video", authenticateRequest, createTikTokVideoPost);
