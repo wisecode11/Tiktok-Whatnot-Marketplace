@@ -18,12 +18,17 @@ class WhatnotConnectorPopup {
     this.nodes.bioInput = document.getElementById("bio-input");
     this.nodes.customPayload = document.getElementById("custom-payload");
 
-    document.getElementById("demo-session").onclick = () => this.demoSession();
-    document.getElementById("demo-graphql").onclick = () => this.demoLiveReadiness();
-    document.getElementById("demo-update-bio").onclick = () => this.demoUpdateBio();
-    document.getElementById("demo-custom-post").onclick = () => this.demoCustomPost();
+    const demoSessionBtn = document.getElementById("demo-session");
+    const demoGraphqlBtn = document.getElementById("demo-graphql");
+    const demoUpdateBioBtn = document.getElementById("demo-update-bio");
+    const demoCustomPostBtn = document.getElementById("demo-custom-post");
+
+    if (demoSessionBtn) demoSessionBtn.onclick = () => this.demoSession();
+    if (demoGraphqlBtn) demoGraphqlBtn.onclick = () => this.demoLiveReadiness();
+    if (demoUpdateBioBtn) demoUpdateBioBtn.onclick = () => this.demoUpdateBio();
+    if (demoCustomPostBtn) demoCustomPostBtn.onclick = () => this.demoCustomPost();
     this.nodes.connectBtn.onclick = () => this.connect();
-    this.nodes.copyTokens.onclick = () => this.copyTokens();
+    if (this.nodes.copyTokens) this.nodes.copyTokens.onclick = () => this.copyTokens();
 
     await this.refreshStatus();
     setInterval(() => this.refreshStatus(), 15000);
@@ -68,14 +73,18 @@ class WhatnotConnectorPopup {
   }
 
   applyTokens(auth) {
-    this.nodes.tokenContainer.style.display = "block";
-    this.nodes.csrfToken.textContent = auth?.csrf_token || "-";
-    this.nodes.sessionToken.textContent = auth?.session_extension_token || "-";
+    if (this.nodes.tokenContainer) this.nodes.tokenContainer.style.display = "block";
+    if (this.nodes.csrfToken) this.nodes.csrfToken.textContent = auth?.csrf_token || "-";
+    if (this.nodes.sessionToken) this.nodes.sessionToken.textContent = auth?.session_extension_token || "-";
     const cookieState = auth?.cookie_state || {};
-    this.nodes.cookieStatus.textContent = JSON.stringify(cookieState);
+    if (this.nodes.cookieStatus) this.nodes.cookieStatus.textContent = JSON.stringify(cookieState);
   }
 
   async copyTokens() {
+    if (!this.nodes.csrfToken || !this.nodes.sessionToken || !this.nodes.cookieStatus) {
+      this.log("Token fields are not available in this popup view.");
+      return;
+    }
     const text = JSON.stringify(
       {
         csrf_token: this.nodes.csrfToken.textContent,
@@ -160,6 +169,9 @@ class WhatnotConnectorPopup {
 
   async demoUpdateBio() {
     try {
+      if (!this.nodes.bioInput) {
+        throw new Error("Bio input is not available in this popup view.");
+      }
       const bio = (this.nodes.bioInput.value || "").trim();
       if (!bio) {
         throw new Error("Please enter bio text first.");
@@ -272,6 +284,9 @@ class WhatnotConnectorPopup {
 
   async demoCustomPost() {
     try {
+      if (!this.nodes.customPayload) {
+        throw new Error("Custom payload input is not available in this popup view.");
+      }
       const raw = (this.nodes.customPayload.value || "").trim();
       if (!raw) {
         throw new Error("Paste payload JSON from platform first.");
@@ -393,6 +408,7 @@ class WhatnotConnectorPopup {
 
   parseCustomPayloadTemplate() {
     try {
+      if (!this.nodes.customPayload) return null;
       const raw = (this.nodes.customPayload.value || "").trim();
       if (!raw) return null;
       const parsed = JSON.parse(raw);

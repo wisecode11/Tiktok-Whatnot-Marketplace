@@ -30,9 +30,11 @@ import {
   AuthApiError,
   getConnectedAccounts,
   getTikTokProfile,
+  getWhatnotExtensionStatus,
   waitForSessionToken,
   type ConnectedAccountResponse,
   type TikTokProfileResponse,
+  type WhatnotExtensionStatusResponse,
 } from "@/lib/auth"
 
 type SupportedPlatformId = "tiktok" | "whatnot"
@@ -95,6 +97,7 @@ export default function SellerConnectPlatformsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccountResponse["accounts"]>([])
   const [tiktokProfile, setTikTokProfile] = useState<TikTokProfileResponse | null>(null)
+  const [whatnotStatus, setWhatnotStatus] = useState<WhatnotExtensionStatusResponse | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -109,9 +112,10 @@ export default function SellerConnectPlatformsPage() {
         setErrorMessage(null)
 
         const token = await waitForSessionToken(getToken)
-        const [accountsResult, tiktokResult] = await Promise.allSettled([
+        const [accountsResult, tiktokResult, whatnotResult] = await Promise.allSettled([
           getConnectedAccounts(token),
           getTikTokProfile(token),
+          getWhatnotExtensionStatus(token),
         ])
 
         if (cancelled) {
@@ -130,7 +134,13 @@ export default function SellerConnectPlatformsPage() {
           setTikTokProfile(null)
         }
 
-        if (accountsResult.status === "rejected" && tiktokResult.status === "rejected") {
+        if (whatnotResult.status === "fulfilled") {
+          setWhatnotStatus(whatnotResult.value)
+        } else {
+          setWhatnotStatus(null)
+        }
+
+        if (accountsResult.status === "rejected" && tiktokResult.status === "rejected" && whatnotResult.status === "rejected") {
           throw accountsResult.reason
         }
       } catch (error) {
@@ -152,9 +162,13 @@ export default function SellerConnectPlatformsPage() {
     }
 
     void loadPlatformState()
+    const intervalId = window.setInterval(() => {
+      void loadPlatformState()
+    }, 10000)
 
     return () => {
       cancelled = true
+      window.clearInterval(intervalId)
     }
   }, [getToken, isLoaded])
 
@@ -177,13 +191,13 @@ export default function SellerConnectPlatformsPage() {
 
       return {
         ...platform,
-        connected: Boolean(account?.connected),
-        username: account?.username || null,
-        status: account?.status || "not connected",
+        connected: Boolean(whatnotStatus?.connected),
+        username: whatnotStatus?.savedSession?.whatnotUsername || account?.username || null,
+        status: whatnotStatus?.status || account?.status || "not connected",
         externalId: account?.externalId || null,
       }
     })
-  }, [connectedAccounts, tiktokProfile])
+  }, [connectedAccounts, tiktokProfile, whatnotStatus])
 
   const connectedCount = platformCards.filter((platform) => platform.connected).length
   const progressValue = (connectedCount / supportedPlatforms.length) * 100
