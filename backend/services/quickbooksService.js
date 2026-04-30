@@ -20,7 +20,7 @@ function getFrontendUrl() {
 }
 
 function getBackendUrl() {
-  return process.env.BACKEND_URL || "http://localhost:5001";
+  return process.env.BACKEND_URL || "http://localhost:5000";
 }
 
 function getIntuitConfig() {

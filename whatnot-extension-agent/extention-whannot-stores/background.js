@@ -60,6 +60,8 @@ async function handleMessage(request) {
       return setBackendSocket(request.url);
     case "save_get_session_api_data":
       return saveGetSessionApiDataToMarketplace(request.payload);
+    case "fetch_whatnot_orders":
+      return fetchWhatnotOrders(request.tabId);
     default:
       return { success: false, error: "Unknown action" };
   }
@@ -170,6 +172,373 @@ async function saveGetSessionApiDataToMarketplace(payload) {
   }
 }
 
+function extractApolloSSRData(htmlString) {
+  const html = typeof htmlString === "string" ? htmlString : "";
+  if (!html) {
+    return {
+      orders: [],
+      debug: {
+        htmlLength: 0,
+        scriptMatches: 0,
+        parsedEntries: 0,
+      }
+    };
+  }
+
+  const scriptTagRegex = /<script[^>]*>\s*\(window\[Symbol\.for\("ApolloSSRDataTransport"\)\]\s*\?\?=\s*\[\]\)\.push\(([\s\S]*?)\)\s*<\/script>/g;
+  let match;
+  const apolloEntries = [];
+  let scriptMatches = 0;
+
+  while ((match = scriptTagRegex.exec(html)) !== null) {
+    scriptMatches += 1;
+    const chunk = String(match[1] || "").trim();
+    if (!chunk) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(chunk);
+      apolloEntries.push(parsed);
+      continue;
+    } catch (_error) {
+      // Try JS object literal parser as fallback.
+    }
+
+    try {
+      const parsed = new Function(`return (${chunk});`)();
+      if (parsed && typeof parsed === "object") {
+        apolloEntries.push(parsed);
+      }
+    } catch (_error) {
+      // Ignore malformed script chunks and continue parsing.
+    }
+  }
+
+  const orders = [];
+  const seenOrderIds = new Set();
+
+  function maybePushOrder(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const id = node.id || node.orderId || node.uuid || JSON.stringify(node);
+    if (seenOrderIds.has(id)) {
+      return;
+    }
+    seenOrderIds.add(id);
+    orders.push(node);
+  }
+
+  // Exact extractor requested by user:
+  // payload.me.orders.edges[].node
+  function extractFromMeOrdersPath(value) {
+    const edges = value?.me?.orders?.edges;
+    if (!Array.isArray(edges)) {
+      return;
+    }
+    for (const edge of edges) {
+      if (edge && edge.node && typeof edge.node === "object") {
+        maybePushOrder(edge.node);
+      }
+    }
+  }
+
+  function visit(value) {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item);
+      }
+      return;
+    }
+
+    extractFromMeOrdersPath(value);
+
+    const directEdges = value?.me?.orders?.edges;
+    if (Array.isArray(directEdges)) {
+      for (const edge of directEdges) {
+        if (edge && edge.node) {
+          maybePushOrder(edge.node);
+        }
+      }
+    }
+
+    const nestedDataEdges = value?.data?.me?.orders?.edges;
+    if (Array.isArray(nestedDataEdges)) {
+      for (const edge of nestedDataEdges) {
+        if (edge && edge.node) {
+          maybePushOrder(edge.node);
+        }
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      visit(nested);
+    }
+  }
+
+  for (const entry of apolloEntries) {
+    visit(entry);
+    if (entry && typeof entry === "object" && entry.rehydrate) {
+      visit(entry.rehydrate);
+    }
+  }
+
+  return {
+    orders,
+    debug: {
+      htmlLength: html.length,
+      scriptMatches,
+      parsedEntries: apolloEntries.length,
+    }
+  };
+}
+
+async function sendOrdersToMarketplace(orders, tabId) {
+  const headers = {
+    "content-type": "application/json"
+  };
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  const response = await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/orders`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      source: "whatnot-extension",
+      clerkUserId: state.clerkUserId,
+      tabId: tabId ?? state.tabId ?? null,
+      orders: Array.isArray(orders) ? orders : []
+    })
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error || "Failed to save orders to marketplace.");
+  }
+}
+
+async function fetchWhatnotOrders(tabId) {
+  let targetTabId = tabId || state.tabId;
+  if (!targetTabId || !state.connected || !state.auth) {
+    const connected = await ensureConnectedWhatnotSession(targetTabId);
+    if (!connected.success) {
+      return { success: false, error: connected.error || "Not connected to Whatnot." };
+    }
+    targetTabId = connected.tabId;
+  }
+
+  const response = await executeApi(targetTabId, {
+    url: "https://www.whatnot.com/en-GB/dashboard/orders",
+    method: "GET"
+  });
+
+  if (!response?.success || typeof response?.data !== "string") {
+    return {
+      success: false,
+      error: response?.error || "Failed to fetch Whatnot orders page."
+    };
+  }
+
+  const ssrExtract = extractApolloSSRData(response.data);
+  let orders = Array.isArray(ssrExtract?.orders) ? ssrExtract.orders : [];
+  let fallbackUsed = false;
+  let fallbackCount = 0;
+  if (!orders.length) {
+    const graphqlFallbackOrders = await fetchOrdersFromCapturedGraphqlTemplate(targetTabId);
+    if (graphqlFallbackOrders.length) {
+      orders = graphqlFallbackOrders;
+      fallbackUsed = true;
+      fallbackCount = graphqlFallbackOrders.length;
+    }
+  }
+
+  console.log("[Whatnot Orders Debug]", {
+    htmlLength: ssrExtract?.debug?.htmlLength || 0,
+    apolloScriptMatches: ssrExtract?.debug?.scriptMatches || 0,
+    apolloParsedEntries: ssrExtract?.debug?.parsedEntries || 0,
+    ssrOrdersCount: Array.isArray(ssrExtract?.orders) ? ssrExtract.orders.length : 0,
+    fallbackUsed,
+    fallbackCount,
+    finalOrdersCount: orders.length,
+    sampleOrder: orders[0] || null
+  });
+
+  await sendOrdersToMarketplace(orders, targetTabId);
+  return {
+    success: true,
+    count: orders.length,
+    orders,
+    debug: {
+      htmlLength: ssrExtract?.debug?.htmlLength || 0,
+      apolloScriptMatches: ssrExtract?.debug?.scriptMatches || 0,
+      apolloParsedEntries: ssrExtract?.debug?.parsedEntries || 0,
+      ssrOrdersCount: Array.isArray(ssrExtract?.orders) ? ssrExtract.orders.length : 0,
+      fallbackUsed,
+      fallbackCount,
+    }
+  };
+}
+
+function extractOrdersFromGraphqlPayload(payload) {
+  const orders = [];
+  const seenOrderIds = new Set();
+
+  function maybePush(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    // Strictly accept only actual order nodes.
+    const isOrderNode = node.__typename === "OrderNode"
+      || (typeof node.id === "string" && node.id.startsWith("T3JkZXJOb2Rl"))
+      || (typeof node.uuid === "string" && node.buyer && node.items);
+    if (!isOrderNode) {
+      return;
+    }
+
+    const key = node.id || node.uuid || JSON.stringify(node);
+    if (seenOrderIds.has(key)) {
+      return;
+    }
+    seenOrderIds.add(key);
+    orders.push(node);
+  }
+
+  function visit(value) {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item);
+      }
+      return;
+    }
+
+    // Only extract from the exact path requested:
+    // me.orders.edges[].node
+    const meOrdersEdges = value?.me?.orders?.edges;
+    if (Array.isArray(meOrdersEdges)) {
+      for (const edge of meOrdersEdges) {
+        if (edge?.node) {
+          maybePush(edge.node);
+        }
+      }
+    }
+
+    // Also support GraphQL payload root where data is already unwrapped.
+    const dataMeOrdersEdges = value?.data?.me?.orders?.edges;
+    if (Array.isArray(dataMeOrdersEdges)) {
+      for (const edge of dataMeOrdersEdges) {
+        if (edge?.node) {
+          maybePush(edge.node);
+        }
+      }
+    }
+
+    for (const nested of Object.values(value)) {
+      visit(nested);
+    }
+  }
+
+  visit(payload);
+  return orders;
+}
+
+function getOrderGraphqlTemplate(templates) {
+  if (!templates || typeof templates !== "object") {
+    return null;
+  }
+
+  const candidates = Object.entries(templates)
+    .filter(([operationName, template]) => {
+      if (!template || typeof template !== "object") {
+        return false;
+      }
+      const op = String(operationName || "").toLowerCase();
+      const body = template.requestBody && typeof template.requestBody === "object"
+        ? template.requestBody
+        : {};
+      const query = typeof body.query === "string" ? body.query.toLowerCase() : "";
+      return op.includes("order") || query.includes("order");
+    })
+    .map(([operationName, template]) => ({
+      operationName,
+      template,
+    }));
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    const aScore = (a.operationName.toLowerCase().includes("sellerhub") ? 20 : 0)
+      + (a.operationName.toLowerCase().includes("myorders") ? 20 : 0)
+      + scoreTemplate(a.template);
+    const bScore = (b.operationName.toLowerCase().includes("sellerhub") ? 20 : 0)
+      + (b.operationName.toLowerCase().includes("myorders") ? 20 : 0)
+      + scoreTemplate(b.template);
+    return bScore - aScore;
+  });
+
+  return candidates[0].template;
+}
+
+async function fetchOrdersFromCapturedGraphqlTemplate(tabId) {
+  const template = getOrderGraphqlTemplate(state.observedGraphqlTemplates || {});
+  if (!template) {
+    return [];
+  }
+
+  const requestBody = template.requestBody && typeof template.requestBody === "object"
+    ? structuredClone(template.requestBody)
+    : null;
+  if (!requestBody) {
+    return [];
+  }
+
+  const templateHeaders = filterAllowedHeaders(template.requestHeaders || {});
+  const headers = {
+    ...templateHeaders,
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-wn-extension": "1",
+  };
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (csrfToken && csrfToken !== "-") {
+    headers["x-csrf-token"] = csrfToken;
+  }
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  const response = await executeApi(tabId, {
+    url: template.url || "https://www.whatnot.com/services/graphql/?ssr=0",
+    method: String(template.method || "POST").toUpperCase(),
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response?.success || !response?.data) {
+    return [];
+  }
+
+  const payload = response.data;
+  const graphqlData = payload && typeof payload === "object" && payload.data
+    ? payload.data
+    : payload;
+
+  return extractOrdersFromGraphqlPayload(graphqlData);
+}
+
 async function executeApi(tabId, options) {
   let targetTabId = tabId || state.tabId;
   if (!targetTabId) {
@@ -222,6 +591,13 @@ async function handlePlatformAction(payload) {
   let result = null;
   if (payload?.action === "update_bio_from_platform") {
     result = await executeUpdateBioFromPlatform(payload);
+  } else if (payload?.action === "fetch_whatnot_orders") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await fetchWhatnotOrders(payload?.tabId || state.tabId);
   } else {
     result = await executeApi(state.tabId, payload);
   }

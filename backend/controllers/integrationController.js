@@ -7,9 +7,12 @@ const {
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
+  getWhatnotOrders,
+  syncWhatnotOrdersFromExtension,
   handleWhatnotCallback,
   handleTikTokCallback,
   saveGetSessionApiData,
+  saveWhatnotOrders,
   saveWhatnotSellerSession,
   updateWhatnotBioFromPlatform,
 } = require("../services/integrationService");
@@ -206,6 +209,51 @@ async function saveGetSessionApiDataEntry(req, res) {
   }
 }
 
+async function saveWhatnotOrdersEntry(req, res) {
+  try {
+    const bodyClerkUserId = req.body && typeof req.body.clerkUserId === "string"
+      ? req.body.clerkUserId.trim()
+      : null;
+    const result = await saveWhatnotOrders({
+      clerkUserId: bodyClerkUserId || (req.auth && req.auth.userId ? req.auth.userId : null),
+      orders: req.body && Array.isArray(req.body.orders) ? req.body.orders : [],
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(200).json({
+      success: true,
+      savedCount: result.savedCount,
+      receivedCount: result.receivedCount,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function listWhatnotOrders(req, res) {
+  try {
+    const result = await getWhatnotOrders({
+      clerkUserId: req.auth.userId,
+      limit: req.query && req.query.limit ? Number(req.query.limit) : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncWhatnotOrders(req, res) {
+  try {
+    const result = await syncWhatnotOrdersFromExtension({
+      clerkUserId: req.auth.userId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function updateWhatnotBio(req, res) {
   try {
     const result = await updateWhatnotBioFromPlatform({
@@ -249,9 +297,12 @@ module.exports = {
   getTikTokPostStatusData,
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
+  getWhatnotOrders: listWhatnotOrders,
+  syncWhatnotOrders,
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   startConnection,
   whatnotCallback,
