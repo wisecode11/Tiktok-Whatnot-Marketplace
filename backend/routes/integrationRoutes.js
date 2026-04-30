@@ -11,9 +11,12 @@ const {
   getTikTokPostStatusData,
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
+  getWhatnotOrders,
+  syncWhatnotOrders,
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
   startConnection,
@@ -49,12 +52,15 @@ router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInvento
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.get("/whatnot/extension-status", authenticateRequest, getWhatnotExtensionStatusData);
+router.get("/whatnot/orders", authenticateRequest, getWhatnotOrders);
+router.post("/whatnot/orders/sync", authenticateRequest, syncWhatnotOrders);
 router.post("/tiktok/posts/photo", authenticateRequest, createTikTokPhotoPost);
 router.post("/tiktok/posts/status", authenticateRequest, getTikTokPostStatusData);
 router.post("/tiktok/posts/video", authenticateRequest, createTikTokVideoPost);
 router.post("/connect", authenticateRequest, startConnection);
 router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatnotSessionData);
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
+router.post("/whatnot/orders", authenticateWhatnotExtension, saveWhatnotOrdersEntry);
 router.post("/whatnot/profile/bio", authenticateRequest, updateWhatnotBio);
 router.delete("/accounts/:platform", authenticateRequest, removeConnection);
 router.get("/stripe/status", authenticateRequest, checkStripeStatus);

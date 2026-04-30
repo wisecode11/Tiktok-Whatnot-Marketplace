@@ -7,6 +7,7 @@ module.exports = {
   ConnectedAccount: require('./ConnectedAccount'),
   GetSessionApiData: require('./GetSessionApiData'),
   SellerSession: require('./SellerSession'),
+  WhatnotOrder: require('./WhatnotOrder'),
   WhatnotInventorySnapshot: require('./WhatnotInventorySnapshot'),
   TikTokPost: require('./TikTokPost'),
 

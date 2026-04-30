@@ -16,6 +16,7 @@ async function authenticateRequest(req, res, next) {
   try {
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY,
+      clockSkewInMs: 15000,
     });
 
     req.auth = {
@@ -26,7 +27,18 @@ async function authenticateRequest(req, res, next) {
 
     return next();
   } catch (error) {
-    return res.status(401).json({ error: "Invalid or expired session token." });
+    const errorMessage =
+      error && typeof error.message === "string"
+        ? error.message
+        : "Invalid or expired session token.";
+
+    return res.status(401).json({
+      error: "Invalid or expired session token.",
+      details:
+        process.env.NODE_ENV === "development"
+          ? { reason: errorMessage }
+          : undefined,
+    });
   }
 }
 

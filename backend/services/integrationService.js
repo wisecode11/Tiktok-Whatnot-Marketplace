@@ -4,6 +4,7 @@ const Stripe = require("stripe");
 const ConnectedAccount = require("../models/ConnectedAccount");
 const GetSessionApiData = require("../models/GetSessionApiData");
 const SellerSession = require("../models/SellerSession");
+const WhatnotOrder = require("../models/WhatnotOrder");
 const WhatnotInventorySnapshot = require("../models/WhatnotInventorySnapshot");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
@@ -1861,6 +1862,236 @@ async function saveGetSessionApiData({
   };
 }
 
+function toNullableDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeWhatnotOrder(order) {
+  const payload = order && typeof order === "object" ? order : {};
+  const isOrderNode = payload.__typename === "OrderNode"
+    || (typeof payload.id === "string" && payload.id.startsWith("T3JkZXJOb2Rl"))
+    || (typeof payload.uuid === "string" && payload.buyer && payload.items);
+  if (!isOrderNode) {
+    return null;
+  }
+
+  const buyer = payload.buyer && typeof payload.buyer === "object" ? payload.buyer : {};
+  const firstItemNode = Array.isArray(payload?.items?.edges) ? payload.items.edges[0]?.node : null;
+  const listingFromItem = firstItemNode && typeof firstItemNode === "object" ? firstItemNode.listing : null;
+  const listing = (payload.listing && typeof payload.listing === "object" ? payload.listing : null)
+    || (listingFromItem && typeof listingFromItem === "object" ? listingFromItem : {});
+  const amountCandidates = [
+    payload.total,
+    payload.totalPrice,
+    payload.total_amount,
+    payload.price,
+    payload.amount,
+    payload.subtotal,
+    payload.orderTotal,
+  ];
+  const currencyCandidates = [
+    payload.currency,
+    payload.currencyCode,
+    payload.totalCurrency,
+    payload.priceCurrency,
+  ];
+
+  let priceAmount = null;
+  for (const candidate of amountCandidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      priceAmount = candidate;
+      break;
+    }
+    if (typeof candidate === "string" && candidate.trim()) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) {
+        priceAmount = parsed;
+        break;
+      }
+    }
+  }
+
+  const normalized = {
+    whatnot_order_id: payload.id || payload.uuid || payload.orderId || null,
+    order_number: payload.orderNumber || payload.number || payload.id || null,
+    status: payload.status || payload.fulfillmentStatus || payload.orderStatus || null,
+    buyer_username: buyer.username || buyer.handle || payload.buyerUsername || null,
+    buyer_name: buyer.displayName || buyer.name || payload.buyerName || null,
+    listing_title: listing.title || payload.title || payload.listingTitle || null,
+    price_amount: priceAmount,
+    price_currency: currencyCandidates.find((value) => typeof value === "string" && value.trim()) || null,
+    ordered_at: toNullableDate(
+      payload.createdAt ||
+        payload.created_at ||
+        payload.placedAt ||
+        payload.purchasedAt ||
+        payload.orderDate,
+    ),
+    raw_payload: payload,
+  };
+
+  return normalized;
+}
+
+async function saveWhatnotOrders({
+  clerkUserId = null,
+  orders = [],
+  tabId = null,
+  source = "whatnot-extension",
+}) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const incomingOrders = Array.isArray(orders) ? orders : [];
+  const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
+  const now = new Date();
+  let savedCount = 0;
+
+  // Clean previously saved non-order documents for this user.
+  await WhatnotOrder.deleteMany({
+    clerk_user_id: normalizedClerkUserId,
+    "raw_payload.__typename": { $ne: "OrderNode" },
+  });
+
+  for (const order of incomingOrders) {
+    const normalized = normalizeWhatnotOrder(order);
+    if (!normalized || !normalized.whatnot_order_id) {
+      continue;
+    }
+    await WhatnotOrder.findOneAndUpdate(
+      {
+        clerk_user_id: normalizedClerkUserId,
+        whatnot_order_id: normalized.whatnot_order_id,
+      },
+      {
+        $set: {
+          platform: "whatnot",
+          clerk_user_id: normalizedClerkUserId,
+          whatnot_order_id: normalized.whatnot_order_id,
+          order_number: normalized.order_number,
+          status: normalized.status,
+          buyer_username: normalized.buyer_username,
+          buyer_name: normalized.buyer_name,
+          listing_title: normalized.listing_title,
+          price_amount: normalized.price_amount,
+          price_currency: normalized.price_currency,
+          ordered_at: normalized.ordered_at,
+          extension_tab_id: extensionTabId,
+          source: source || "whatnot-extension",
+          raw_payload: normalized.raw_payload,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+      },
+    );
+    savedCount += 1;
+  }
+
+  return {
+    savedCount,
+    receivedCount: incomingOrders.length,
+  };
+}
+
+async function getWhatnotOrders({ clerkUserId, limit = 100 }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.min(200, Math.max(1, Math.floor(Number(limit))))
+    : 100;
+  const orders = await WhatnotOrder.find({ clerk_user_id: normalizedClerkUserId })
+    .sort({ ordered_at: -1, updated_at: -1 })
+    .limit(safeLimit);
+
+  return {
+    orders: orders.map((order) => ({
+      id: order._id,
+      whatnotOrderId: order.whatnot_order_id,
+      orderNumber: order.order_number,
+      status: order.status,
+      buyerUsername: order.buyer_username,
+      buyerName: order.buyer_name,
+      listingTitle: order.listing_title,
+      priceAmount: order.price_amount,
+      priceCurrency: order.price_currency,
+      orderedAt: order.ordered_at,
+      updatedAt: order.updated_at,
+      rawPayload: order.raw_payload,
+    })),
+  };
+}
+
+async function syncWhatnotOrdersFromExtension({ clerkUserId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    return {
+      triggered: false,
+      reason: "extension_offline",
+      fetchedCount: null,
+    };
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    return {
+      triggered: false,
+      reason: "extension_not_connected_for_user",
+      fetchedCount: null,
+    };
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "fetch_whatnot_orders",
+    clerkUserId: normalizedClerkUserId,
+  });
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to sync Whatnot orders through extension.",
+      actionResult || null,
+    );
+  }
+
+  return {
+    triggered: true,
+    reason: "sync_started",
+    fetchedCount: Number.isFinite(Number(actionResult.count)) ? Number(actionResult.count) : null,
+  };
+}
+
 async function updateWhatnotBioFromPlatform({ bio }) {
   const nextBio = typeof bio === "string" ? bio.trim() : "";
 
@@ -2128,5 +2359,8 @@ module.exports = {
   handleTikTokCallback,
   updateWhatnotBioFromPlatform,
   saveGetSessionApiData,
+  saveWhatnotOrders,
   saveWhatnotSellerSession,
+  getWhatnotOrders,
+  syncWhatnotOrdersFromExtension,
 };

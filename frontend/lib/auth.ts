@@ -280,6 +280,31 @@ export interface WhatnotExtensionStatusResponse {
   } | null
 }
 
+export interface WhatnotOrderItem {
+  id: string
+  whatnotOrderId: string | null
+  orderNumber: string | null
+  status: string | null
+  buyerUsername: string | null
+  buyerName: string | null
+  listingTitle: string | null
+  priceAmount: number | null
+  priceCurrency: string | null
+  orderedAt: string | null
+  updatedAt: string | null
+  rawPayload: Record<string, unknown>
+}
+
+export interface WhatnotOrdersResponse {
+  orders: WhatnotOrderItem[]
+}
+
+export interface WhatnotOrdersSyncResponse {
+  triggered: boolean
+  reason: string
+  fetchedCount: number | null
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
@@ -561,6 +586,22 @@ export async function getWhatnotExtensionStatus(token: string) {
   })
 }
 
+export async function getWhatnotOrders(token: string, params?: { limit?: number }) {
+  const search = new URLSearchParams()
+
+  if (typeof params?.limit === "number") {
+    search.set("limit", String(params.limit))
+  }
+
+  const query = search.toString()
+  const path = query ? `/api/integrations/whatnot/orders?${query}` : "/api/integrations/whatnot/orders"
+  return request<WhatnotOrdersResponse>(path, { token })
+}
+
+export async function syncWhatnotOrders(token: string) {
+  return request<WhatnotOrdersSyncResponse>("/api/integrations/whatnot/orders/sync", {
+    token,
+    method: "POST",
 export async function syncWhatnotInventoryLive(
   token: string,
   status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",
