@@ -5,6 +5,7 @@ const ConnectedAccount = require("../models/ConnectedAccount");
 const GetSessionApiData = require("../models/GetSessionApiData");
 const SellerSession = require("../models/SellerSession");
 const WhatnotOrder = require("../models/WhatnotOrder");
+const WhatnotInventorySnapshot = require("../models/WhatnotInventorySnapshot");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
 const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
@@ -54,12 +55,21 @@ const TIKTOK_ENHANCED_USER_INFO_FIELDS = [
   "likes_count",
   "video_count",
 ].join(",");
+const WHATNOT_INVENTORY_STATUSES = new Set(["ACTIVE", "DRAFT", "INACTIVE", "SOLD_OUT"]);
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
   error.status = status;
   error.details = details;
   return error;
+}
+
+function normalizeInventoryStatus(status) {
+  const normalized = typeof status === "string" ? status.trim().toUpperCase() : "";
+  if (!WHATNOT_INVENTORY_STATUSES.has(normalized)) {
+    throw createHttpError(400, "Invalid status. Use ACTIVE, DRAFT, INACTIVE, or SOLD_OUT.");
+  }
+  return normalized;
 }
 
 function getFrontendUrl() {
@@ -2117,6 +2127,173 @@ async function updateWhatnotBioFromPlatform({ bio }) {
   };
 }
 
+async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE" }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+  const normalizedStatus = normalizeInventoryStatus(status);
+
+  const requestPayload = {
+    after: null,
+    filters: [],
+    first: null,
+    groupBy: null,
+    query: null,
+    sellerId: null,
+    sort: null,
+    statuses: [normalizedStatus],
+    transactionTypes: null,
+  };
+
+  const actionResult = await requestWhatnotAction({
+    action: "fetch_seller_hub_inventory",
+    status: normalizedStatus,
+    requestPayload,
+    clerkUserId: normalizedClerkUserId,
+  });
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Whatnot inventory fetch failed through extension.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  if (Array.isArray(body && body.errors) && body.errors.length) {
+    const firstError = body.errors[0] && body.errors[0].message
+      ? String(body.errors[0].message)
+      : "Whatnot inventory GraphQL returned errors.";
+    throw createHttpError(502, firstError, body);
+  }
+
+  const now = new Date();
+  const edges =
+    body &&
+    body.data &&
+    body.data.me &&
+    body.data.me.inventory &&
+    Array.isArray(body.data.me.inventory.edges)
+      ? body.data.me.inventory.edges
+      : [];
+  const tabId = actionResult.tabId ?? null;
+  let upsertedCount = 0;
+
+  for (const edge of edges) {
+    const node = edge && typeof edge === "object" ? edge.node : null;
+    const inventoryId = node && node.id ? String(node.id).trim() : "";
+
+    if (!inventoryId) {
+      continue;
+    }
+
+    await WhatnotInventorySnapshot.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        clerk_user_id: normalizedClerkUserId,
+        status_filter: normalizedStatus,
+        inventory_id: inventoryId,
+      },
+      {
+        $set: {
+          source: "whatnot-extension-live",
+          request_payload: requestPayload,
+          response_payload: node || {},
+          extension_tab_id: tabId,
+          synced_at: now,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
+    );
+    upsertedCount += 1;
+  }
+
+  const latestRecords = await WhatnotInventorySnapshot.find({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+    status_filter: normalizedStatus,
+  })
+    .sort({ synced_at: -1, updated_at: -1 })
+    .limit(Math.max(1, edges.length || 1));
+
+  const responsePayload = {
+    data: {
+      me: {
+        inventory: {
+          edges: latestRecords.map((record) => ({
+            node: record.response_payload || {},
+          })),
+        },
+      },
+    },
+  };
+
+  return {
+    status: normalizedStatus,
+    syncedAt: now,
+    snapshotId: latestRecords.length ? latestRecords[0]._id : null,
+    syncedProducts: upsertedCount,
+    responsePayload,
+  };
+}
+
+async function getLatestWhatnotInventorySnapshot({ clerkUserId, status = "ACTIVE" }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+  const normalizedStatus = normalizeInventoryStatus(status);
+
+  const snapshots = await WhatnotInventorySnapshot.find({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+    status_filter: normalizedStatus,
+  }).sort({ synced_at: -1, updated_at: -1 });
+
+  if (!snapshots.length) {
+    return {
+      status: normalizedStatus,
+      syncedAt: null,
+      responsePayload: {},
+    };
+  }
+
+  const latestSyncedAt = snapshots[0].synced_at ? new Date(snapshots[0].synced_at).getTime() : null;
+  const latestSnapshots = latestSyncedAt == null
+    ? snapshots
+    : snapshots.filter((record) => {
+      const recordSyncedAt = record.synced_at ? new Date(record.synced_at).getTime() : null;
+      return recordSyncedAt === latestSyncedAt;
+    });
+
+  return {
+    status: normalizedStatus,
+    syncedAt: snapshots[0].synced_at || null,
+    snapshotId: snapshots[0]._id || null,
+    responsePayload: {
+      data: {
+        me: {
+          inventory: {
+            edges: latestSnapshots.map((record) => ({
+              node: record.response_payload || {},
+            })),
+          },
+        },
+      },
+    },
+  };
+}
+
 async function getWhatnotExtensionConnectionStatus({ clerkUserId }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -2173,7 +2350,9 @@ module.exports = {
   disconnectPlatform,
   getConnectedAccounts,
   getWhatnotExtensionConnectionStatus,
+  getLatestWhatnotInventorySnapshot,
   getWhatnotInventorySnapshot,
+  syncWhatnotInventoryFromPlatform,
   getTikTokProfile,
   getTikTokVideoAnalytics,
   handleWhatnotCallback,

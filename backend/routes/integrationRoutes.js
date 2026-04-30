@@ -5,6 +5,7 @@ const {
   createTikTokPhotoPost,
   createTikTokVideoPost,
   getWhatnotExtensionStatusData,
+  getWhatnotInventoryLiveData,
   getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -17,6 +18,7 @@ const {
   saveGetSessionApiDataEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
+  syncWhatnotInventoryLiveData,
   startConnection,
   whatnotCallback,
   tiktokCallback,
@@ -47,6 +49,8 @@ router.get("/tiktok/creator-info", authenticateRequest, getTikTokCreatorInfoData
 router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
+router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
+router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.get("/whatnot/extension-status", authenticateRequest, getWhatnotExtensionStatusData);
 router.get("/whatnot/orders", authenticateRequest, getWhatnotOrders);
 router.post("/whatnot/orders/sync", authenticateRequest, syncWhatnotOrders);

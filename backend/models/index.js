@@ -8,6 +8,7 @@ module.exports = {
   GetSessionApiData: require('./GetSessionApiData'),
   SellerSession: require('./SellerSession'),
   WhatnotOrder: require('./WhatnotOrder'),
+  WhatnotInventorySnapshot: require('./WhatnotInventorySnapshot'),
   TikTokPost: require('./TikTokPost'),
 
   // Billing / Subscription

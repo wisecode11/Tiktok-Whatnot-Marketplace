@@ -4,6 +4,7 @@ const {
   disconnectPlatform,
   getConnectedAccounts,
   getWhatnotExtensionConnectionStatus,
+  getLatestWhatnotInventorySnapshot,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
@@ -14,6 +15,7 @@ const {
   saveGetSessionApiData,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
+  syncWhatnotInventoryFromPlatform,
   updateWhatnotBioFromPlatform,
 } = require("../services/integrationService");
 const {
@@ -104,6 +106,30 @@ async function getWhatnotExtensionStatusData(req, res) {
   try {
     const result = await getWhatnotExtensionConnectionStatus({
       clerkUserId: req.auth.userId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getWhatnotInventoryLiveData(req, res) {
+  try {
+    const result = await getLatestWhatnotInventorySnapshot({
+      clerkUserId: req.auth.userId,
+      status: req.query && req.query.status ? req.query.status : "ACTIVE",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncWhatnotInventoryLiveData(req, res) {
+  try {
+    const result = await syncWhatnotInventoryFromPlatform({
+      clerkUserId: req.auth.userId,
+      status: req.body && req.body.status ? req.body.status : "ACTIVE",
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -292,6 +318,7 @@ module.exports = {
   createTikTokPhotoPost,
   createTikTokVideoPost,
   getWhatnotInventorySnapshotData,
+  getWhatnotInventoryLiveData,
   getWhatnotExtensionStatusData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -304,6 +331,7 @@ module.exports = {
   saveGetSessionApiDataEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
+  syncWhatnotInventoryLiveData,
   startConnection,
   whatnotCallback,
   tiktokCallback,

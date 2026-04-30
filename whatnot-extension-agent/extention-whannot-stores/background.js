@@ -13,6 +13,8 @@ let stateHydrated = false;
 const MARKETPLACE_API_BASE = "http://localhost:5000";
 const WHATNOT_EXTENSION_API_KEY = "";
 const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
+const SELLER_HUB_INVENTORY_QUERY =
+  "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
 
 chrome.runtime.onInstalled.addListener(() => {
   state.backendSocketUrl = BACKEND_SOCKET_URL;
@@ -598,6 +600,8 @@ async function handlePlatformAction(payload) {
       await persistState();
     }
     result = await fetchWhatnotOrders(payload?.tabId || state.tabId);
+  } else if (payload?.action === "fetch_seller_hub_inventory") {
+    result = await executeSellerHubInventoryFromPlatform(payload);
   } else {
     result = await executeApi(state.tabId, payload);
   }
@@ -609,6 +613,81 @@ async function handlePlatformAction(payload) {
     timestamp: Date.now()
   });
   return result;
+}
+
+async function executeSellerHubInventoryFromPlatform(payload) {
+  const requestedStatus = String(payload?.status || "ACTIVE").trim().toUpperCase();
+  const allowedStatuses = new Set(["ACTIVE", "DRAFT", "INACTIVE", "SOLD_OUT"]);
+  if (!allowedStatuses.has(requestedStatus)) {
+    return { success: false, error: "Invalid inventory status." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const defaultPayload = {
+    after: null,
+    filters: [],
+    first: null,
+    groupBy: null,
+    query: null,
+    sellerId: null,
+    sort: null,
+    statuses: [requestedStatus],
+    transactionTypes: null
+  };
+  const requestPayload = {
+    ...defaultPayload,
+    ...(payload?.requestPayload && typeof payload.requestPayload === "object" ? payload.requestPayload : {}),
+    statuses: [requestedStatus]
+  };
+
+  const template = state?.observedGraphqlTemplates?.SellerHubInventory;
+  let requestBody = {
+    operationName: "SellerHubInventory",
+    query: SELLER_HUB_INVENTORY_QUERY,
+    variables: requestPayload
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "SellerHubInventory";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      ...requestPayload,
+      statuses: [requestedStatus]
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=SellerHubInventory&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
 }
 
 async function executeUpdateBioFromPlatform(payload) {
