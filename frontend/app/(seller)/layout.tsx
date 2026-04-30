@@ -19,6 +19,7 @@ import {
   Video,
   Sparkles,
   UserPlus,
+  PackageSearch,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -26,6 +27,7 @@ const sellerNavigation = [
     items: [
       { title: "Connect Platforms", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
+      { title: "Inventory Management", href: "/seller/inventory-management", icon: PackageSearch, requiresSubscription: true },
       { title: "Calendar", href: "/seller/calendar", icon: CalendarDays, requiresSubscription: true },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },
       { title: "Publish", href: "/seller/publish", icon: Video, requiresSubscription: true },

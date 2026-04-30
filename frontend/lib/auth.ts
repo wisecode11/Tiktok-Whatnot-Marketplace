@@ -135,6 +135,34 @@ export interface WhatnotInventorySnapshotResponse {
   }
 }
 
+export interface WhatnotInventoryLiveResponse {
+  status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT"
+  syncedAt: string | null
+  snapshotId: string | null
+  responsePayload: {
+    data?: {
+      me?: {
+        inventory?: {
+          edges?: Array<{
+            node?: {
+              id?: string | null
+              title?: string | null
+              subtitle?: string | null
+              description?: string | null
+              status?: string | null
+              publicStatus?: string | null
+              quantity?: number | null
+              transactionType?: string | null
+              price?: { amount?: number | null; currency?: string | null }
+              product?: { category?: { label?: string | null } }
+            }
+          }>
+        }
+      }
+    }
+  }
+}
+
 export interface TikTokCreatorInfoResponse {
   connected: boolean
   creator: {
@@ -530,5 +558,16 @@ export async function updateWhatnotProfileBio(token: string, bio: string) {
 export async function getWhatnotExtensionStatus(token: string) {
   return request<WhatnotExtensionStatusResponse>("/api/integrations/whatnot/extension-status", {
     token,
+  })
+}
+
+export async function syncWhatnotInventoryLive(
+  token: string,
+  status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",
+) {
+  return request<WhatnotInventoryLiveResponse>("/api/integrations/whatnot/inventory/sync", {
+    token,
+    method: "POST",
+    body: { status },
   })
 }
