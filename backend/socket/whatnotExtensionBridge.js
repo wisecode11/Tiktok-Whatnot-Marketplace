@@ -4,6 +4,34 @@ const { WebSocketServer, WebSocket } = require("ws");
 let extensionSocket = null;
 let extensionAuthState = null;
 const pendingRequests = new Map();
+let heartbeatTimer = null;
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
+      stopHeartbeat();
+      return;
+    }
+    try {
+      extensionSocket.send(
+        JSON.stringify({
+          type: "heartbeat",
+          payload: { ts: Date.now() },
+        }),
+      );
+    } catch (_error) {
+      // Ignore send errors; close handler will clean up.
+    }
+  }, 15000);
+}
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -59,6 +87,7 @@ function initializeWhatnotExtensionBridge({ server }) {
             payload,
             receivedAt: Date.now(),
           };
+          startHeartbeat();
           return;
         }
 
@@ -90,6 +119,7 @@ function initializeWhatnotExtensionBridge({ server }) {
       if (extensionSocket === socket) {
         extensionSocket = null;
         extensionAuthState = null;
+        stopHeartbeat();
       }
       rejectAllPending(createHttpError(503, "Whatnot extension disconnected."));
     });
@@ -98,6 +128,7 @@ function initializeWhatnotExtensionBridge({ server }) {
       if (extensionSocket === socket) {
         extensionSocket = null;
         extensionAuthState = null;
+        stopHeartbeat();
       }
     });
   });
@@ -114,7 +145,18 @@ function getWhatnotExtensionBridgeState() {
 
 async function requestWhatnotAction(payload, timeoutMs = 25000) {
   if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
-    throw createHttpError(503, "Whatnot extension is offline. Open extension and connect Whatnot first.");
+    // Give extension reconnect loop a short chance before failing request.
+    const waitUntil = Date.now() + 3000;
+    while (Date.now() < waitUntil) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      if (extensionSocket && extensionSocket.readyState === WebSocket.OPEN) {
+        break;
+      }
+    }
+  }
+
+  if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
+    throw createHttpError(503, "Whatnot extension is offline. Open extension popup once and reconnect Whatnot.");
   }
 
   const requestId = crypto.randomUUID();
