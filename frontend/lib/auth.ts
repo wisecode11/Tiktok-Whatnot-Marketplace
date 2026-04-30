@@ -602,6 +602,9 @@ export async function syncWhatnotOrders(token: string) {
   return request<WhatnotOrdersSyncResponse>("/api/integrations/whatnot/orders/sync", {
     token,
     method: "POST",
+  })
+}
+
 export async function syncWhatnotInventoryLive(
   token: string,
   status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",
