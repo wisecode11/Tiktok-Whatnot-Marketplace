@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { Box, ClipboardList, type LucideIcon, PackageCheck, Printer, Tags, Warehouse } from "lucide-react"
+import { Box, ClipboardList, type LucideIcon, Printer, Warehouse } from "lucide-react"
 
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
@@ -14,8 +14,6 @@ import { getMyPermissions } from "@/lib/permissions-checker"
 
 const moduleIcons: Record<string, LucideIcon> = {
   view_inventory: Warehouse,
-  update_stock: PackageCheck,
-  add_edit_products: Tags,
   view_orders: ClipboardList,
   packing: Box,
   labelling: Printer,
@@ -24,8 +22,6 @@ const moduleIcons: Record<string, LucideIcon> = {
 
 const moduleOrder = [
   "view_inventory",
-  "update_stock",
-  "add_edit_products",
   "view_orders",
   "packing",
   "labelling",
@@ -34,8 +30,6 @@ const moduleOrder = [
 
 const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
   view_inventory: "View Inventory",
-  update_stock: "Update Stock",
-  add_edit_products: "Add / Edit Products",
   view_orders: "View Orders",
   packing: "Packing",
   labelling: "Labelling",

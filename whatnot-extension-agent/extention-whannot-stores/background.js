@@ -182,38 +182,80 @@ function extractApolloSSRData(htmlString) {
       debug: {
         htmlLength: 0,
         scriptMatches: 0,
+        candidateScriptTags: 0,
+        pushCallsFound: 0,
+        parseFailures: 0,
         parsedEntries: 0,
       }
     };
   }
 
-  const scriptTagRegex = /<script[^>]*>\s*\(window\[Symbol\.for\("ApolloSSRDataTransport"\)\]\s*\?\?=\s*\[\]\)\.push\(([\s\S]*?)\)\s*<\/script>/g;
-  let match;
+  const scriptTagRegex = /<script[^>]*>([\s\S]*?)<\/script>/g;
+  const pushCallRegex = /\(window\[Symbol\.for\("ApolloSSRDataTransport"\)\]\s*\?\?=\s*\[\]\)\.push\(([\s\S]*?)\)\s*;?/g;
+  let scriptMatch;
   const apolloEntries = [];
   let scriptMatches = 0;
+  let candidateScriptTags = 0;
+  let pushCallsFound = 0;
+  let parseFailures = 0;
 
-  while ((match = scriptTagRegex.exec(html)) !== null) {
-    scriptMatches += 1;
-    const chunk = String(match[1] || "").trim();
-    if (!chunk) {
-      continue;
-    }
-
+  function tryParseChunk(chunk) {
     try {
       const parsed = JSON.parse(chunk);
-      apolloEntries.push(parsed);
-      continue;
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
     } catch (_error) {
-      // Try JS object literal parser as fallback.
+      // Fallback to JS object-literal parse below.
     }
 
     try {
       const parsed = new Function(`return (${chunk});`)();
       if (parsed && typeof parsed === "object") {
-        apolloEntries.push(parsed);
+        return parsed;
       }
     } catch (_error) {
-      // Ignore malformed script chunks and continue parsing.
+      parseFailures += 1;
+    }
+
+    return null;
+  }
+
+  while ((scriptMatch = scriptTagRegex.exec(html)) !== null) {
+    scriptMatches += 1;
+    const scriptBody = String(scriptMatch[1] || "");
+    if (!scriptBody || !scriptBody.includes('ApolloSSRDataTransport')) {
+      continue;
+    }
+    candidateScriptTags += 1;
+
+    let pushMatch;
+    while ((pushMatch = pushCallRegex.exec(scriptBody)) !== null) {
+      pushCallsFound += 1;
+      const chunk = String(pushMatch[1] || "").trim();
+      if (!chunk) {
+        continue;
+      }
+      const parsed = tryParseChunk(chunk);
+      if (parsed) {
+        apolloEntries.push(parsed);
+      }
+    }
+  }
+
+  // Fallback for pages where push call appears outside strict <script> parsing.
+  if (!apolloEntries.length) {
+    let loosePushMatch;
+    while ((loosePushMatch = pushCallRegex.exec(html)) !== null) {
+      pushCallsFound += 1;
+      const chunk = String(loosePushMatch[1] || "").trim();
+      if (!chunk) {
+        continue;
+      }
+      const parsed = tryParseChunk(chunk);
+      if (parsed) {
+        apolloEntries.push(parsed);
+      }
     }
   }
 
@@ -290,11 +332,90 @@ function extractApolloSSRData(htmlString) {
     }
   }
 
+  function readBalancedJsonObject(source, startIndex) {
+    if (startIndex < 0 || source[startIndex] !== "{") {
+      return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = startIndex; i < source.length; i += 1) {
+      const ch = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === "\"") {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === "\"") {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") {
+        depth += 1;
+        continue;
+      }
+      if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          return source.slice(startIndex, i + 1);
+        }
+      }
+    }
+    return null;
+  }
+
+  // Last-resort fallback:
+  // recover OrderNode objects directly from raw HTML when Apollo chunks are malformed.
+  if (!orders.length && html.includes("\"__typename\":\"OrderNode\"")) {
+    const marker = "\"__typename\":\"OrderNode\"";
+    let cursor = 0;
+    while (cursor < html.length) {
+      const markerIndex = html.indexOf(marker, cursor);
+      if (markerIndex === -1) {
+        break;
+      }
+
+      let extracted = false;
+      // Search nearby opening braces before the marker and parse first valid object.
+      for (let probe = markerIndex; probe >= Math.max(0, markerIndex - 4000); probe -= 1) {
+        if (html[probe] !== "{") {
+          continue;
+        }
+        const objectText = readBalancedJsonObject(html, probe);
+        if (!objectText || !objectText.includes(marker)) {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(objectText);
+          if (parsed && parsed.__typename === "OrderNode") {
+            maybePushOrder(parsed);
+            extracted = true;
+            break;
+          }
+        } catch (_error) {
+          // Ignore invalid candidate objects and keep scanning.
+        }
+      }
+
+      cursor = extracted ? markerIndex + marker.length : markerIndex + 1;
+    }
+  }
+
   return {
     orders,
     debug: {
       htmlLength: html.length,
       scriptMatches,
+      candidateScriptTags,
+      pushCallsFound,
+      parseFailures,
       parsedEntries: apolloEntries.length,
     }
   };

@@ -1,21 +1,19 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
 
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Table,
   TableBody,
@@ -24,179 +22,296 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useSimulatedFetch } from "@/lib/staff/use-simulated-fetch"
-import { listWorkspaceOrders } from "@/lib/staff/mock-order-workspace"
-import type { MockOrder, OrderStatus } from "@/lib/staff/mock-workspace-data"
+import { getClerkErrorMessage, getWhatnotOrders, type WhatnotOrderItem, waitForSessionToken } from "@/lib/auth"
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  paid: "Paid",
-  processing: "Processing",
-  packing: "Packing",
-  label_ready: "Label ready",
-  shipped: "Shipped",
-  delivered: "Delivered",
+type RawOrderPayload = {
+  createdAt?: string
+  salesChannel?: string
+  prettyStatus?: string
+  buyer?: { username?: string }
+  subtotal?: { amount?: number | string; currency?: string }
+  items?: {
+    edges?: Array<{
+      node?: {
+        quantity?: number
+        listing?: { title?: string }
+        sellerReceipt?: {
+          earningsStatus?: { badgeLabel?: string }
+          netEarnings?: { amount?: string }
+          netEarning?: { amount?: string }
+        }
+      }
+    }>
+  }
 }
 
-function statusVariant(status: OrderStatus) {
-  if (status === "shipped" || status === "delivered") {
+type OrderDetailRow = {
+  id: string
+  title: string
+  createdAt: string | null
+  customer: string
+  quantity: number
+  salesChannel: string
+  prettyStatus: string
+  earningStatus: string
+  priceLabel: string
+  netEarning: string
+}
+
+function statusVariant(status: string | null) {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : ""
+  if (normalized.includes("cancel") || normalized.includes("refund")) {
+    return "destructive" as const
+  }
+  if (normalized.includes("deliver") || normalized.includes("complete")) {
     return "secondary" as const
   }
-  if (status === "packing" || status === "label_ready") {
+  if (normalized.includes("ship") || normalized.includes("process")) {
     return "default" as const
   }
   return "outline" as const
 }
 
-export function ViewOrdersPage() {
-  const [selected, setSelected] = useState<MockOrder | null>(null)
-  const [filter, setFilter] = useState<"all" | OrderStatus>("all")
+function formatDate(value: string | null) {
+  if (!value) {
+    return "N/A"
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleString()
+}
 
-  const fetch = useSimulatedFetch<MockOrder[]>(
-    "staff-view-orders",
-    () => listWorkspaceOrders(),
-    { minDelay: 460, pollInterval: 16_000, refreshDelay: 360 },
+function toCurrency(amount: number | null, currency = "USD") {
+  if (amount == null || !Number.isFinite(amount)) {
+    return "N/A"
+  }
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "USD" }).format(amount)
+}
+
+function resolveDisplayPrice(order: WhatnotOrderItem) {
+  const raw = (order.rawPayload || {}) as RawOrderPayload
+  const subtotalAmountRaw = raw?.subtotal?.amount
+  const subtotalCurrency = raw?.subtotal?.currency || order.priceCurrency || "USD"
+
+  if (typeof subtotalAmountRaw === "number" && Number.isFinite(subtotalAmountRaw)) {
+    return toCurrency(subtotalAmountRaw / 100, subtotalCurrency)
+  }
+
+  if (typeof subtotalAmountRaw === "string" && subtotalAmountRaw.trim()) {
+    const parsed = Number(subtotalAmountRaw)
+    if (Number.isFinite(parsed)) {
+      return toCurrency(parsed / 100, subtotalCurrency)
+    }
+  }
+
+  return toCurrency(
+    typeof order.priceAmount === "number" && Number.isFinite(order.priceAmount) ? order.priceAmount : null,
+    order.priceCurrency || "USD",
+  )
+}
+
+export function ViewOrdersPage() {
+  const { getToken, isLoaded } = useAuth()
+  const [rows, setRows] = useState<WhatnotOrderItem[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<OrderDetailRow | null>(null)
+
+  const loadOrders = useCallback(
+    async (isManualRefresh: boolean) => {
+      try {
+        if (isManualRefresh) {
+          setIsRefreshing(true)
+        } else {
+          setIsLoading(true)
+        }
+        setError(null)
+
+        const token = await waitForSessionToken(getToken)
+        const result = await getWhatnotOrders(token, { limit: 100 })
+        setRows(result.orders || [])
+        setLastUpdated(new Date())
+      } catch (loadError) {
+        setError(getClerkErrorMessage(loadError))
+        setRows([])
+      } finally {
+        setIsLoading(false)
+        setIsRefreshing(false)
+      }
+    },
+    [getToken],
   )
 
-  const rows = useMemo(() => {
-    const orders = fetch.data || []
-    if (filter === "all") {
-      return orders
+  useEffect(() => {
+    if (!isLoaded) {
+      return
     }
-    return orders.filter((order) => order.status === filter)
-  }, [fetch.data, filter])
+    void loadOrders(false)
+  }, [isLoaded, loadOrders])
+
+  const totalRevenueLabel = useMemo(() => {
+    const total = rows.reduce((sum, order) => {
+      const raw = (order.rawPayload || {}) as RawOrderPayload
+      const subtotalAmountRaw = raw?.subtotal?.amount
+      if (typeof subtotalAmountRaw === "number" && Number.isFinite(subtotalAmountRaw)) {
+        return sum + subtotalAmountRaw / 100
+      }
+      if (typeof subtotalAmountRaw === "string" && subtotalAmountRaw.trim()) {
+        const parsed = Number(subtotalAmountRaw)
+        if (Number.isFinite(parsed)) {
+          return sum + parsed / 100
+        }
+      }
+      return sum + (typeof order.priceAmount === "number" && Number.isFinite(order.priceAmount) ? order.priceAmount : 0)
+    }, 0)
+    return `USD ${total.toFixed(2)}`
+  }, [rows])
 
   return (
     <StaffModuleGate
       moduleId="view_orders"
-      title="Order fulfillment · Orders"
-      description="Operational queue with live refresh (simulated) across packing, labelling, and carrier updates."
+      title="View Orders"
+      description="Whatnot orders for your parent seller workspace."
     >
       <StaffLiveSyncBanner
-        lastUpdated={fetch.lastUpdated}
-        isRefreshing={fetch.isRefreshing}
-        onRefresh={() => void fetch.refetch()}
+        lastUpdated={lastUpdated}
+        isRefreshing={isRefreshing}
+        onRefresh={() => void loadOrders(true)}
       />
 
-      <Tabs value={filter} onValueChange={(value) => setFilter(value as typeof filter)}>
-        <TabsList className="flex flex-wrap">
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="processing">Processing</TabsTrigger>
-          <TabsTrigger value="packing">Packing</TabsTrigger>
-          <TabsTrigger value="label_ready">Label ready</TabsTrigger>
-          <TabsTrigger value="shipped">Shipped</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {fetch.isLoading ? (
+      {isLoading ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">Loading orders…</CardContent>
         </Card>
-      ) : fetch.error ? (
+      ) : error ? (
         <Card className="border-destructive/30">
-          <CardContent className="py-8 text-sm text-destructive">{fetch.error}</CardContent>
+          <CardContent className="py-8 text-sm text-destructive">{error}</CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Orders</CardTitle>
+            <CardTitle>Recent Whatnot Orders</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Click a row to inspect line items, carrier selection, and simulated marketplace order IDs.
+              Only orders synced under your parent seller are visible here.
             </p>
+            <p className="text-xs text-muted-foreground">Total orders: {rows.length} · Approx revenue: {totalRevenueLabel}</p>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Order</TableHead>
+                  <TableHead>Date</TableHead>
                   <TableHead>Customer</TableHead>
-                  <TableHead>Placed</TableHead>
-                  <TableHead>Carrier</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Lines</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Sales Channel</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Order Status</TableHead>
+                  <TableHead>Earning Status</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((order) => (
-                  <TableRow
-                    key={order.id}
-                    className="cursor-pointer"
-                    onClick={() => setSelected(order)}
-                  >
-                    <TableCell className="font-mono text-xs font-medium">{order.orderNumber}</TableCell>
-                    <TableCell>{order.customer}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(
-                        new Date(order.placedAt),
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">{order.carrier}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(order.status)} className="font-normal">
-                        {STATUS_LABEL[order.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{order.lines.length}</TableCell>
-                  </TableRow>
+                  (() => {
+                    const raw = (order.rawPayload || {}) as RawOrderPayload
+                    const itemEdges = Array.isArray(raw.items?.edges) ? raw.items.edges : []
+                    const firstItemNode = itemEdges[0]?.node || null
+                    const itemsCount = itemEdges.reduce((total, edge) => total + (edge?.node?.quantity || 0), 0) || 1
+                    const title = firstItemNode?.listing?.title || order.listingTitle || order.orderNumber || order.whatnotOrderId || "Untitled order"
+                    const salesChannel = raw.salesChannel || "N/A"
+                    const prettyStatus = raw.prettyStatus || order.status || "Unknown"
+                    const earningStatus = firstItemNode?.sellerReceipt?.earningsStatus?.badgeLabel || "N/A"
+                    const netEarning =
+                      firstItemNode?.sellerReceipt?.netEarnings?.amount
+                      || firstItemNode?.sellerReceipt?.netEarning?.amount
+                      || "N/A"
+                    const priceLabel = resolveDisplayPrice(order)
+                    return (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{title}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{formatDate(raw.createdAt || order.orderedAt || null)}</TableCell>
+                        <TableCell>{raw.buyer?.username || order.buyerUsername || order.buyerName || "N/A"}</TableCell>
+                        <TableCell>{itemsCount}</TableCell>
+                        <TableCell>{salesChannel}</TableCell>
+                        <TableCell>{resolveDisplayPrice(order)}</TableCell>
+                        <TableCell>
+                          <Badge variant={statusVariant(prettyStatus)} className="font-normal">
+                            {prettyStatus}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{earningStatus}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setSelectedOrder({
+                                id: order.id,
+                                title,
+                                createdAt: raw.createdAt || order.orderedAt || null,
+                                customer: raw.buyer?.username || order.buyerUsername || order.buyerName || "N/A",
+                                quantity: itemsCount,
+                                salesChannel,
+                                prettyStatus,
+                                earningStatus,
+                                priceLabel,
+                                netEarning,
+                              })
+                            }
+                          >
+                            View Detail
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })()
                 ))}
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                      No Whatnot orders found for your parent seller.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
       )}
 
-      <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="sm:max-w-md">
-          <SheetHeader>
-            <SheetTitle>{selected?.orderNumber}</SheetTitle>
-            <SheetDescription>Order detail snapshot (simulated).</SheetDescription>
-          </SheetHeader>
-          {selected ? (
-            <ScrollArea className="mt-4 h-[calc(100vh-8rem)] pr-4">
-              <div className="space-y-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={statusVariant(selected.status)}>{STATUS_LABEL[selected.status]}</Badge>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    TT-{selected.id.toUpperCase()}
-                  </Badge>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    WN-{selected.orderNumber.replace("MH-", "")}
-                  </Badge>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Customer</p>
-                  <p className="font-medium">{selected.customer}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Carrier</p>
-                  <p className="font-medium">{selected.carrier}</p>
-                </div>
-                {selected.tracking ? (
-                  <div>
-                    <p className="text-muted-foreground">Tracking</p>
-                    <p className="font-mono text-xs">{selected.tracking}</p>
-                  </div>
-                ) : null}
-                <Separator />
-                <p className="font-medium">Line items</p>
-                <div className="space-y-2">
-                  {selected.lines.map((line) => (
-                    <div key={`${selected.id}-${line.sku}`} className="rounded-md border border-border/70 p-3">
-                      <p className="font-medium">{line.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {line.sku} · qty {line.qty}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <Button type="button" variant="outline" className="w-full" onClick={() => setSelected(null)}>
-                  Close
-                </Button>
+      <Dialog open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedOrder?.title || "Order Detail"}</DialogTitle>
+          </DialogHeader>
+
+          {selectedOrder ? (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg border p-3">
+                <div className="mb-2 font-semibold">Order details</div>
+                <div>Order date/time: {formatDate(selectedOrder.createdAt)}</div>
+                <div>Buyer: {selectedOrder.customer}</div>
+                <div>Quantity: {selectedOrder.quantity}</div>
+                <div>Sales channel: {selectedOrder.salesChannel}</div>
+                <div>Status: {selectedOrder.prettyStatus}</div>
+                <div>Earning status: {selectedOrder.earningStatus}</div>
               </div>
-            </ScrollArea>
+
+              <div className="rounded-lg border p-3">
+                <div className="mb-2 font-semibold">Buyer paid</div>
+                <div>Order total: {selectedOrder.priceLabel}</div>
+              </div>
+
+              <div className="rounded-lg border p-3">
+                <div className="mb-2 font-semibold">Your earning</div>
+                <div>Net earning: {selectedOrder.netEarning}</div>
+              </div>
+            </div>
           ) : null}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </StaffModuleGate>
   )
 }

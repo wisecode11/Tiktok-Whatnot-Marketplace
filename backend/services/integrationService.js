@@ -321,6 +321,33 @@ async function findLocalUser(clerkUserId) {
   return user;
 }
 
+async function resolveWhatnotSnapshotOwnerClerkUserId(clerkUserId) {
+  const user = await findLocalUser(clerkUserId);
+
+  if (user.user_type !== "staff") {
+    return typeof user.clerk_user_id === "string" ? user.clerk_user_id.trim() : "";
+  }
+
+  if (!user.parent_seller_user_id) {
+    throw createHttpError(400, "This staff account is not attached to a seller.");
+  }
+
+  const parentSeller = await User.findById(user.parent_seller_user_id);
+
+  if (!parentSeller) {
+    throw createHttpError(404, "Parent seller account was not found.");
+  }
+
+  const parentClerkUserId =
+    typeof parentSeller.clerk_user_id === "string" ? parentSeller.clerk_user_id.trim() : "";
+
+  if (!parentClerkUserId) {
+    throw createHttpError(400, "Parent seller does not have a Clerk user id.");
+  }
+
+  return parentClerkUserId;
+}
+
 function buildFrontendRedirect({ role, platform, status, message }) {
   const redirectUrl = new URL(`${getFrontendUrl()}/launch-pad`);
   redirectUrl.searchParams.set("role", role);
@@ -1955,6 +1982,8 @@ async function saveWhatnotOrders({
   const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
   const now = new Date();
   let savedCount = 0;
+  let skippedByNormalize = 0;
+  let skippedMissingOrderId = 0;
 
   // Clean previously saved non-order documents for this user.
   await WhatnotOrder.deleteMany({
@@ -1964,7 +1993,12 @@ async function saveWhatnotOrders({
 
   for (const order of incomingOrders) {
     const normalized = normalizeWhatnotOrder(order);
-    if (!normalized || !normalized.whatnot_order_id) {
+    if (!normalized) {
+      skippedByNormalize += 1;
+      continue;
+    }
+    if (!normalized.whatnot_order_id) {
+      skippedMissingOrderId += 1;
       continue;
     }
     await WhatnotOrder.findOneAndUpdate(
@@ -2013,12 +2047,12 @@ async function getWhatnotOrders({ clerkUserId, limit = 100 }) {
     throw createHttpError(400, "Missing Clerk user id.");
   }
 
-  await findLocalUser(normalizedClerkUserId);
+  const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
 
   const safeLimit = Number.isFinite(Number(limit))
     ? Math.min(200, Math.max(1, Math.floor(Number(limit))))
     : 100;
-  const orders = await WhatnotOrder.find({ clerk_user_id: normalizedClerkUserId })
+  const orders = await WhatnotOrder.find({ clerk_user_id: ownerClerkUserId })
     .sort({ ordered_at: -1, updated_at: -1 })
     .limit(safeLimit);
 
@@ -2252,11 +2286,12 @@ async function getLatestWhatnotInventorySnapshot({ clerkUserId, status = "ACTIVE
   if (!normalizedClerkUserId) {
     throw createHttpError(400, "Missing Clerk user id.");
   }
+  const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
   const normalizedStatus = normalizeInventoryStatus(status);
 
   const snapshots = await WhatnotInventorySnapshot.find({
     platform: "whatnot",
-    clerk_user_id: normalizedClerkUserId,
+    clerk_user_id: ownerClerkUserId,
     status_filter: normalizedStatus,
   }).sort({ synced_at: -1, updated_at: -1 });
 

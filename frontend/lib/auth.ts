@@ -615,3 +615,19 @@ export async function syncWhatnotInventoryLive(
     body: { status },
   })
 }
+
+export async function getWhatnotInventoryLive(
+  token: string,
+  params?: { status?: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT" },
+) {
+  const search = new URLSearchParams()
+
+  if (params?.status) {
+    search.set("status", params.status)
+  }
+
+  const query = search.toString()
+  const path = query ? `/api/integrations/whatnot/inventory/live?${query}` : "/api/integrations/whatnot/inventory/live"
+
+  return request<WhatnotInventoryLiveResponse>(path, { token })
+}
