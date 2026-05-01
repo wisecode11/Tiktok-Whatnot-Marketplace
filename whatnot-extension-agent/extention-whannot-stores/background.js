@@ -15,6 +15,16 @@ const WHATNOT_EXTENSION_API_KEY = "";
 const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
 const SELLER_HUB_INVENTORY_QUERY =
   "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
+const SELLER_HUB_INVENTORY_EDIT_QUERY =
+  "query SellerHubInventoryEdit($listingId:ID!,$includeListing:Boolean!){categories:categoryBrowse{id label type position hazmatType __typename subcategories{id label type position hazmatType __typename subcategories{id label type position hazmatType __typename}}} listing(id:$listingId) @include(if:$includeListing){id title __typename}}";
+const GET_SHIPPING_PROFILES_QUERY =
+  "query GetShippingProfiles($categoryId:ID){shippingProfiles(categoryId:$categoryId){...ShippingProfile __typename}}fragment ShippingProfile on ShippingProfileNode{id name weightAmount weightScale weightName length width height dimensionScale bundleConfiguration{maxWeight amount __typename} incrementalWeight{amount scale __typename} __typename}";
+const GENERATE_MEDIA_UPLOAD_URLS_MUTATION =
+  "mutation GenerateMediaUploadUrls($media:[GenerateMediaUploadInput!]!){generateMediaUploadURLs(media:$media){uploads{id method url headers{name value __typename} targetKey expiresAt error __typename} error __typename}}";
+const ADD_LISTING_PHOTO_MUTATION =
+  "mutation AddListingPhoto($uuid:String$label:String!$uploadKey:String!){addListingPhoto(uuid:$uuid label:$label uploadKey:$uploadKey){image{id url key bucket __typename}success message __typename}}";
+const CREATE_LISTING_MUTATION =
+  "mutation CreateListing($uuid:ID!$title:String!$description:String$transactionType:ListingTransactionType!$transactionProps:TransactionPropsInput$price:MoneyInput$catalogProductId:String$productId:ID$salesChannels:[SalesChannelInfoInput]$productAttributeValues:[ProductAttributeValueInput]$quantity:Int$images:[ListingImageInput]$listIndividually:Boolean$categoryId:ID$shippingProfileId:ID$weight:WeightInput$hazmatType:HazmatLabelType$isPartialSave:Boolean$reservedForSalesChannel:ReservedForSalesChannelType$sku:String$costPerItem:MoneyInput$barcode:String$variants:[ListingVariantInput!]$timedListingEvent:TimedListingEventInput$metadata:ListingMetadata$videoIds:[ID!]$isQuickAdd:Boolean){createListing(uuid:$uuid title:$title description:$description transactionType:$transactionType transactionProps:$transactionProps price:$price catalogProductId:$catalogProductId productId:$productId salesChannels:$salesChannels productAttributeValues:$productAttributeValues quantity:$quantity images:$images listIndividually:$listIndividually categoryId:$categoryId shippingProfileId:$shippingProfileId weight:$weight hazmatType:$hazmatType isPartialSave:$isPartialSave reservedForSalesChannel:$reservedForSalesChannel sku:$sku costPerItem:$costPerItem barcode:$barcode variants:$variants timedListingEvent:$timedListingEvent metadata:$metadata videoIds:$videoIds isQuickAdd:$isQuickAdd){listingNode{...CreateListing __typename}error __typename}}fragment CreateListing on ListingNode{id uuid publicStatus status title product{id __typename}__typename}";
 
 chrome.runtime.onInstalled.addListener(() => {
   state.backendSocketUrl = BACKEND_SOCKET_URL;
@@ -121,6 +131,9 @@ async function connectWhatnot(tabId, clerkUserId = null) {
     sessionData: sessionResult.data || {},
     tabId: resolvedTabId
   });
+  // As soon as connect is successful and tokens are available,
+  // fetch inventory edit catalog and persist categories in backend.
+  void syncSellerHubInventoryEditCatalog(resolvedTabId);
 
   return { success: true, auth: state.auth, tabId: resolvedTabId };
 }
@@ -168,6 +181,174 @@ async function saveGetSessionApiDataToMarketplace(payload) {
         responsePayload: payload?.responsePayload || {}
       })
     });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function saveInventoryEditCategoriesToMarketplace(payload) {
+  const headers = {
+    "content-type": "application/json"
+  };
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  try {
+    await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/inventory-edit-categories`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        source: "whatnot-extension",
+        tabId: payload?.tabId ?? state.tabId ?? null,
+        responsePayload: payload?.responsePayload || {}
+      })
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function saveShippingProfilesToMarketplace(payload) {
+  const headers = {
+    "content-type": "application/json"
+  };
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  try {
+    await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/shipping-profiles`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        source: "whatnot-extension",
+        tabId: payload?.tabId ?? state.tabId ?? null,
+        categoryId: payload?.categoryId ?? null,
+        responsePayload: payload?.responsePayload || {}
+      })
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function fetchSellerHubInventoryEditData(tabId) {
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  const template = state?.observedGraphqlTemplates?.SellerHubInventoryEdit;
+  let requestBody = {
+    operationName: "SellerHubInventoryEdit",
+    query: SELLER_HUB_INVENTORY_EDIT_QUERY,
+    variables: {
+      includeListing: false,
+      listingId: "new"
+    }
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "SellerHubInventoryEdit";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      includeListing: false,
+      listingId: "new"
+    };
+  }
+
+  return executeApi(tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=SellerHubInventoryEdit&ssr=0",
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function fetchShippingProfilesData(tabId) {
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  const template = state?.observedGraphqlTemplates?.GetShippingProfiles;
+  let requestBody = {
+    operationName: "GetShippingProfiles",
+    query: GET_SHIPPING_PROFILES_QUERY,
+    variables: {
+      categoryId: null
+    }
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetShippingProfiles";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      categoryId: null
+    };
+  }
+
+  return executeApi(tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetShippingProfiles&ssr=0",
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function syncSellerHubInventoryEditCatalog(tabId) {
+  try {
+    const response = await fetchSellerHubInventoryEditData(tabId);
+    if (!response?.success || !response?.data) {
+      return { success: false, error: response?.error || "Failed to fetch SellerHubInventoryEdit data." };
+    }
+    await saveInventoryEditCategoriesToMarketplace({
+      tabId,
+      responsePayload: response.data
+    });
+
+    // Recommended flow: call shipping profiles right after categories/subcategories.
+    const shippingResponse = await fetchShippingProfilesData(tabId);
+    if (shippingResponse?.success && shippingResponse?.data) {
+      await saveShippingProfilesToMarketplace({
+        tabId,
+        categoryId: null,
+        responsePayload: shippingResponse.data
+      });
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -602,6 +783,10 @@ async function handlePlatformAction(payload) {
     result = await fetchWhatnotOrders(payload?.tabId || state.tabId);
   } else if (payload?.action === "fetch_seller_hub_inventory") {
     result = await executeSellerHubInventoryFromPlatform(payload);
+  } else if (payload?.action === "generate_media_upload_urls") {
+    result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
+  } else if (payload?.action === "create_listing") {
+    result = await executeCreateListingFromPlatform(payload);
   } else {
     result = await executeApi(state.tabId, payload);
   }
@@ -688,6 +873,348 @@ async function executeSellerHubInventoryFromPlatform(payload) {
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
   });
+}
+
+function headersArrayToObject(headers) {
+  if (!Array.isArray(headers)) return {};
+  return Object.fromEntries(
+    headers
+      .filter((h) => h && typeof h === "object" && h.name)
+      .map((h) => [String(h.name), h.value]),
+  );
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary = atob(String(base64).replace(/\s/g, ""));
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+function resolveAddListingPhotoLabel(upload, uploadKey, normalizedMedia, index) {
+  const apiId =
+    upload && typeof upload.id === "string" && upload.id.trim() ? upload.id.trim() : "";
+  if (apiId) {
+    return apiId;
+  }
+  const pendingBase =
+    typeof uploadKey === "string"
+      ? uploadKey
+          .replace(/^pending\//, "")
+          .replace(/\.[a-z0-9]+$/i, "")
+          .trim()
+      : "";
+  if (pendingBase) {
+    return pendingBase;
+  }
+  const fallback =
+    normalizedMedia[index] && normalizedMedia[index].id ? normalizedMedia[index].id.trim() : "";
+  return fallback || normalizedMedia[0]?.id?.trim() || "";
+}
+
+async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
+  const media = Array.isArray(payload?.media) ? payload.media : [];
+  const normalizedMedia = media
+    .map((entry) => ({
+      extension: typeof entry?.extension === "string" ? entry.extension.trim().toLowerCase() : "",
+      id: typeof entry?.id === "string" ? entry.id.trim() : "",
+    }))
+    .filter((entry) => entry.id && entry.extension);
+
+  if (!normalizedMedia.length) {
+    return { success: false, error: "At least one media item with id and extension is required." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const template = state?.observedGraphqlTemplates?.GenerateMediaUploadUrls;
+  let requestBody = {
+    operationName: "GenerateMediaUploadUrls",
+    variables: {
+      media: normalizedMedia,
+    },
+    query: GENERATE_MEDIA_UPLOAD_URLS_MUTATION,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GenerateMediaUploadUrls";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      media: normalizedMedia,
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  const generateResponse = await executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GenerateMediaUploadUrls&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!generateResponse?.success || !generateResponse?.data) {
+    return generateResponse;
+  }
+
+  const uploads = Array.isArray(generateResponse?.data?.data?.generateMediaUploadURLs?.uploads)
+    ? generateResponse.data.data.generateMediaUploadURLs.uploads
+    : [];
+  const firstUpload = uploads.find((entry) => entry && typeof entry === "object" && entry.targetKey) || null;
+  const uploadKey = firstUpload && typeof firstUpload.targetKey === "string"
+    ? firstUpload.targetKey.trim()
+    : "";
+
+  if (!uploadKey) {
+    return {
+      success: false,
+      status: 502,
+      error: "GenerateMediaUploadUrls response missing uploads.targetKey.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  if (firstUpload && firstUpload.error) {
+    return {
+      success: false,
+      status: 502,
+      error: typeof firstUpload.error === "string" ? firstUpload.error : "GenerateMediaUploadUrls upload slot error.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  const fileBase64Raw = typeof payload?.fileBase64 === "string" ? payload.fileBase64.trim().replace(/^data:[^;]+;base64,/, "") : "";
+  if (!fileBase64Raw) {
+    return {
+      success: false,
+      status: 400,
+      error: "fileBase64 is required on the backend payload so the extension can PUT the image before AddListingPhoto.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  const uploadUrl = firstUpload && typeof firstUpload.url === "string" ? firstUpload.url.trim() : "";
+  if (!uploadUrl) {
+    return {
+      success: false,
+      status: 502,
+      error: "GenerateMediaUploadUrls response missing uploads.url for storage PUT.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  const fileContentType =
+    typeof payload?.fileContentType === "string" && payload.fileContentType.trim()
+      ? payload.fileContentType.trim()
+      : "application/octet-stream";
+
+  let fileBuffer;
+  try {
+    fileBuffer = base64ToArrayBuffer(fileBase64Raw);
+  } catch (_e) {
+    return {
+      success: false,
+      status: 400,
+      error: "Invalid fileBase64 encoding.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  const uploadMethod = String(firstUpload.method || "PUT").toUpperCase();
+  const presignHeadersRaw = headersArrayToObject(firstUpload.headers);
+  const presignHeaders = { ...presignHeadersRaw };
+  const hasContentType =
+    Boolean(presignHeaders["Content-Type"] || presignHeaders["content-type"]);
+  if (!hasContentType) {
+    presignHeaders["Content-Type"] = fileContentType;
+  }
+
+  const putResponse = await executeApi(state.tabId, {
+    url: uploadUrl,
+    method: uploadMethod,
+    headers: presignHeaders,
+    body: fileBuffer,
+  });
+
+  if (!putResponse?.success) {
+    return {
+      success: false,
+      status: putResponse?.status || 502,
+      error: putResponse?.error || "Failed to PUT image bytes to Whatnot upload URL.",
+      data: generateResponse?.data || null,
+      putResponse,
+    };
+  }
+
+  const firstUploadIndex = firstUpload ? uploads.indexOf(firstUpload) : -1;
+  const normalizedIndex = firstUploadIndex >= 0 ? firstUploadIndex : 0;
+  const derivedLabel = resolveAddListingPhotoLabel(firstUpload, uploadKey, normalizedMedia, normalizedIndex);
+
+  if (!derivedLabel) {
+    return {
+      success: false,
+      status: 400,
+      error: "Unable to resolve label for AddListingPhoto.",
+      data: generateResponse?.data || null,
+    };
+  }
+
+  const addListingPhotoTemplate = state?.observedGraphqlTemplates?.AddListingPhoto;
+  let addListingPhotoRequestBody = {
+    operationName: "AddListingPhoto",
+    variables: {
+      label: derivedLabel,
+      uploadKey,
+      uuid: null,
+    },
+    query: ADD_LISTING_PHOTO_MUTATION,
+  };
+  if (addListingPhotoTemplate?.requestBody && typeof addListingPhotoTemplate.requestBody === "object") {
+    addListingPhotoRequestBody = structuredClone(addListingPhotoTemplate.requestBody);
+    addListingPhotoRequestBody.operationName = "AddListingPhoto";
+    if (!addListingPhotoRequestBody.variables || typeof addListingPhotoRequestBody.variables !== "object") {
+      addListingPhotoRequestBody.variables = {};
+    }
+    addListingPhotoRequestBody.variables = {
+      ...addListingPhotoRequestBody.variables,
+      label: derivedLabel,
+      uploadKey,
+      uuid: null,
+    };
+    if (typeof addListingPhotoRequestBody.query !== "string" || !addListingPhotoRequestBody.query.trim()) {
+      addListingPhotoRequestBody.query = ADD_LISTING_PHOTO_MUTATION;
+    }
+  }
+
+  const addListingPhotoHeaders = filterAllowedHeaders(addListingPhotoTemplate?.requestHeaders || {});
+  const addListingPhotoResponse = await executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=AddListingPhoto&ssr=0",
+    method: "POST",
+    headers: { ...addListingPhotoHeaders, ...defaultHeaders },
+    body: JSON.stringify(addListingPhotoRequestBody),
+  });
+
+  if (!addListingPhotoResponse?.success) {
+    return addListingPhotoResponse;
+  }
+
+  return {
+    success: true,
+    status: addListingPhotoResponse?.status || generateResponse?.status || 200,
+    data: {
+      generateMediaUploadUrls: generateResponse?.data || null,
+      storagePut: putResponse?.data ?? null,
+      addListingPhoto: addListingPhotoResponse?.data || null,
+      uploadKey,
+      label: derivedLabel,
+    },
+  };
+}
+
+async function executeCreateListingFromPlatform(payload) {
+  const draftPayload = payload?.createListingPayload && typeof payload.createListingPayload === "object"
+    ? structuredClone(payload.createListingPayload)
+    : {};
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const createListingTemplate = state?.observedGraphqlTemplates?.CreateListing;
+  let createListingRequestBody = {
+    operationName: "CreateListing",
+    variables: draftPayload,
+    query: CREATE_LISTING_MUTATION,
+  };
+
+  if (createListingTemplate?.requestBody && typeof createListingTemplate.requestBody === "object") {
+    createListingRequestBody = structuredClone(createListingTemplate.requestBody);
+    createListingRequestBody.operationName = "CreateListing";
+    if (!createListingRequestBody.variables || typeof createListingRequestBody.variables !== "object") {
+      createListingRequestBody.variables = {};
+    }
+    createListingRequestBody.variables = {
+      ...createListingRequestBody.variables,
+      ...draftPayload,
+    };
+    if (typeof createListingRequestBody.query !== "string" || !createListingRequestBody.query.trim()) {
+      createListingRequestBody.query = CREATE_LISTING_MUTATION;
+    }
+  }
+
+  if (!createListingRequestBody.variables || typeof createListingRequestBody.variables !== "object") {
+    createListingRequestBody.variables = {};
+  }
+
+  const requestUuid =
+    typeof createListingRequestBody.variables.uuid === "string" && createListingRequestBody.variables.uuid.trim()
+      ? createListingRequestBody.variables.uuid.trim()
+      : crypto.randomUUID();
+  createListingRequestBody.variables.uuid = requestUuid;
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(createListingTemplate?.requestHeaders || {});
+
+  const createListingResponse = await executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=CreateListing&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(createListingRequestBody),
+  });
+
+  if (!createListingResponse?.success) {
+    return createListingResponse;
+  }
+
+  return {
+    success: true,
+    status: createListingResponse?.status || 200,
+    data: createListingResponse?.data || null,
+    uuid: requestUuid,
+  };
 }
 
 async function executeUpdateBioFromPlatform(payload) {

@@ -100,6 +100,13 @@ function initializeWhatnotExtensionBridge({ server }) {
             return;
           }
 
+          // Ignore uncorrelated notifications that do not carry an actionable response.
+          // These can come from passive API observation events and should not settle a
+          // pending request, otherwise the caller receives null and logs empty-body errors.
+          if (response == null) {
+            return;
+          }
+
           const firstPending = pendingRequests.keys().next().value;
           if (firstPending) {
             settlePending(firstPending, response);

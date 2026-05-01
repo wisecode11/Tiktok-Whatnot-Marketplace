@@ -6,6 +6,10 @@ const GetSessionApiData = require("../models/GetSessionApiData");
 const SellerSession = require("../models/SellerSession");
 const WhatnotOrder = require("../models/WhatnotOrder");
 const WhatnotInventorySnapshot = require("../models/WhatnotInventorySnapshot");
+const WhatnotCategory = require("../models/WhatnotCategory");
+const WhatnotSubCategory = require("../models/WhatnotSubCategory");
+const WhatnotHazmatType = require("../models/WhatnotHazmatType");
+const WhatnotProfileShipping = require("../models/WhatnotProfileShipping");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
 const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
@@ -2007,6 +2011,240 @@ async function saveWhatnotOrders({
   };
 }
 
+function flattenSubcategories(subcategories, parentSubcategoryId = null, output = []) {
+  if (!Array.isArray(subcategories) || !subcategories.length) {
+    return output;
+  }
+
+  for (const subcategory of subcategories) {
+    if (!subcategory || typeof subcategory !== "object") {
+      continue;
+    }
+    const normalizedSubcategoryId = typeof subcategory.id === "string" ? subcategory.id.trim() : "";
+    if (!normalizedSubcategoryId) {
+      continue;
+    }
+    output.push({
+      node: subcategory,
+      parentSubcategoryId,
+    });
+
+    flattenSubcategories(subcategory.subcategories, normalizedSubcategoryId, output);
+  }
+
+  return output;
+}
+
+async function saveWhatnotInventoryEditCategories({
+  responsePayload = {},
+  tabId = null,
+  source = "whatnot-extension",
+}) {
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+  const categories = Array.isArray(payload?.data?.categories) ? payload.data.categories : [];
+  const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
+  const now = new Date();
+  let savedCategoryCount = 0;
+  let savedSubCategoryCount = 0;
+  let savedHazmatTypeCount = 0;
+
+  for (const category of categories) {
+    if (!category || typeof category !== "object") {
+      continue;
+    }
+    const normalizedCategoryId = typeof category.id === "string" ? category.id.trim() : "";
+    if (!normalizedCategoryId) {
+      continue;
+    }
+    const normalizedHazmatType = typeof category.hazmatType === "string" ? category.hazmatType.trim() : "";
+
+    const categoryRecord = await WhatnotCategory.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        whatnot_category_id: normalizedCategoryId,
+      },
+      {
+        $set: {
+          label: category.label || null,
+          type: category.type || null,
+          position: Number.isFinite(Number(category.position)) ? Number(category.position) : null,
+          hazmat_type: normalizedHazmatType || null,
+          source: source || "whatnot-extension",
+          extension_tab_id: extensionTabId,
+          raw_payload: category,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
+    );
+    savedCategoryCount += 1;
+
+    if (normalizedHazmatType) {
+      await WhatnotHazmatType.findOneAndUpdate(
+        {
+          platform: "whatnot",
+          hazmat_type: normalizedHazmatType,
+        },
+        {
+          $set: {
+            source: source || "whatnot-extension",
+            updated_at: now,
+          },
+          $setOnInsert: {
+            created_at: now,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        },
+      );
+      savedHazmatTypeCount += 1;
+    }
+
+    const flattenedSubcategories = flattenSubcategories(category.subcategories);
+    for (const entry of flattenedSubcategories) {
+      const subcategory = entry.node;
+      const normalizedSubcategoryId = typeof subcategory.id === "string" ? subcategory.id.trim() : "";
+      if (!normalizedSubcategoryId) {
+        continue;
+      }
+      const subcategoryHazmatType = typeof subcategory.hazmatType === "string" ? subcategory.hazmatType.trim() : "";
+
+      await WhatnotSubCategory.findOneAndUpdate(
+        {
+          platform: "whatnot",
+          whatnot_category_id: categoryRecord._id,
+          subcategory_id: normalizedSubcategoryId,
+        },
+        {
+          $set: {
+            parent_subcategory_id: entry.parentSubcategoryId || null,
+            label: subcategory.label || null,
+            type: subcategory.type || null,
+            position: Number.isFinite(Number(subcategory.position)) ? Number(subcategory.position) : null,
+            hazmat_type: subcategoryHazmatType || null,
+            source: source || "whatnot-extension",
+            extension_tab_id: extensionTabId,
+            raw_payload: subcategory,
+            updated_at: now,
+          },
+          $setOnInsert: {
+            created_at: now,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        },
+      );
+      savedSubCategoryCount += 1;
+    }
+  }
+
+  return {
+    receivedCategoryCount: categories.length,
+    savedCategoryCount,
+    savedSubCategoryCount,
+    savedHazmatTypeCount,
+  };
+}
+
+async function saveWhatnotShippingProfiles({
+  responsePayload = {},
+  tabId = null,
+  source = "whatnot-extension",
+  categoryId = null,
+}) {
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+  const shippingProfiles = Array.isArray(payload?.data?.shippingProfiles) ? payload.data.shippingProfiles : [];
+  const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
+  const normalizedCategoryId = typeof categoryId === "string" && categoryId.trim() ? categoryId.trim() : null;
+  const now = new Date();
+  let savedProfileCount = 0;
+
+  for (const profile of shippingProfiles) {
+    if (!profile || typeof profile !== "object") {
+      continue;
+    }
+    const normalizedProfileId = typeof profile.id === "string" ? profile.id.trim() : "";
+    if (!normalizedProfileId) {
+      continue;
+    }
+
+    await WhatnotProfileShipping.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        WhatnotProfileShipping_id: normalizedProfileId,
+      },
+      {
+        $set: {
+          name: profile.name || null,
+          weight_amount: Number.isFinite(Number(profile.weightAmount)) ? Number(profile.weightAmount) : null,
+          weight_scale: profile.weightScale || null,
+          weight_name: profile.weightName || null,
+          length: Number.isFinite(Number(profile.length)) ? Number(profile.length) : null,
+          width: Number.isFinite(Number(profile.width)) ? Number(profile.width) : null,
+          height: Number.isFinite(Number(profile.height)) ? Number(profile.height) : null,
+          dimension_scale: profile.dimensionScale || null,
+          category_id: normalizedCategoryId,
+          source: source || "whatnot-extension",
+          extension_tab_id: extensionTabId,
+          raw_payload: profile,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
+    );
+    savedProfileCount += 1;
+  }
+
+  return {
+    receivedProfileCount: shippingProfiles.length,
+    savedProfileCount,
+  };
+}
+
+async function getWhatnotInventoryCreateFormOptions() {
+  const [subcategories, shippingProfiles] = await Promise.all([
+    WhatnotSubCategory.find({
+      subcategory_id: { $exists: true, $type: "string" },
+      label: { $exists: true, $type: "string" },
+    }).sort({ label: 1 }),
+    WhatnotProfileShipping.find({
+      WhatnotProfileShipping_id: { $exists: true, $type: "string" },
+      name: { $exists: true, $type: "string" },
+    }).sort({ name: 1 }),
+  ]);
+
+  return {
+    subcategories: subcategories.map((item) => ({
+      id: item.subcategory_id,
+      label: item.label,
+    })),
+    shippingProfiles: shippingProfiles.map((item) => ({
+      id: item.WhatnotProfileShipping_id,
+      name: item.name,
+    })),
+  };
+}
+
 async function getWhatnotOrders({ clerkUserId, limit = 100 }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -2127,6 +2365,266 @@ async function updateWhatnotBioFromPlatform({ bio }) {
   };
 }
 
+async function generateWhatnotMediaUploadUrlsFromPlatform({ media = [], fileBase64 = "", fileContentType = "" }) {
+  const normalizedMedia = Array.isArray(media)
+    ? media
+      .map((entry) => ({
+        extension: typeof entry?.extension === "string" ? entry.extension.trim().toLowerCase() : "",
+        id: typeof entry?.id === "string" ? entry.id.trim() : "",
+      }))
+      .filter((entry) => entry.id && entry.extension)
+    : [];
+
+  if (!normalizedMedia.length) {
+    throw createHttpError(400, "At least one media item with id and extension is required.");
+  }
+
+  const normalizedFileBase64 = typeof fileBase64 === "string" ? fileBase64.trim() : "";
+  if (!normalizedFileBase64) {
+    throw createHttpError(400, "fileBase64 is required: image bytes must be uploaded to the signed URL before AddListingPhoto.");
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "generate_media_upload_urls",
+    media: normalizedMedia,
+    fileBase64: normalizedFileBase64,
+    fileContentType: typeof fileContentType === "string" ? fileContentType.trim() : "",
+  });
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  const generateBody =
+    body &&
+    body.generateMediaUploadUrls &&
+    typeof body.generateMediaUploadUrls === "object"
+      ? body.generateMediaUploadUrls
+      : body;
+  const addListingPhotoBody =
+    body &&
+    body.addListingPhoto &&
+    typeof body.addListingPhoto === "object"
+      ? body.addListingPhoto
+      : null;
+
+  const addListingPhotoNode =
+    addListingPhotoBody && addListingPhotoBody.data && addListingPhotoBody.data.addListingPhoto
+      ? addListingPhotoBody.data.addListingPhoto
+      : null;
+
+  const hasGenerateErrors = Array.isArray(generateBody && generateBody.errors) && generateBody.errors.length > 0;
+  const hasAddListingPhotoErrors =
+    Array.isArray(addListingPhotoBody && addListingPhotoBody.errors) && addListingPhotoBody.errors.length > 0;
+  const hasGraphqlErrors = hasGenerateErrors || hasAddListingPhotoErrors;
+  const firstGraphqlErrorMessage = hasGenerateErrors && generateBody.errors[0] && generateBody.errors[0].message
+    ? String(generateBody.errors[0].message)
+    : hasAddListingPhotoErrors && addListingPhotoBody.errors[0] && addListingPhotoBody.errors[0].message
+      ? String(addListingPhotoBody.errors[0].message)
+    : "";
+  const firstResultErrorMessage =
+    actionResult &&
+    actionResult.data &&
+    Array.isArray(actionResult.data.errors) &&
+    actionResult.data.errors[0] &&
+    actionResult.data.errors[0].message
+      ? String(actionResult.data.errors[0].message)
+      : "";
+
+  const addListingRejected =
+    addListingPhotoNode &&
+    typeof addListingPhotoNode.success === "boolean" &&
+    addListingPhotoNode.success === false;
+
+  if (!actionResult || !actionResult.success || hasGraphqlErrors || addListingRejected) {
+    const errorMessage = actionResult && actionResult.error
+      ? actionResult.error
+      : addListingRejected &&
+          addListingPhotoNode &&
+          typeof addListingPhotoNode.message === "string" &&
+          addListingPhotoNode.message.trim()
+        ? addListingPhotoNode.message.trim()
+        : firstGraphqlErrorMessage
+          ? `Whatnot media upload URL request failed: ${firstGraphqlErrorMessage}`
+          : firstResultErrorMessage
+            ? `Whatnot media upload URL request failed: ${firstResultErrorMessage}`
+            : actionResult && Number.isFinite(Number(actionResult.status))
+              ? `Whatnot media upload URL request failed (status ${actionResult.status}).`
+              : "Whatnot media upload URL request failed through extension.";
+    console.error("[Whatnot GenerateMediaUploadUrls Error]", {
+      status: actionResult && actionResult.status ? actionResult.status : null,
+      success: actionResult && typeof actionResult.success === "boolean" ? actionResult.success : null,
+      error: actionResult && actionResult.error ? actionResult.error : null,
+      body,
+    });
+
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      errorMessage,
+      body && Object.keys(body).length ? body : actionResult,
+    );
+  }
+
+  if (!body || typeof body !== "object") {
+    const fallbackMessage = "Whatnot media upload URL request returned an empty response.";
+    console.error("[Whatnot GenerateMediaUploadUrls Empty Response]", {
+      status: actionResult && actionResult.status ? actionResult.status : null,
+      success: actionResult && typeof actionResult.success === "boolean" ? actionResult.success : null,
+      body,
+    });
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      fallbackMessage,
+      actionResult || null,
+    );
+  }
+
+  // User requested the response to be logged on backend console.
+  console.log("[Whatnot GenerateMediaUploadUrls Response]", generateBody);
+  if (addListingPhotoBody) {
+    console.log("[Whatnot AddListingPhoto Response]", addListingPhotoBody);
+  }
+
+  if (addListingPhotoBody && typeof addListingPhotoBody === "object") {
+    return addListingPhotoBody;
+  }
+
+  return body;
+}
+
+async function createWhatnotListingFromPlatform({
+  title = "",
+  description = "",
+  quantity = null,
+  priceUsd = null,
+  subcategoryId = "",
+  shippingProfileId = "",
+  hazmatType = "",
+  imageId = "",
+}) {
+  const normalizedTitle = typeof title === "string" ? title.trim() : "";
+  const normalizedDescription = typeof description === "string" ? description.trim() : "";
+  const normalizedSubcategoryId = typeof subcategoryId === "string" ? subcategoryId.trim() : "";
+  const normalizedShippingProfileId = typeof shippingProfileId === "string" ? shippingProfileId.trim() : "";
+  const normalizedHazmatType = typeof hazmatType === "string" ? hazmatType.trim() : "";
+  const normalizedImageId = typeof imageId === "string" ? imageId.trim() : "";
+  const normalizedQuantity = Number(quantity);
+  const normalizedPriceUsd = Number(priceUsd);
+
+  if (!normalizedTitle) {
+    throw createHttpError(400, "title is required.");
+  }
+  if (!normalizedDescription) {
+    throw createHttpError(400, "description is required.");
+  }
+  if (!normalizedSubcategoryId) {
+    throw createHttpError(400, "subcategoryId is required.");
+  }
+  if (!normalizedShippingProfileId) {
+    throw createHttpError(400, "shippingProfileId is required.");
+  }
+  if (!normalizedHazmatType) {
+    throw createHttpError(400, "hazmatType is required.");
+  }
+  if (!normalizedImageId) {
+    throw createHttpError(400, "imageId is required. Upload image via AddListingPhoto first.");
+  }
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0 || !Number.isInteger(normalizedQuantity)) {
+    throw createHttpError(400, "quantity must be a whole number greater than 0.");
+  }
+  if (!Number.isFinite(normalizedPriceUsd) || normalizedPriceUsd <= 0) {
+    throw createHttpError(400, "priceUsd must be greater than 0.");
+  }
+
+  const selectedSubcategory = await WhatnotSubCategory.findOne({
+    platform: "whatnot",
+    subcategory_id: normalizedSubcategoryId,
+  }).sort({ updated_at: -1 });
+  if (!selectedSubcategory) {
+    throw createHttpError(400, "Selected subcategory was not found in Whatnot category cache.");
+  }
+
+  const selectedShippingProfile = await WhatnotProfileShipping.findOne({
+    platform: "whatnot",
+    WhatnotProfileShipping_id: normalizedShippingProfileId,
+  }).sort({ updated_at: -1 });
+  if (!selectedShippingProfile) {
+    throw createHttpError(400, "Selected shipping profile was not found in Whatnot shipping profile cache.");
+  }
+
+  const listingPayload = {
+    barcode: null,
+    catalogProductId: null,
+    categoryId: normalizedSubcategoryId,
+    costPerItem: null,
+    description: normalizedDescription,
+    hazmatType: normalizedHazmatType,
+    images: [{ id: normalizedImageId }],
+    videoIds: [],
+    isPartialSave: false,
+    listIndividually: false,
+    price: {
+      amount: Math.round(normalizedPriceUsd * 100),
+      currency: "USD",
+    },
+    productAttributeValues: [],
+    productId: null,
+    quantity: normalizedQuantity,
+    reservedForSalesChannel: "NONE",
+    salesChannels: [{ id: null, type: "MARKETPLACE" }],
+    shippingProfileId: normalizedShippingProfileId,
+    sku: null,
+    timedListingEvent: null,
+    title: normalizedTitle,
+    transactionProps: {
+      auction: null,
+      isOfferable: false,
+      purchaseLimits: null,
+    },
+    transactionType: "BUY_IT_NOW",
+    uuid: null,
+    variants: null,
+    weight: null,
+    metadata: {
+      productLookupId: null,
+    },
+    isQuickAdd: false,
+  };
+
+  const actionResult = await requestWhatnotAction({
+    action: "create_listing",
+    createListingPayload: listingPayload,
+  });
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  const hasGraphqlErrors = Array.isArray(body && body.errors) && body.errors.length > 0;
+  const listingErrorMessage =
+    body &&
+    body.data &&
+    body.data.createListing &&
+    typeof body.data.createListing.error === "string" &&
+    body.data.createListing.error.trim()
+      ? body.data.createListing.error.trim()
+      : "";
+
+  if (!actionResult || !actionResult.success || hasGraphqlErrors || listingErrorMessage) {
+    const firstGraphqlErrorMessage =
+      hasGraphqlErrors && body.errors[0] && body.errors[0].message
+        ? String(body.errors[0].message)
+        : "";
+    const errorMessage = actionResult && actionResult.error
+      ? actionResult.error
+      : listingErrorMessage
+        ? listingErrorMessage
+        : firstGraphqlErrorMessage
+          ? `Whatnot CreateListing failed: ${firstGraphqlErrorMessage}`
+          : "Whatnot CreateListing request failed through extension.";
+
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      errorMessage,
+      body && Object.keys(body).length ? body : actionResult,
+    );
+  }
+
+  return body;
+}
+
 async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE" }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -2156,7 +2654,7 @@ async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE"
   if (!actionResult || !actionResult.success) {
     throw createHttpError(
       (actionResult && actionResult.status) || 502,
-      (actionResult && actionResult.error) || "Whatnot inventory fetch failed through extension.",
+      (actionResult && actionResult.error) || "Change filter to get the Updated inventory list.",
       actionResult || null,
     );
   }
@@ -2358,9 +2856,14 @@ module.exports = {
   handleWhatnotCallback,
   handleTikTokCallback,
   updateWhatnotBioFromPlatform,
+  generateWhatnotMediaUploadUrlsFromPlatform,
+  createWhatnotListingFromPlatform,
   saveGetSessionApiData,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
+  saveWhatnotInventoryEditCategories,
+  saveWhatnotShippingProfiles,
+  getWhatnotInventoryCreateFormOptions,
   getWhatnotOrders,
   syncWhatnotOrdersFromExtension,
 };

@@ -59,11 +59,27 @@
   }
 
   async function execute(options) {
+    const urlStr = typeof options.url === "string" ? options.url : "";
+    let useWhatnotCredentials = options.credentials === undefined && urlStr;
+    try {
+      const hostname = urlStr ? new URL(urlStr).hostname : "";
+      useWhatnotCredentials = hostname.endsWith("whatnot.com");
+    } catch (_e) {
+      useWhatnotCredentials = false;
+    }
+
+    const credentials =
+      typeof options.credentials === "string"
+        ? options.credentials
+        : useWhatnotCredentials
+          ? "include"
+          : "omit";
+
     const res = await fetch(options.url, {
       method: options.method || "GET",
       headers: options.headers || {},
       body: options.body,
-      credentials: "include"
+      credentials,
     });
 
     const text = await res.text();
