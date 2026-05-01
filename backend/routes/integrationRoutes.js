@@ -5,6 +5,7 @@ const {
   createTikTokPhotoPost,
   createTikTokVideoPost,
   getWhatnotExtensionStatusData,
+  getWhatnotInventoryCreateFormOptionsData,
   getWhatnotInventoryLiveData,
   getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
@@ -16,6 +17,8 @@ const {
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotInventoryEditCategoriesEntry,
+  saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
@@ -23,6 +26,8 @@ const {
   whatnotCallback,
   tiktokCallback,
   updateWhatnotBio,
+  generateWhatnotMediaUploadUrls,
+  publishWhatnotInventory,
 } = require("../controllers/integrationController");
 
 const { authenticateRequest } = require("../middleware/authenticate");
@@ -50,6 +55,7 @@ router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
+router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.get("/whatnot/extension-status", authenticateRequest, getWhatnotExtensionStatusData);
 router.get("/whatnot/orders", authenticateRequest, getWhatnotOrders);
@@ -60,8 +66,12 @@ router.post("/tiktok/posts/video", authenticateRequest, createTikTokVideoPost);
 router.post("/connect", authenticateRequest, startConnection);
 router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatnotSessionData);
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
+router.post("/whatnot/inventory-edit-categories", authenticateWhatnotExtension, saveWhatnotInventoryEditCategoriesEntry);
+router.post("/whatnot/shipping-profiles", authenticateWhatnotExtension, saveWhatnotShippingProfilesEntry);
 router.post("/whatnot/orders", authenticateWhatnotExtension, saveWhatnotOrdersEntry);
 router.post("/whatnot/profile/bio", authenticateRequest, updateWhatnotBio);
+router.post("/whatnot/media/upload-urls", authenticateRequest, generateWhatnotMediaUploadUrls);
+router.post("/whatnot/inventory/publish", authenticateRequest, publishWhatnotInventory);
 router.delete("/accounts/:platform", authenticateRequest, removeConnection);
 router.get("/stripe/status", authenticateRequest, checkStripeStatus);
 router.get("/tiktok/callback", tiktokCallback);

@@ -163,6 +163,56 @@ export interface WhatnotInventoryLiveResponse {
   }
 }
 
+export interface WhatnotInventoryCreateFormOptionsResponse {
+  subcategories: Array<{
+    id: string
+    label: string
+  }>
+  shippingProfiles: Array<{
+    id: string
+    name: string
+  }>
+}
+
+export interface WhatnotGenerateMediaUploadUrlsResponse {
+  data?: {
+    addListingPhoto?: {
+      image?: {
+        id?: string
+        url?: string
+      }
+      success?: boolean
+      message?: string
+    }
+  }
+  errors?: Array<{ message?: string }>
+}
+
+export interface CreateWhatnotListingPayload {
+  title: string
+  description: string
+  quantity: number
+  priceUsd: number
+  subcategoryId: string
+  shippingProfileId: string
+  hazmatType: string
+  imageId: string
+}
+
+export interface CreateWhatnotListingResponse {
+  data?: {
+    createListing?: {
+      listingNode?: {
+        id?: string
+        uuid?: string
+        title?: string
+      }
+      error?: string | null
+    }
+  }
+  errors?: Array<{ message?: string }>
+}
+
 export interface TikTokCreatorInfoResponse {
   connected: boolean
   creator: {
@@ -613,5 +663,35 @@ export async function syncWhatnotInventoryLive(
     token,
     method: "POST",
     body: { status },
+  })
+}
+
+export async function getWhatnotInventoryCreateFormOptions(token: string) {
+  return request<WhatnotInventoryCreateFormOptionsResponse>("/api/integrations/whatnot/inventory/create-form-options", {
+    token,
+  })
+}
+
+export async function generateWhatnotMediaUploadUrls(
+  token: string,
+  media: Array<{ id: string; extension: string }>,
+  file: { fileBase64: string; fileContentType?: string },
+) {
+  return request<WhatnotGenerateMediaUploadUrlsResponse>("/api/integrations/whatnot/media/upload-urls", {
+    token,
+    method: "POST",
+    body: {
+      media,
+      fileBase64: file.fileBase64,
+      ...(file.fileContentType ? { fileContentType: file.fileContentType } : {}),
+    },
+  })
+}
+
+export async function createWhatnotListing(token: string, payload: CreateWhatnotListingPayload) {
+  return request<CreateWhatnotListingResponse>("/api/integrations/whatnot/inventory/publish", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
   })
 }

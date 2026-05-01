@@ -47,7 +47,18 @@ app.post(
   express.raw({ type: "application/json" }),
   stripeWebhook,
 );
-app.use(express.json());
+function createJsonMiddleware() {
+  const defaultParser = express.json({ limit: "1mb" });
+  const integrationsUploadUrlsParser = express.json({ limit: "25mb" });
+  return (req, res, next) => {
+    const url = typeof req.originalUrl === "string" ? req.originalUrl.split("?")[0] : "";
+    const isLargeWhatnotUpload =
+      req.method === "POST" && url === "/api/integrations/whatnot/media/upload-urls";
+    return (isLargeWhatnotUpload ? integrationsUploadUrlsParser : defaultParser)(req, res, next);
+  };
+}
+
+app.use(createJsonMiddleware());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/billing", billingRoutes);
