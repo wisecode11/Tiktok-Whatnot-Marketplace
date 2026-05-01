@@ -5,6 +5,7 @@ const {
   getConnectedAccounts,
   getWhatnotExtensionConnectionStatus,
   getLatestWhatnotInventorySnapshot,
+  getWhatnotInventoryCreateFormOptions,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
@@ -13,9 +14,13 @@ const {
   handleWhatnotCallback,
   handleTikTokCallback,
   saveGetSessionApiData,
+  saveWhatnotInventoryEditCategories,
+  saveWhatnotShippingProfiles,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
   syncWhatnotInventoryFromPlatform,
+  generateWhatnotMediaUploadUrlsFromPlatform,
+  createWhatnotListingFromPlatform,
   updateWhatnotBioFromPlatform,
 } = require("../services/integrationService");
 const {
@@ -119,6 +124,15 @@ async function getWhatnotInventoryLiveData(req, res) {
       clerkUserId: req.auth.userId,
       status: req.query && req.query.status ? req.query.status : "ACTIVE",
     });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getWhatnotInventoryCreateFormOptionsData(_req, res) {
+  try {
+    const result = await getWhatnotInventoryCreateFormOptions();
     return res.status(200).json(result);
   } catch (error) {
     return sendError(res, error);
@@ -257,6 +271,41 @@ async function saveWhatnotOrdersEntry(req, res) {
   }
 }
 
+async function saveWhatnotInventoryEditCategoriesEntry(req, res) {
+  try {
+    const result = await saveWhatnotInventoryEditCategories({
+      responsePayload: req.body && req.body.responsePayload ? req.body.responsePayload : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function saveWhatnotShippingProfilesEntry(req, res) {
+  try {
+    const result = await saveWhatnotShippingProfiles({
+      responsePayload: req.body && req.body.responsePayload ? req.body.responsePayload : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+      categoryId: req.body && req.body.categoryId != null ? req.body.categoryId : null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function listWhatnotOrders(req, res) {
   try {
     const result = await getWhatnotOrders({
@@ -284,6 +333,39 @@ async function updateWhatnotBio(req, res) {
   try {
     const result = await updateWhatnotBioFromPlatform({
       bio: req.body && req.body.bio ? req.body.bio : "",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function generateWhatnotMediaUploadUrls(req, res) {
+  try {
+    const result = await generateWhatnotMediaUploadUrlsFromPlatform({
+      media: req.body && Array.isArray(req.body.media) ? req.body.media : [],
+      fileBase64: req.body && typeof req.body.fileBase64 === "string" ? req.body.fileBase64 : "",
+      fileContentType:
+        req.body && typeof req.body.fileContentType === "string" ? req.body.fileContentType : "",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function publishWhatnotInventory(req, res) {
+  try {
+    const result = await createWhatnotListingFromPlatform({
+      title: req.body && typeof req.body.title === "string" ? req.body.title : "",
+      description: req.body && typeof req.body.description === "string" ? req.body.description : "",
+      quantity: req.body && req.body.quantity != null ? req.body.quantity : null,
+      priceUsd: req.body && req.body.priceUsd != null ? req.body.priceUsd : null,
+      subcategoryId: req.body && typeof req.body.subcategoryId === "string" ? req.body.subcategoryId : "",
+      shippingProfileId:
+        req.body && typeof req.body.shippingProfileId === "string" ? req.body.shippingProfileId : "",
+      hazmatType: req.body && typeof req.body.hazmatType === "string" ? req.body.hazmatType : "",
+      imageId: req.body && typeof req.body.imageId === "string" ? req.body.imageId : "",
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -319,6 +401,7 @@ module.exports = {
   createTikTokVideoPost,
   getWhatnotInventorySnapshotData,
   getWhatnotInventoryLiveData,
+  getWhatnotInventoryCreateFormOptionsData,
   getWhatnotExtensionStatusData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -329,6 +412,8 @@ module.exports = {
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotInventoryEditCategoriesEntry,
+  saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
@@ -336,4 +421,6 @@ module.exports = {
   whatnotCallback,
   tiktokCallback,
   updateWhatnotBio,
+  generateWhatnotMediaUploadUrls,
+  publishWhatnotInventory,
 };
