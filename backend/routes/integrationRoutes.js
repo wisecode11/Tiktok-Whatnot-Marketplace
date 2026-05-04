@@ -22,6 +22,7 @@ const {
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
+  syncWhatnotEarlyPayoutBalanceData,
   startConnection,
   whatnotCallback,
   tiktokCallback,
@@ -57,6 +58,11 @@ router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInvento
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
+router.post(
+  "/whatnot/finance/early-payout-balance-sync",
+  authenticateRequest,
+  syncWhatnotEarlyPayoutBalanceData,
+);
 router.get("/whatnot/extension-status", authenticateRequest, getWhatnotExtensionStatusData);
 router.get("/whatnot/orders", authenticateRequest, getWhatnotOrders);
 router.post("/whatnot/orders/sync", authenticateRequest, syncWhatnotOrders);

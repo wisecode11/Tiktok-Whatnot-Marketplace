@@ -2827,6 +2827,39 @@ async function getLatestWhatnotInventorySnapshot({ clerkUserId, status = "ACTIVE
   };
 }
 
+async function syncWhatnotEarlyPayoutBalanceFromPlatform({ clerkUserId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "fetch_early_payout_balance_data",
+    clerkUserId: normalizedClerkUserId,
+  });
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to load Whatnot payout balance. Connect the extension and Whatnot.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  if (Array.isArray(body && body.errors) && body.errors.length) {
+    const firstError = body.errors[0] && body.errors[0].message
+      ? String(body.errors[0].message)
+      : "Whatnot finance GraphQL returned errors.";
+    throw createHttpError(502, firstError, body);
+  }
+
+  return {
+    syncedAt: new Date(),
+    responsePayload: body,
+  };
+}
+
 async function getWhatnotExtensionConnectionStatus({ clerkUserId }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -2886,6 +2919,7 @@ module.exports = {
   getLatestWhatnotInventorySnapshot,
   getWhatnotInventorySnapshot,
   syncWhatnotInventoryFromPlatform,
+  syncWhatnotEarlyPayoutBalanceFromPlatform,
   getTikTokProfile,
   getTikTokVideoAnalytics,
   handleWhatnotCallback,

@@ -19,6 +19,7 @@ const {
   saveWhatnotOrders,
   saveWhatnotSellerSession,
   syncWhatnotInventoryFromPlatform,
+  syncWhatnotEarlyPayoutBalanceFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
   createWhatnotListingFromPlatform,
   updateWhatnotBioFromPlatform,
@@ -144,6 +145,17 @@ async function syncWhatnotInventoryLiveData(req, res) {
     const result = await syncWhatnotInventoryFromPlatform({
       clerkUserId: req.auth.userId,
       status: req.body && req.body.status ? req.body.status : "ACTIVE",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncWhatnotEarlyPayoutBalanceData(req, res) {
+  try {
+    const result = await syncWhatnotEarlyPayoutBalanceFromPlatform({
+      clerkUserId: req.auth.userId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -417,6 +429,7 @@ module.exports = {
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
+  syncWhatnotEarlyPayoutBalanceData,
   startConnection,
   whatnotCallback,
   tiktokCallback,

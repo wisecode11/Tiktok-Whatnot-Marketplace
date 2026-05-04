@@ -163,6 +163,30 @@ export interface WhatnotInventoryLiveResponse {
   }
 }
 
+export interface WhatnotEarlyPayoutMoney {
+  amount?: number | null
+  currency?: string | null
+  amountSafe?: number | null
+}
+
+export interface WhatnotEarlyPayoutBalanceResponse {
+  syncedAt: string | null
+  responsePayload: {
+    data?: {
+      me?: {
+        id?: string | null
+        balances?: {
+          completedSalesBalance?: WhatnotEarlyPayoutMoney | null
+          processingSalesBalance?: WhatnotEarlyPayoutMoney | null
+          totalSalesBalance?: WhatnotEarlyPayoutMoney | null
+          totalSalesAltCurrencyBalance?: WhatnotEarlyPayoutMoney | null
+        } | null
+      } | null
+    } | null
+    errors?: Array<{ message?: string }>
+  }
+}
+
 export interface WhatnotInventoryCreateFormOptionsResponse {
   subcategories: Array<{
     id: string
@@ -664,6 +688,17 @@ export async function syncWhatnotInventoryLive(
     method: "POST",
     body: { status },
   })
+}
+
+export async function syncWhatnotEarlyPayoutBalance(token: string) {
+  return request<WhatnotEarlyPayoutBalanceResponse>(
+    "/api/integrations/whatnot/finance/early-payout-balance-sync",
+    {
+      token,
+      method: "POST",
+      body: {},
+    },
+  )
 }
 
 export async function getWhatnotInventoryCreateFormOptions(token: string) {

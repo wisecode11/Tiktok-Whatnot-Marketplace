@@ -15,6 +15,8 @@ const WHATNOT_EXTENSION_API_KEY = "";
 const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
 const SELLER_HUB_INVENTORY_QUERY =
   "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
+const GET_EARLY_PAYOUT_BALANCE_DATA_QUERY =
+  "query GetEarlyPayoutBalanceData{me{id balances{completedSalesBalance{...Money __typename}processingSalesBalance{...Money __typename}totalSalesBalance{...Money __typename}totalSalesAltCurrencyBalance{...Money __typename}__typename}__typename}}fragment Money on Money{amount currency amountSafe __typename}";
 const SELLER_HUB_INVENTORY_EDIT_QUERY =
   "query SellerHubInventoryEdit($listingId:ID!$includeListing:Boolean!){categories:categoryBrowse{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption __typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}getListing(id:$listingId)@include(if:$includeListing){...SellerHubInventoryListing __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment SellerHubInventoryListingPriceFormat on ListingNode{id transactionProps{isOfferable auction{endTime isSuddenDeath __typename}purchaseLimits{type limit __typename}__typename}reservedForSalesChannel price{...Money __typename}salesChannels{id type __typename}__typename}fragment SellerHubInventoryListingImages on ListingNode{id images{id url label key __typename}__typename}fragment SellerHubInventoryListingVideos on ListingNode{id videos{id url thumbnailUrl duration status __typename}__typename}fragment SellerHubInventoryListingAttribute on ProductAttributeValueNode{value unit attribute{id key label valueType isRequired __typename}__typename}fragment SellerHubInventoryListingUpcomingFlashSale on ListingNode{id upcomingTimedListingEvent{id type ...on FlashSaleListingEvent{discountType discountPercent originalPrice{...Money __typename}discountPrice{...Money __typename}durationSeconds isAvailableForFullPrice __typename}__typename}__typename}fragment SellerHubInventoryListingVariants on ListingNode{id variants{id title quantity productVariant{id images{id url __typename}subtitle quantity price{...Money __typename}attributes{id key label value __typename}__typename}__typename}variantEnabled variantV3Enabled __typename}fragment SellerHubInventoryListingActions on ListingNode{id inventoryActions{actionType label description enabled disabledReason __typename}__typename}fragment ProductCategoryOption on CategoryNode{id label type position hazmatType __typename}fragment SellerHubInventoryListing on ListingNode{id uuid title description status publicStatus updatedAt ...SellerHubInventoryListingPriceFormat ineligibleSalesChannels{type reasons __typename}livestreams{id status title startTime categoryNodes{id label __typename}tags{id name label __typename}__typename}...SellerHubInventoryListingImages ...SellerHubInventoryListingVideos actions{action label description __typename}listingAttributeValues{...SellerHubInventoryListingAttribute __typename}quantity sku product{id externalSource name externalId category{id label hazmatType __typename}shippingProfile{id __typename}hazmatType hasVariants variantOptions{id productAttribute{id key label __typename}__typename}variants{edges{node{id listingId quantity price{...Money __typename}attributes{id key value __typename}__typename}__typename}__typename}__typename}transactionType orders{edges{node{id shipmentId status __typename}__typename}__typename}auctionInfo{bidCount currentPrice{...Money __typename}auctionWinner{id username __typename}endTime __typename}order{id __typename}isEditable uneditableFields costPerItem{...Money __typename}barcode isMyListing ...SellerHubInventoryListingUpcomingFlashSale ...SellerHubInventoryListingVariants ...SellerHubInventoryListingActions __typename}";
 const GET_SHIPPING_PROFILES_QUERY =
@@ -905,6 +907,13 @@ async function handlePlatformAction(payload) {
     result = await fetchWhatnotOrders(payload?.tabId || state.tabId);
   } else if (payload?.action === "fetch_seller_hub_inventory") {
     result = await executeSellerHubInventoryFromPlatform(payload);
+  } else if (payload?.action === "fetch_early_payout_balance_data") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeGetEarlyPayoutBalanceDataFromPlatform(payload);
   } else if (payload?.action === "generate_media_upload_urls") {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
@@ -994,6 +1003,56 @@ async function executeSellerHubInventoryFromPlatform(payload) {
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
+  });
+}
+
+async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
+  let requestBody = {
+    operationName: "GetEarlyPayoutBalanceData",
+    variables: {},
+    query: GET_EARLY_PAYOUT_BALANCE_DATA_QUERY,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetEarlyPayoutBalanceData";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
+      requestBody.query = GET_EARLY_PAYOUT_BALANCE_DATA_QUERY;
+    }
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
   });
 }
 
