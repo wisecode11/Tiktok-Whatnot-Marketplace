@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { Box, ClipboardList, type LucideIcon, Printer, Warehouse } from "lucide-react"
+import { BarChart3, Box, ClipboardList, type LucideIcon, Printer, Warehouse } from "lucide-react"
 
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
@@ -18,6 +18,7 @@ const moduleIcons: Record<string, LucideIcon> = {
   packing: Box,
   labelling: Printer,
   order_status_update: ClipboardList,
+  order_management: BarChart3,
 }
 
 const moduleOrder = [
@@ -26,6 +27,7 @@ const moduleOrder = [
   "packing",
   "labelling",
   "order_status_update",
+  "order_management",
 ] as const
 
 const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
@@ -34,6 +36,7 @@ const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
   packing: "Packing",
   labelling: "Labelling",
   order_status_update: "Order Status Update",
+  order_management: "Order Management",
 }
 
 export default function StaffLayout({

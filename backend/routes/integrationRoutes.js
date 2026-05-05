@@ -29,6 +29,9 @@ const {
   updateWhatnotBio,
   generateWhatnotMediaUploadUrls,
   publishWhatnotInventory,
+  fetchMyLiveStatsData,
+  fetchWhatnotShipmentsLivestreamsCurrentData,
+  fetchWhatnotShipmentsTableData,
 } = require("../controllers/integrationController");
 
 const { authenticateRequest } = require("../middleware/authenticate");
@@ -58,6 +61,13 @@ router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInvento
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
+router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData);
+router.get(
+  "/whatnot/shipments-livestreams/current",
+  authenticateRequest,
+  fetchWhatnotShipmentsLivestreamsCurrentData,
+);
+router.post("/whatnot/shipments/table", authenticateRequest, fetchWhatnotShipmentsTableData);
 router.post(
   "/whatnot/finance/early-payout-balance-sync",
   authenticateRequest,

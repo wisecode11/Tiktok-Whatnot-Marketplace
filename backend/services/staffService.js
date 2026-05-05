@@ -3,6 +3,8 @@ const { createClerkClient } = require("@clerk/backend");
 const User = require("../models/Users");
 const SellerWorkspace = require("../models/SellerWorkspace");
 const WorkspaceMembership = require("../models/WorkspaceMembership");
+const WhatnotLiveStatsSnapshot = require("../models/WhatnotLiveStatsSnapshot");
+const WhatnotShipmentDetail = require("../models/WhatnotShipmentDetail");
 const { getEmailDeliveryErrorMessage, sendStaffWelcomeEmail } = require("./emailService");
 
 function createHttpError(status, message, details) {
@@ -162,6 +164,62 @@ async function listStaffMembers({ clerkUserId }) {
   };
 }
 
+async function getStaffOrderManagementSnapshot({ clerkUserId, limit = 100 }) {
+  const user = await User.findOne({ clerk_user_id: clerkUserId });
+
+  if (!user) {
+    throw createHttpError(404, "User account was not found.");
+  }
+
+  if (user.user_type !== "staff") {
+    throw createHttpError(403, "Only staff members can access this endpoint.");
+  }
+
+  if (!user.parent_seller_user_id) {
+    throw createHttpError(404, "Parent seller was not found for this staff account.");
+  }
+
+  const seller = await User.findOne({ _id: user.parent_seller_user_id, user_type: "seller" });
+  if (!seller || !seller.clerk_user_id) {
+    throw createHttpError(404, "Parent seller profile is missing or invalid.");
+  }
+
+  const parentSellerClerkUserId = seller.clerk_user_id;
+  const latestStats = await WhatnotLiveStatsSnapshot.findOne({
+    platform: "whatnot",
+    clerk_user_id: parentSellerClerkUserId,
+  }).sort({ synced_at: -1, updated_at: -1 });
+
+  const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(200, Number(limit))) : 100;
+  const shipments = await WhatnotShipmentDetail.find({
+    platform: "whatnot",
+    clerk_user_id: parentSellerClerkUserId,
+  })
+    .sort({ synced_at: -1, updated_at: -1 })
+    .limit(safeLimit);
+
+  return {
+    stats: latestStats
+      ? {
+          liveId: latestStats.live_id || null,
+          statistic: latestStats.statistic_payload || null,
+          syncedAt: latestStats.synced_at || null,
+          updatedAt: latestStats.updated_at || null,
+        }
+      : null,
+    shipments: shipments.map((item) => ({
+      shipmentKey: item.shipment_key || null,
+      shipmentIdInput: item.shipment_id_input || null,
+      shipmentGlobalId: item.shipment_global_id || null,
+      shipment: item.shipment_payload || null,
+      syncedAt: item.synced_at || null,
+      updatedAt: item.updated_at || null,
+    })),
+    source: "db",
+    parentSellerClerkUserId,
+  };
+}
+
 async function createStaffMember({ clerkUserId, username, email, password }) {
   const normalizedUsername = normalizeUsername(username);
   const normalizedEmail = normalizeEmail(email);
@@ -317,5 +375,6 @@ async function createStaffMember({ clerkUserId, username, email, password }) {
 
 module.exports = {
   createStaffMember,
+  getStaffOrderManagementSnapshot,
   listStaffMembers,
 };

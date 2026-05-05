@@ -81,4 +81,8 @@ export const MODULE_DEFINITIONS: Record<
     label: "Order Status Update",
     description: "Update order status",
   },
+  order_management: {
+    label: "Order Management",
+    description: "View seller order stats and shipment details from synced database snapshots",
+  },
 }
