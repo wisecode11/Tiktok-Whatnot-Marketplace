@@ -917,13 +917,19 @@ async function handlePlatformAction(payload) {
   } else if (payload?.action === "fetch_seller_hub_inventory") {
     result = await executeSellerHubInventoryFromPlatform(payload);
   } else if (payload?.action === "fetch_my_live_stats") {
-  } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
       state.clerkUserId = requestedClerkUserId;
       await persistState();
     }
     result = await executeMyLiveStatsFromPlatform(payload);
+  } else if (payload?.action === "fetch_early_payout_balance_data") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeGetEarlyPayoutBalanceDataFromPlatform(payload);
   } else if (payload?.action === "fetch_shipments_livestreams") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -950,7 +956,6 @@ async function handlePlatformAction(payload) {
         shipmentIds: Array.isArray(state.recentObservedShipmentIds) ? [...state.recentObservedShipmentIds] : [],
       },
     };
-    result = await executeGetEarlyPayoutBalanceDataFromPlatform(payload);
   } else if (payload?.action === "generate_media_upload_urls") {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
@@ -1101,7 +1106,6 @@ async function executeMyLiveStatsFromPlatform(payload) {
 }
 
 async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
-async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
   if (!state.tabId || !state.auth?.csrf_token) {
     const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
     if (!autoConnected.success) {
@@ -1166,6 +1170,56 @@ async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
   });
 }
 
+async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
+  }
+
+  const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
+  let requestBody = {
+    operationName: "GetEarlyPayoutBalanceData",
+    variables: {},
+    query: GET_EARLY_PAYOUT_BALANCE_DATA_QUERY,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetEarlyPayoutBalanceData";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
+      requestBody.query = GET_EARLY_PAYOUT_BALANCE_DATA_QUERY;
+    }
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+}
+
 async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
   const id = typeof shipmentGraphqlId === "string" ? shipmentGraphqlId.trim() : "";
   if (!id) {
@@ -1201,28 +1255,12 @@ async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
       ...requestBody.variables,
       id
     };
-  const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
-  let requestBody = {
-    operationName: "GetEarlyPayoutBalanceData",
-    variables: {},
-    query: GET_EARLY_PAYOUT_BALANCE_DATA_QUERY,
-  };
-  if (template?.requestBody && typeof template.requestBody === "object") {
-    requestBody = structuredClone(template.requestBody);
-    requestBody.operationName = "GetEarlyPayoutBalanceData";
-    if (!requestBody.variables || typeof requestBody.variables !== "object") {
-      requestBody.variables = {};
-    }
-    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
-      requestBody.query = GET_EARLY_PAYOUT_BALANCE_DATA_QUERY;
-    }
   }
 
   const defaultHeaders = {
     "content-type": "application/json",
     "x-whatnot-app": "whatnot-web",
     "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
     "x-wn-extension": "1",
   };
   const accessToken = String(state?.auth?.access_token || "").trim();
@@ -1280,6 +1318,49 @@ async function executeWhatnotShipmentsBatchFromPlatform(payload) {
   };
 }
 
+async function syncWhatnotEarlyPayoutBalanceFromPlatform() {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
+  }
+
+  const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
+  let requestBody = {
+    operationName: "GetEarlyPayoutBalanceData",
+    variables: {},
+    query: GET_EARLY_PAYOUT_BALANCE_DATA_QUERY,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetEarlyPayoutBalanceData";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
+      requestBody.query = GET_EARLY_PAYOUT_BALANCE_DATA_QUERY;
+    }
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },

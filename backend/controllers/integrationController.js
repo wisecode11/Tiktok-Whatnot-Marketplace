@@ -197,6 +197,13 @@ async function fetchWhatnotShipmentsTableData(req, res) {
       liveId: liveId || null,
       shipmentIds: shipmentIds && shipmentIds.length ? shipmentIds : null,
       manifestUrls: manifestUrls && manifestUrls.length ? manifestUrls : null,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function syncWhatnotEarlyPayoutBalanceData(req, res) {
   try {
     const result = await syncWhatnotEarlyPayoutBalanceFromPlatform({
