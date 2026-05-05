@@ -8,12 +8,34 @@ export interface AuthUserProfile {
   lastName: string
   role: AppRole
   backendRole: "seller" | "staff" | "moderator" | "admin"
+  activeWorkspaceId: string | null
   status: string
   dashboardPath: string
 }
 
 export interface AuthResponse {
   user: AuthUserProfile
+  redirectTo: string
+}
+
+export interface SellerOrganization {
+  id: string
+  name: string
+  slug: string | null
+  clerkOrganizationId: string | null
+  status: string
+  isActive: boolean
+  createdAt: string | null
+}
+
+export interface SellerOrganizationsResponse {
+  organizations: SellerOrganization[]
+  activeWorkspaceId: string | null
+  hasOrganizations: boolean
+}
+
+export interface SellerOrganizationMutationResponse {
+  organization: SellerOrganization
   redirectTo: string
 }
 
@@ -545,6 +567,36 @@ export async function loginWithRole(token: string, role: AppRole) {
 export async function getCurrentUserProfile(token: string) {
   return request<AuthResponse>("/api/auth/me", {
     token,
+  })
+}
+
+export async function getSellerOrganizations(token: string) {
+  return request<SellerOrganizationsResponse>("/api/auth/seller-organizations", {
+    token,
+  })
+}
+
+export async function createSellerOrganization(token: string, payload: { name: string; slug?: string }) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function activateSellerOrganization(token: string, workspaceId: string) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations/activate", {
+    token,
+    method: "POST",
+    body: { workspaceId },
+  })
+}
+
+export async function syncSellerActiveOrganization(token: string, clerkOrganizationId: string) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations/sync-active", {
+    token,
+    method: "POST",
+    body: { clerkOrganizationId },
   })
 }
 

@@ -55,6 +55,19 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
           return
         }
 
+        const shouldForceSellerOrganizationStep =
+          user.role === "streamer" &&
+          typeof redirectTo === "string" &&
+          redirectTo.length > 0 &&
+          redirectTo !== user.dashboardPath
+
+        const isLaunchPadRoute = typeof pathname === "string" && pathname.startsWith("/launch-pad")
+
+        if (shouldForceSellerOrganizationStep && !isLaunchPadRoute && pathname !== redirectTo) {
+          router.replace(redirectTo)
+          return
+        }
+
         setAuthorizedUser(user)
       } catch (error) {
         if (!cancelled) {
