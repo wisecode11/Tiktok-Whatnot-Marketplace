@@ -1,4 +1,8 @@
-const { createStaffMember, listStaffMembers } = require("../services/staffService");
+const {
+  createStaffMember,
+  getStaffOrderManagementSnapshot,
+  listStaffMembers,
+} = require("../services/staffService");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -35,7 +39,20 @@ async function createStaff(req, res) {
   }
 }
 
+async function getStaffOrderManagementData(req, res) {
+  try {
+    const result = await getStaffOrderManagementSnapshot({
+      clerkUserId: req.auth.userId,
+      limit: req.query && req.query.limit ? Number(req.query.limit) : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
   createStaff,
+  getStaffOrderManagementData,
   listStaff,
 };

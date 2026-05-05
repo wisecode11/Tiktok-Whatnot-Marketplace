@@ -5,6 +5,8 @@ const state = {
   auth: null,
   lastObservedApi: null,
   observedGraphqlTemplates: {},
+  /** Shipment GraphQL / numeric ids seen from passive GetShipment traffic on Whatnot tabs (newest first). */
+  recentObservedShipmentIds: [],
   backendSocketUrl: null
 };
 
@@ -15,6 +17,12 @@ const WHATNOT_EXTENSION_API_KEY = "";
 const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
 const SELLER_HUB_INVENTORY_QUERY =
   "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
+const MY_LIVE_STATS_QUERY =
+  "query MyLiveStats($liveId:String!){myLiveStatistic(liveId:$liveId){totalCount totalSales{amount currency amountSafe __typename}totalEarned{amount currency amountSafe __typename}totalEarnings{amount currency amountSafe __typename}totalPendingEarned{amount currency amountSafe __typename}totalCancellations totalShippingSpend{amount currency amountSafe __typename}totalCouponSpend{amount currency amountSafe __typename}pendingShipments deliveredShipments runningTask manifestUrls __typename}}";
+const GET_SHIPMENTS_LIVESTREAMS_QUERY =
+  "query GetShipmentsLivestreams($statuses:[LiveStreamStatus!],$categoryType:String,$userId:ID,$before:String,$after:String,$first:Int,$last:Int,$reverse:Boolean){livestreamsByUserId(statuses:$statuses,categoryType:$categoryType,userId:$userId,before:$before,after:$after,first:$first,last:$last,reverse:$reverse){edges{cursor node{id title startTime pendingShippingShipmentsCount __typename}__typename}pageInfo{hasNextPage hasPreviousPage startCursor endCursor __typename}__typename}}";
+const GET_SHIPMENT_QUERY =
+  "query GetShipment($id:ID!){shipment(id:$id){...ShipmentDetails __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment OrderStatusLabel on OrderNode{id status prettyStatus refundRequest{id prettyStatus __typename}__typename}fragment ShipmentDetailsOrderItem on OrderItemNode{id quantity listing{id uuid title description images{id url __typename}status __typename}status cancellationReason order{id uuid subtotal{...Money __typename}livestream{id title startTime __typename}...OrderStatusLabel __typename}createdAt countryOfOrigin __typename}fragment ShipmentDetails on ShipmentNode{id status weight{amount scale __typename}cubicWeight{amount scale __typename}dimensions{length width height scale __typename}addressFullName addressPhoneNumber addressEmail addressCity addressLine1 addressLine2 addressPostalCode addressState addressCountryCode address{id fullName phoneNumber city line1 line2 postalCode state countryCode __typename}buyer{id username directMessagingDisabled canBeMessagedByMe __typename}fileUrl bundledFileUrl verificationRequestFileUrls commercialInvoiceUrl invoices{isAvailable type __typename}trackingCode trackingUrl isTrackingOverridden courier overrideReason canOverrideTrackingCode canGenerateLabel courierParcelTemplateId requiresFlatRateBoxSelection signatureRequired method shippingServiceLevelDisclosures{justification{message linkText link __typename}reasons __typename}sellerPaidShippingCost{...Money __typename}surchargeAdjustmentChargeableAmount{...Money __typename}hazmatLabelType bundlingStatus{displayCopy hoverCopy learnMoreUrl __typename}insuranceInfo{insuranceAmount{...Money __typename}insuranceContents __typename}signatureRequiredSettingsDetails{disabled message __typename}orderItems{...ShipmentDetailsOrderItem __typename}totalItemQuantity pickupRequest{id pickupDetails{address{id line1 line2 city state postalCode countryCode __typename}instructions __typename}pickupLabelUrl pickedUpDate status __typename}actionItemsNeeded{actionType label __typename}bundlingWindowId bundlingWindow{id createdAt bundleType shipDate shouldConfirmPriorToLabelGen __typename}dropoffPhotoUrls dropoffConfirmedAt itn carrierAdjustment{id __typename}__typename}";
 const SELLER_HUB_INVENTORY_EDIT_QUERY =
   "query SellerHubInventoryEdit($listingId:ID!$includeListing:Boolean!){categories:categoryBrowse{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption __typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}getListing(id:$listingId)@include(if:$includeListing){...SellerHubInventoryListing __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment SellerHubInventoryListingPriceFormat on ListingNode{id transactionProps{isOfferable auction{endTime isSuddenDeath __typename}purchaseLimits{type limit __typename}__typename}reservedForSalesChannel price{...Money __typename}salesChannels{id type __typename}__typename}fragment SellerHubInventoryListingImages on ListingNode{id images{id url label key __typename}__typename}fragment SellerHubInventoryListingVideos on ListingNode{id videos{id url thumbnailUrl duration status __typename}__typename}fragment SellerHubInventoryListingAttribute on ProductAttributeValueNode{value unit attribute{id key label valueType isRequired __typename}__typename}fragment SellerHubInventoryListingUpcomingFlashSale on ListingNode{id upcomingTimedListingEvent{id type ...on FlashSaleListingEvent{discountType discountPercent originalPrice{...Money __typename}discountPrice{...Money __typename}durationSeconds isAvailableForFullPrice __typename}__typename}__typename}fragment SellerHubInventoryListingVariants on ListingNode{id variants{id title quantity productVariant{id images{id url __typename}subtitle quantity price{...Money __typename}attributes{id key label value __typename}__typename}__typename}variantEnabled variantV3Enabled __typename}fragment SellerHubInventoryListingActions on ListingNode{id inventoryActions{actionType label description enabled disabledReason __typename}__typename}fragment ProductCategoryOption on CategoryNode{id label type position hazmatType __typename}fragment SellerHubInventoryListing on ListingNode{id uuid title description status publicStatus updatedAt ...SellerHubInventoryListingPriceFormat ineligibleSalesChannels{type reasons __typename}livestreams{id status title startTime categoryNodes{id label __typename}tags{id name label __typename}__typename}...SellerHubInventoryListingImages ...SellerHubInventoryListingVideos actions{action label description __typename}listingAttributeValues{...SellerHubInventoryListingAttribute __typename}quantity sku product{id externalSource name externalId category{id label hazmatType __typename}shippingProfile{id __typename}hazmatType hasVariants variantOptions{id productAttribute{id key label __typename}__typename}variants{edges{node{id listingId quantity price{...Money __typename}attributes{id key value __typename}__typename}__typename}__typename}__typename}transactionType orders{edges{node{id shipmentId status __typename}__typename}__typename}auctionInfo{bidCount currentPrice{...Money __typename}auctionWinner{id username __typename}endTime __typename}order{id __typename}isEditable uneditableFields costPerItem{...Money __typename}barcode isMyListing ...SellerHubInventoryListingUpcomingFlashSale ...SellerHubInventoryListingVariants ...SellerHubInventoryListingActions __typename}";
 const GET_SHIPPING_PROFILES_QUERY =
@@ -58,7 +66,8 @@ async function handleMessage(request) {
         clerkUserId: state.clerkUserId,
         auth: state.auth,
         lastObservedApi: state.lastObservedApi,
-        observedGraphqlTemplates: state.observedGraphqlTemplates
+        observedGraphqlTemplates: state.observedGraphqlTemplates,
+        recentObservedShipmentIds: state.recentObservedShipmentIds || []
       };
     case "set_clerk_user":
       state.clerkUserId = normalizeClerkUserId(request.clerkUserId);
@@ -905,6 +914,39 @@ async function handlePlatformAction(payload) {
     result = await fetchWhatnotOrders(payload?.tabId || state.tabId);
   } else if (payload?.action === "fetch_seller_hub_inventory") {
     result = await executeSellerHubInventoryFromPlatform(payload);
+  } else if (payload?.action === "fetch_my_live_stats") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeMyLiveStatsFromPlatform(payload);
+  } else if (payload?.action === "fetch_shipments_livestreams") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeGetShipmentsLivestreamsFromPlatform(payload);
+  } else if (payload?.action === "fetch_whatnot_shipments_batch") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeWhatnotShipmentsBatchFromPlatform(payload);
+  } else if (payload?.action === "peek_observed_shipment_ids") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = {
+      success: true,
+      data: {
+        shipmentIds: Array.isArray(state.recentObservedShipmentIds) ? [...state.recentObservedShipmentIds] : [],
+      },
+    };
   } else if (payload?.action === "generate_media_upload_urls") {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
@@ -995,6 +1037,226 @@ async function executeSellerHubInventoryFromPlatform(payload) {
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
   });
+}
+
+async function executeMyLiveStatsFromPlatform(payload) {
+  const liveId = typeof payload?.liveId === "string" ? payload.liveId.trim() : "";
+  if (!liveId) {
+    return { success: false, error: "liveId is required for MyLiveStats." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const variables = { liveId };
+  const template = state?.observedGraphqlTemplates?.MyLiveStats;
+  let requestBody = {
+    operationName: "MyLiveStats",
+    query: MY_LIVE_STATS_QUERY,
+    variables
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "MyLiveStats";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      liveId
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=MyLiveStats&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const defaultVariables = {
+    statuses: ["PLAYING", "STOPPED", "ENDED"],
+    categoryType: null,
+    userId: null,
+    before: null,
+    after: null,
+    first: 10,
+    last: null,
+    reverse: true
+  };
+
+  const template = state?.observedGraphqlTemplates?.GetShipmentsLivestreams;
+  let requestBody = {
+    operationName: "GetShipmentsLivestreams",
+    query: GET_SHIPMENTS_LIVESTREAMS_QUERY,
+    variables: defaultVariables
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetShipmentsLivestreams";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...defaultVariables,
+      ...requestBody.variables,
+      statuses: Array.isArray(requestBody.variables.statuses) && requestBody.variables.statuses.length
+        ? requestBody.variables.statuses
+        : defaultVariables.statuses
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetShipmentsLivestreams&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
+  const id = typeof shipmentGraphqlId === "string" ? shipmentGraphqlId.trim() : "";
+  if (!id) {
+    return { success: false, error: "Missing shipment id.", status: 400, data: null };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
+  }
+
+  const variables = { id };
+  const template = state?.observedGraphqlTemplates?.GetShipment;
+  let requestBody = {
+    operationName: "GetShipment",
+    query: GET_SHIPMENT_QUERY,
+    variables
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetShipment";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      id
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetShipment&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function executeWhatnotShipmentsBatchFromPlatform(payload) {
+  const rawIds = payload?.shipmentIds;
+  const shipmentIds = Array.isArray(rawIds)
+    ? [...new Set(rawIds.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 30)
+    : [];
+  if (!shipmentIds.length) {
+    return { success: false, error: "shipmentIds array is required.", status: 400, data: null };
+  }
+
+  const rows = [];
+  for (const shipmentId of shipmentIds) {
+    const one = await executeGetShipmentFromPlatform(shipmentId);
+    if (!one || !one.success) {
+      rows.push({
+        shipmentId,
+        shipment: null,
+        error: (one && one.error) || "Request failed",
+      });
+      continue;
+    }
+    const gql = one.data && typeof one.data === "object" ? one.data : {};
+    if (Array.isArray(gql.errors) && gql.errors.length) {
+      const message = gql.errors[0] && gql.errors[0].message ? String(gql.errors[0].message) : "GraphQL error";
+      rows.push({ shipmentId, shipment: null, error: message });
+      continue;
+    }
+    const shipment = gql.data && gql.data.shipment ? gql.data.shipment : null;
+    rows.push({ shipmentId, shipment, error: shipment ? null : "Empty shipment" });
+  }
+
+  return {
+    success: true,
+    status: 200,
+    data: {
+      batchShipments: {
+        rows,
+      },
+    },
+  };
 }
 
 function headersArrayToObject(headers) {
@@ -1196,7 +1458,18 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
 
   const firstUploadIndex = firstUpload ? uploads.indexOf(firstUpload) : -1;
   const normalizedIndex = firstUploadIndex >= 0 ? firstUploadIndex : 0;
-  const derivedLabel = resolveAddListingPhotoLabel(firstUpload, uploadKey, normalizedMedia, normalizedIndex);
+  const normalizedPreferredLabel =
+    typeof payload?.preferredAddListingPhotoLabel === "string"
+      ? payload.preferredAddListingPhotoLabel.trim()
+      : "";
+
+  let derivedLabel = "";
+  if (normalizedPreferredLabel) {
+    derivedLabel = normalizedPreferredLabel;
+  }
+  if (!derivedLabel) {
+    derivedLabel = resolveAddListingPhotoLabel(firstUpload, uploadKey, normalizedMedia, normalizedIndex);
+  }
 
   if (!derivedLabel) {
     return {
@@ -1394,6 +1667,21 @@ async function executeUpdateBioFromPlatform(payload) {
 }
 
 function getOperationName(payload) {
+  if (payload?.action === "fetch_whatnot_shipments_batch") {
+    return "GetShipment";
+  }
+  if (payload?.action === "peek_observed_shipment_ids") {
+    return "PeekObservedShipmentIds";
+  }
+  if (payload?.action === "fetch_my_live_stats") {
+    return "MyLiveStats";
+  }
+  if (payload?.action === "fetch_shipments_livestreams") {
+    return "GetShipmentsLivestreams";
+  }
+  if (payload?.action === "fetch_seller_hub_inventory") {
+    return "SellerHubInventory";
+  }
   try {
     const body = typeof payload?.body === "string" ? JSON.parse(payload.body) : payload?.body;
     return body?.operationName || "unknown";
@@ -1430,9 +1718,68 @@ async function readCookieValue(name) {
   return cookie?.value || null;
 }
 
+function recordObservedShipmentGraphqlIds(ids) {
+  const incoming = (Array.isArray(ids) ? ids : [])
+    .map((x) => (typeof x === "string" ? x.trim() : x != null ? String(x).trim() : ""))
+    .filter(Boolean);
+  if (!incoming.length) {
+    return;
+  }
+  const cur = Array.isArray(state.recentObservedShipmentIds) ? state.recentObservedShipmentIds : [];
+  const merged = [...incoming, ...cur];
+  const out = [];
+  const seen = new Set();
+  for (const id of merged) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    out.push(id);
+    if (out.length >= 40) {
+      break;
+    }
+  }
+  state.recentObservedShipmentIds = out;
+}
+
+function ingestShipmentIdsFromObservedApiPayload(payload) {
+  try {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    const rb = payload.requestBody && typeof payload.requestBody === "object" ? payload.requestBody : null;
+    let operationName = rb && typeof rb.operationName === "string" ? rb.operationName.trim() : "";
+    if (!operationName && typeof payload.url === "string") {
+      try {
+        operationName = new URL(payload.url).searchParams.get("operationName") || "";
+      } catch (_e) {
+        operationName = "";
+      }
+    }
+    if (operationName !== "GetShipment") {
+      return;
+    }
+    const ids = [];
+    const variables = rb && rb.variables && typeof rb.variables === "object" ? rb.variables : {};
+    const vid = variables.id;
+    if (vid != null && String(vid).trim()) {
+      ids.push(String(vid).trim());
+    }
+    const res = payload.responseBody;
+    const shipment = res && res.data && typeof res.data === "object" ? res.data.shipment : null;
+    if (shipment && typeof shipment.id === "string" && shipment.id.trim()) {
+      ids.push(shipment.id.trim());
+    }
+    recordObservedShipmentGraphqlIds(ids);
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
 async function onObservedApi(payload) {
   state.lastObservedApi = payload;
   captureGraphqlTemplate(payload);
+  ingestShipmentIdsFromObservedApiPayload(payload);
   await persistState();
   sendSocketMessage("action_response", {
     status: payload.status >= 200 && payload.status < 300 ? "success" : "error",
@@ -1618,6 +1965,9 @@ async function ensureStateHydrated() {
     state.auth = cachedState.auth || null;
     state.lastObservedApi = cachedState.lastObservedApi || null;
     state.observedGraphqlTemplates = cachedState.observedGraphqlTemplates || {};
+    state.recentObservedShipmentIds = Array.isArray(cachedState.recentObservedShipmentIds)
+      ? cachedState.recentObservedShipmentIds
+      : [];
     state.backendSocketUrl = cachedState.backendSocketUrl || BACKEND_SOCKET_URL;
   } else {
     state.backendSocketUrl = BACKEND_SOCKET_URL;

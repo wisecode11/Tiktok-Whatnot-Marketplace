@@ -17,6 +17,7 @@ const DEFAULT_MODULES = [
   "packing",
   "labelling",
   "order_status_update",
+  "order_management",
   "attendance",
 ];
 

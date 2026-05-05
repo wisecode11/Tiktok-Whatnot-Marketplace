@@ -9,10 +9,13 @@ module.exports = {
   SellerSession: require('./SellerSession'),
   WhatnotOrder: require('./WhatnotOrder'),
   WhatnotInventorySnapshot: require('./WhatnotInventorySnapshot'),
+  WhatnotLiveStatsSnapshot: require('./WhatnotLiveStatsSnapshot'),
+  WhatnotShipmentDetail: require('./WhatnotShipmentDetail'),
   WhatnotCategory: require('./WhatnotCategory'),
   WhatnotSubCategory: require('./WhatnotSubCategory'),
   WhatnotHazmatType: require('./WhatnotHazmatType'),
   WhatnotProfileShipping: require('./WhatnotProfileShipping'),
+  PendingInventory: require('./PendingInventory'),
   TikTokPost: require('./TikTokPost'),
 
   // Billing / Subscription

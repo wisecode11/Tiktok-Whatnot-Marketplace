@@ -197,6 +197,8 @@ export interface CreateWhatnotListingPayload {
   shippingProfileId: string
   hazmatType: string
   imageId: string
+  /** Optional; when omitted backend infers defaults from cached category data when possible. */
+  productAttributeValues?: Array<{ id: string; value: string }>
 }
 
 export interface CreateWhatnotListingResponse {
@@ -211,6 +213,97 @@ export interface CreateWhatnotListingResponse {
     }
   }
   errors?: Array<{ message?: string }>
+}
+
+export interface CreateStaffPendingInventoryPayload {
+  subcategoryId: string
+  title: string
+  description: string
+  quantity: number
+  priceUsd: number
+  shippingProfileId: string
+  hazmatType: string
+  imageId: string
+  imagePayload: {
+    media: Array<{ id: string; extension: string }>
+    fileBase64: string
+    fileContentType?: string
+  }
+}
+
+export interface CreateStaffPendingInventoryResponse {
+  item: {
+    id: string
+    ownerSellerUserId: string
+    createdByUserId: string
+    createdByClerkUserId: string
+    subcategoryId: string
+    title: string
+    description: string
+    quantity: number
+    priceUsd: number
+    shippingProfileId: string
+    hazmatType: string
+    imageId: string
+    imagePayload: {
+      media: Array<{ id: string; extension: string }>
+      fileBase64: string
+      fileContentType?: string
+    }
+    status: string
+    source: string
+    createdAt: string
+    updatedAt: string
+  }
+  message: string
+}
+
+export interface SellerPendingInventoryItem {
+  id: string
+  ownerSellerUserId: string
+  createdByUserId: string
+  createdByClerkUserId: string
+  createdByRole: string | null
+  createdByName: string | null
+  createdByEmail: string | null
+  subcategoryId: string
+  title: string
+  description: string
+  quantity: number
+  priceUsd: number
+  shippingProfileId: string
+  hazmatType: string
+  imageId: string
+  imagePayload: {
+    media?: Array<{ id?: string; extension?: string }>
+    fileBase64?: string
+    fileContentType?: string
+  }
+  status: "PENDING" | "SYNCED" | "FAILED" | string
+  syncedListingId: string | null
+  syncedListingUuid: string | null
+  syncedAt: string | null
+  syncError: string | null
+  source: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SellerPendingInventoryListResponse {
+  items: SellerPendingInventoryItem[]
+}
+
+export interface SellerPendingInventorySyncResponse {
+  item: {
+    id: string
+    status: string
+    imageId: string
+    syncedListingId: string | null
+    syncedListingUuid: string | null
+    syncedAt: string | null
+    syncError: string | null
+  }
+  message: string
 }
 
 export interface TikTokCreatorInfoResponse {
@@ -353,6 +446,81 @@ export interface WhatnotOrdersSyncResponse {
   triggered: boolean
   reason: string
   fetchedCount: number | null
+}
+
+export interface WhatnotMoneySnapshot {
+  amount?: number
+  currency?: string
+  amountSafe?: number
+  __typename?: string
+}
+
+export interface WhatnotMyLiveStatistic {
+  totalCount?: number
+  totalSales?: WhatnotMoneySnapshot
+  totalEarned?: WhatnotMoneySnapshot
+  totalEarnings?: WhatnotMoneySnapshot
+  totalPendingEarned?: WhatnotMoneySnapshot
+  totalCancellations?: number
+  totalShippingSpend?: WhatnotMoneySnapshot
+  totalCouponSpend?: WhatnotMoneySnapshot
+  pendingShipments?: number
+  deliveredShipments?: number
+  runningTask?: boolean
+  manifestUrls?: string[]
+  __typename?: string
+}
+
+export interface FetchWhatnotMyLiveStatsResponse {
+  liveId: string
+  statistic: WhatnotMyLiveStatistic | null
+  raw: Record<string, unknown>
+}
+
+export interface WhatnotLivestreamIdSummary {
+  id: string
+  title: string | null
+  startTime: number | null
+}
+
+export interface WhatnotShipmentsLivestreamsCurrentResponse {
+  liveId: string | null
+  title: string | null
+  startTime: number | null
+  livestreams: WhatnotLivestreamIdSummary[]
+}
+
+export interface WhatnotShipmentTableRow {
+  shipmentId: string
+  shipment: Record<string, unknown> | null
+  error: string | null
+}
+
+export interface FetchWhatnotShipmentsTableResponse {
+  rows: WhatnotShipmentTableRow[]
+  requestedIds: string[]
+  hint?: string
+}
+
+export interface StaffOrderManagementShipmentRow {
+  shipmentKey: string | null
+  shipmentIdInput: string | null
+  shipmentGlobalId: string | null
+  shipment: Record<string, unknown> | null
+  syncedAt: string | null
+  updatedAt: string | null
+}
+
+export interface StaffOrderManagementSnapshotResponse {
+  stats: {
+    liveId: string | null
+    statistic: WhatnotMyLiveStatistic | null
+    syncedAt: string | null
+    updatedAt: string | null
+  } | null
+  shipments: StaffOrderManagementShipmentRow[]
+  source: "db"
+  parentSellerClerkUserId: string
 }
 
 export class AuthApiError extends Error {
@@ -655,6 +823,32 @@ export async function syncWhatnotOrders(token: string) {
   })
 }
 
+export async function fetchWhatnotMyLiveStats(token: string, liveId: string) {
+  return request<FetchWhatnotMyLiveStatsResponse>("/api/integrations/whatnot/my-live-stats", {
+    token,
+    method: "POST",
+    body: { liveId },
+  })
+}
+
+export async function getWhatnotShipmentsLivestreamsCurrentLiveId(token: string) {
+  return request<WhatnotShipmentsLivestreamsCurrentResponse>(
+    "/api/integrations/whatnot/shipments-livestreams/current",
+    { token },
+  )
+}
+
+export async function fetchWhatnotShipmentsTable(
+  token: string,
+  body: { liveId?: string; shipmentIds?: string[]; shipmentIdsText?: string; manifestUrls?: string[] },
+) {
+  return request<FetchWhatnotShipmentsTableResponse>("/api/integrations/whatnot/shipments/table", {
+    token,
+    method: "POST",
+    body: body as Record<string, unknown>,
+  })
+}
+
 export async function syncWhatnotInventoryLive(
   token: string,
   status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",
@@ -694,4 +888,32 @@ export async function createWhatnotListing(token: string, payload: CreateWhatnot
     method: "POST",
     body: payload as unknown as Record<string, unknown>,
   })
+}
+
+export async function createStaffPendingInventory(token: string, payload: CreateStaffPendingInventoryPayload) {
+  return request<CreateStaffPendingInventoryResponse>("/api/staff/pending-inventory", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function getSellerPendingInventory(token: string) {
+  return request<SellerPendingInventoryListResponse>("/api/staff/pending-inventory", {
+    token,
+  })
+}
+
+export async function syncSellerPendingInventoryItem(token: string, pendingInventoryId: string) {
+  return request<SellerPendingInventorySyncResponse>(`/api/staff/pending-inventory/${pendingInventoryId}/sync`, {
+    token,
+    method: "POST",
+  })
+}
+
+export async function getStaffOrderManagementSnapshot(token: string, params?: { limit?: number }) {
+  const path = buildPath("/api/staff/order-management", {
+    limit: typeof params?.limit === "number" ? String(params.limit) : undefined,
+  })
+  return request<StaffOrderManagementSnapshotResponse>(path, { token })
 }

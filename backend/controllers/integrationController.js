@@ -22,6 +22,9 @@ const {
   generateWhatnotMediaUploadUrlsFromPlatform,
   createWhatnotListingFromPlatform,
   updateWhatnotBioFromPlatform,
+  fetchMyLiveStatsFromExtension,
+  fetchWhatnotCurrentLiveIdFromExtension,
+  fetchWhatnotShipmentsTable,
 } = require("../services/integrationService");
 const {
   getTikTokCreatorInfo,
@@ -144,6 +147,55 @@ async function syncWhatnotInventoryLiveData(req, res) {
     const result = await syncWhatnotInventoryFromPlatform({
       clerkUserId: req.auth.userId,
       status: req.body && req.body.status ? req.body.status : "ACTIVE",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function fetchMyLiveStatsData(req, res) {
+  try {
+    const liveId = req.body && typeof req.body.liveId === "string" ? req.body.liveId.trim() : "";
+    const result = await fetchMyLiveStatsFromExtension({
+      clerkUserId: req.auth.userId,
+      liveId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function fetchWhatnotShipmentsLivestreamsCurrentData(req, res) {
+  try {
+    const result = await fetchWhatnotCurrentLiveIdFromExtension({
+      clerkUserId: req.auth.userId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function fetchWhatnotShipmentsTableData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const liveId = typeof body.liveId === "string" ? body.liveId.trim() : "";
+    const rawIds = body.shipmentIds;
+    const shipmentIds = Array.isArray(rawIds)
+      ? rawIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : typeof body.shipmentIdsText === "string"
+        ? body.shipmentIdsText.split(/[\s,]+/).map((id) => id.trim()).filter(Boolean)
+        : null;
+    const manifestUrls = Array.isArray(body.manifestUrls)
+      ? body.manifestUrls.filter((u) => typeof u === "string" && u.trim())
+      : null;
+    const result = await fetchWhatnotShipmentsTable({
+      clerkUserId: req.auth.userId,
+      liveId: liveId || null,
+      shipmentIds: shipmentIds && shipmentIds.length ? shipmentIds : null,
+      manifestUrls: manifestUrls && manifestUrls.length ? manifestUrls : null,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -356,6 +408,11 @@ async function generateWhatnotMediaUploadUrls(req, res) {
 
 async function publishWhatnotInventory(req, res) {
   try {
+    const bodyProductAttrs =
+      req.body && Array.isArray(req.body.productAttributeValues)
+        ? req.body.productAttributeValues
+        : null;
+
     const result = await createWhatnotListingFromPlatform({
       title: req.body && typeof req.body.title === "string" ? req.body.title : "",
       description: req.body && typeof req.body.description === "string" ? req.body.description : "",
@@ -366,6 +423,7 @@ async function publishWhatnotInventory(req, res) {
         req.body && typeof req.body.shippingProfileId === "string" ? req.body.shippingProfileId : "",
       hazmatType: req.body && typeof req.body.hazmatType === "string" ? req.body.hazmatType : "",
       imageId: req.body && typeof req.body.imageId === "string" ? req.body.imageId : "",
+      productAttributeValues: bodyProductAttrs,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -417,6 +475,9 @@ module.exports = {
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
+  fetchMyLiveStatsData,
+  fetchWhatnotShipmentsLivestreamsCurrentData,
+  fetchWhatnotShipmentsTableData,
   startConnection,
   whatnotCallback,
   tiktokCallback,
