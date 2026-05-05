@@ -1,7 +1,11 @@
 const {
+  activateSellerOrganization,
+  createSellerOrganization,
   getCurrentUser,
+  listSellerOrganizations,
   loginWithRole,
   upsertUserFromClerk,
+  syncSellerActiveOrganization,
 } = require("../services/authService");
 
 function sendError(res, error) {
@@ -50,8 +54,64 @@ async function me(req, res) {
   }
 }
 
+async function getSellerOrganizations(req, res) {
+  try {
+    const result = await listSellerOrganizations({
+      clerkUserId: req.auth.userId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function createSellerOrganizationEntry(req, res) {
+  try {
+    const result = await createSellerOrganization({
+      clerkUserId: req.auth.userId,
+      name: req.body && req.body.name,
+      slug: req.body && req.body.slug,
+    });
+
+    return res.status(201).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function activateSellerOrganizationEntry(req, res) {
+  try {
+    const result = await activateSellerOrganization({
+      clerkUserId: req.auth.userId,
+      workspaceId: req.body && req.body.workspaceId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncSellerActiveOrganizationEntry(req, res) {
+  try {
+    const result = await syncSellerActiveOrganization({
+      clerkUserId: req.auth.userId,
+      clerkOrganizationId: req.body && req.body.clerkOrganizationId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
+  activateSellerOrganizationEntry,
+  createSellerOrganizationEntry,
+  getSellerOrganizations,
   login,
   me,
+  syncSellerActiveOrganizationEntry,
   syncUser,
 };

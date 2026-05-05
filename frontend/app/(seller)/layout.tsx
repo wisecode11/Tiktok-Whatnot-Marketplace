@@ -23,6 +23,8 @@ import {
   PackageSearch,
   Clock4,
   ClipboardList,
+  CircleDollarSign,
+  Building2,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -37,6 +39,7 @@ const sellerNavigation = [
       { title: "Publish", href: "/seller/publish", icon: Video, requiresSubscription: true },
       { title: "Orders", href: "/seller/orders", icon: Package, requiresSubscription: true },
       { title: "Order Management", href: "/seller/order-management", icon: ClipboardList, requiresSubscription: true },
+      { title: "Finance Management", href: "/seller/finance-management", icon: CircleDollarSign },
       { title: "Chat", href: "/seller/chat", icon: MessageSquare, requiresSubscription: true },
     ],
   },
@@ -56,6 +59,7 @@ const sellerNavigation = [
   {
     label: "Account",
     items: [
+      { title: "Organization", href: "/seller/organization", icon: Building2 },
       { title: "Manage Staff", href: "/seller/manage-staff", icon: UserPlus },
       { title: "Subscription", href: "/seller/subscription", icon: CreditCard },
       { title: "Settings", href: "/seller/settings", icon: Settings },

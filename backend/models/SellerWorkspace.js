@@ -10,6 +10,20 @@ const SellerWorkspaceSchema = new mongoose.Schema({
     ref: "User",
   },
 
+  clerk_organization_id: {
+    type: String,
+    unique: true,
+    sparse: true,
+    default: null,
+  },
+
+  slug: {
+    type: String,
+    unique: true,
+    sparse: true,
+    default: null,
+  },
+
   business_name: String,
   description: String,
   country: String,
@@ -26,5 +40,7 @@ const SellerWorkspaceSchema = new mongoose.Schema({
   created_at: Date,
   updated_at: Date,
 });
+
+SellerWorkspaceSchema.index({ owner_user_id: 1, created_at: -1 });
 
 module.exports = mongoose.model("SellerWorkspace", SellerWorkspaceSchema);

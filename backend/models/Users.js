@@ -16,6 +16,12 @@ const UserSchema = new mongoose.Schema({
     default: null,
   },
 
+  active_workspace_id: {
+    type: String,
+    ref: "SellerWorkspace",
+    default: null,
+  },
+
   user_type: {
     type: String,
     enum: ["seller", "moderator", "admin", "staff"],

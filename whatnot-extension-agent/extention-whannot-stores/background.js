@@ -23,6 +23,8 @@ const GET_SHIPMENTS_LIVESTREAMS_QUERY =
   "query GetShipmentsLivestreams($statuses:[LiveStreamStatus!],$categoryType:String,$userId:ID,$before:String,$after:String,$first:Int,$last:Int,$reverse:Boolean){livestreamsByUserId(statuses:$statuses,categoryType:$categoryType,userId:$userId,before:$before,after:$after,first:$first,last:$last,reverse:$reverse){edges{cursor node{id title startTime pendingShippingShipmentsCount __typename}__typename}pageInfo{hasNextPage hasPreviousPage startCursor endCursor __typename}__typename}}";
 const GET_SHIPMENT_QUERY =
   "query GetShipment($id:ID!){shipment(id:$id){...ShipmentDetails __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment OrderStatusLabel on OrderNode{id status prettyStatus refundRequest{id prettyStatus __typename}__typename}fragment ShipmentDetailsOrderItem on OrderItemNode{id quantity listing{id uuid title description images{id url __typename}status __typename}status cancellationReason order{id uuid subtotal{...Money __typename}livestream{id title startTime __typename}...OrderStatusLabel __typename}createdAt countryOfOrigin __typename}fragment ShipmentDetails on ShipmentNode{id status weight{amount scale __typename}cubicWeight{amount scale __typename}dimensions{length width height scale __typename}addressFullName addressPhoneNumber addressEmail addressCity addressLine1 addressLine2 addressPostalCode addressState addressCountryCode address{id fullName phoneNumber city line1 line2 postalCode state countryCode __typename}buyer{id username directMessagingDisabled canBeMessagedByMe __typename}fileUrl bundledFileUrl verificationRequestFileUrls commercialInvoiceUrl invoices{isAvailable type __typename}trackingCode trackingUrl isTrackingOverridden courier overrideReason canOverrideTrackingCode canGenerateLabel courierParcelTemplateId requiresFlatRateBoxSelection signatureRequired method shippingServiceLevelDisclosures{justification{message linkText link __typename}reasons __typename}sellerPaidShippingCost{...Money __typename}surchargeAdjustmentChargeableAmount{...Money __typename}hazmatLabelType bundlingStatus{displayCopy hoverCopy learnMoreUrl __typename}insuranceInfo{insuranceAmount{...Money __typename}insuranceContents __typename}signatureRequiredSettingsDetails{disabled message __typename}orderItems{...ShipmentDetailsOrderItem __typename}totalItemQuantity pickupRequest{id pickupDetails{address{id line1 line2 city state postalCode countryCode __typename}instructions __typename}pickupLabelUrl pickedUpDate status __typename}actionItemsNeeded{actionType label __typename}bundlingWindowId bundlingWindow{id createdAt bundleType shipDate shouldConfirmPriorToLabelGen __typename}dropoffPhotoUrls dropoffConfirmedAt itn carrierAdjustment{id __typename}__typename}";
+const GET_EARLY_PAYOUT_BALANCE_DATA_QUERY =
+  "query GetEarlyPayoutBalanceData{me{id balances{completedSalesBalance{...Money __typename}processingSalesBalance{...Money __typename}totalSalesBalance{...Money __typename}totalSalesAltCurrencyBalance{...Money __typename}__typename}__typename}}fragment Money on Money{amount currency amountSafe __typename}";
 const SELLER_HUB_INVENTORY_EDIT_QUERY =
   "query SellerHubInventoryEdit($listingId:ID!$includeListing:Boolean!){categories:categoryBrowse{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption __typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}getListing(id:$listingId)@include(if:$includeListing){...SellerHubInventoryListing __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment SellerHubInventoryListingPriceFormat on ListingNode{id transactionProps{isOfferable auction{endTime isSuddenDeath __typename}purchaseLimits{type limit __typename}__typename}reservedForSalesChannel price{...Money __typename}salesChannels{id type __typename}__typename}fragment SellerHubInventoryListingImages on ListingNode{id images{id url label key __typename}__typename}fragment SellerHubInventoryListingVideos on ListingNode{id videos{id url thumbnailUrl duration status __typename}__typename}fragment SellerHubInventoryListingAttribute on ProductAttributeValueNode{value unit attribute{id key label valueType isRequired __typename}__typename}fragment SellerHubInventoryListingUpcomingFlashSale on ListingNode{id upcomingTimedListingEvent{id type ...on FlashSaleListingEvent{discountType discountPercent originalPrice{...Money __typename}discountPrice{...Money __typename}durationSeconds isAvailableForFullPrice __typename}__typename}__typename}fragment SellerHubInventoryListingVariants on ListingNode{id variants{id title quantity productVariant{id images{id url __typename}subtitle quantity price{...Money __typename}attributes{id key label value __typename}__typename}__typename}variantEnabled variantV3Enabled __typename}fragment SellerHubInventoryListingActions on ListingNode{id inventoryActions{actionType label description enabled disabledReason __typename}__typename}fragment ProductCategoryOption on CategoryNode{id label type position hazmatType __typename}fragment SellerHubInventoryListing on ListingNode{id uuid title description status publicStatus updatedAt ...SellerHubInventoryListingPriceFormat ineligibleSalesChannels{type reasons __typename}livestreams{id status title startTime categoryNodes{id label __typename}tags{id name label __typename}__typename}...SellerHubInventoryListingImages ...SellerHubInventoryListingVideos actions{action label description __typename}listingAttributeValues{...SellerHubInventoryListingAttribute __typename}quantity sku product{id externalSource name externalId category{id label hazmatType __typename}shippingProfile{id __typename}hazmatType hasVariants variantOptions{id productAttribute{id key label __typename}__typename}variants{edges{node{id listingId quantity price{...Money __typename}attributes{id key value __typename}__typename}__typename}__typename}__typename}transactionType orders{edges{node{id shipmentId status __typename}__typename}__typename}auctionInfo{bidCount currentPrice{...Money __typename}auctionWinner{id username __typename}endTime __typename}order{id __typename}isEditable uneditableFields costPerItem{...Money __typename}barcode isMyListing ...SellerHubInventoryListingUpcomingFlashSale ...SellerHubInventoryListingVariants ...SellerHubInventoryListingActions __typename}";
 const GET_SHIPPING_PROFILES_QUERY =
@@ -915,6 +917,7 @@ async function handlePlatformAction(payload) {
   } else if (payload?.action === "fetch_seller_hub_inventory") {
     result = await executeSellerHubInventoryFromPlatform(payload);
   } else if (payload?.action === "fetch_my_live_stats") {
+  } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
       state.clerkUserId = requestedClerkUserId;
@@ -947,6 +950,7 @@ async function handlePlatformAction(payload) {
         shipmentIds: Array.isArray(state.recentObservedShipmentIds) ? [...state.recentObservedShipmentIds] : [],
       },
     };
+    result = await executeGetEarlyPayoutBalanceDataFromPlatform(payload);
   } else if (payload?.action === "generate_media_upload_urls") {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
@@ -1097,6 +1101,7 @@ async function executeMyLiveStatsFromPlatform(payload) {
 }
 
 async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
+async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
   if (!state.tabId || !state.auth?.csrf_token) {
     const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
     if (!autoConnected.success) {
@@ -1196,6 +1201,21 @@ async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
       ...requestBody.variables,
       id
     };
+  const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
+  let requestBody = {
+    operationName: "GetEarlyPayoutBalanceData",
+    variables: {},
+    query: GET_EARLY_PAYOUT_BALANCE_DATA_QUERY,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetEarlyPayoutBalanceData";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
+      requestBody.query = GET_EARLY_PAYOUT_BALANCE_DATA_QUERY;
+    }
   }
 
   const defaultHeaders = {
@@ -1203,6 +1223,7 @@ async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
     "x-whatnot-app": "whatnot-web",
     "x-csrf-token": csrfToken,
     "x-wn-extension": "1"
+    "x-wn-extension": "1",
   };
   const accessToken = String(state?.auth?.access_token || "").trim();
   if (accessToken) {
@@ -1257,6 +1278,13 @@ async function executeWhatnotShipmentsBatchFromPlatform(payload) {
       },
     },
   };
+}
+
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
 }
 
 function headersArrayToObject(headers) {

@@ -19,6 +19,7 @@ const {
   saveWhatnotOrders,
   saveWhatnotSellerSession,
   syncWhatnotInventoryFromPlatform,
+  syncWhatnotEarlyPayoutBalanceFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
   createWhatnotListingFromPlatform,
   updateWhatnotBioFromPlatform,
@@ -196,6 +197,10 @@ async function fetchWhatnotShipmentsTableData(req, res) {
       liveId: liveId || null,
       shipmentIds: shipmentIds && shipmentIds.length ? shipmentIds : null,
       manifestUrls: manifestUrls && manifestUrls.length ? manifestUrls : null,
+async function syncWhatnotEarlyPayoutBalanceData(req, res) {
+  try {
+    const result = await syncWhatnotEarlyPayoutBalanceFromPlatform({
+      clerkUserId: req.auth.userId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -478,6 +483,7 @@ module.exports = {
   fetchMyLiveStatsData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
+  syncWhatnotEarlyPayoutBalanceData,
   startConnection,
   whatnotCallback,
   tiktokCallback,

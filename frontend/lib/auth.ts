@@ -8,12 +8,34 @@ export interface AuthUserProfile {
   lastName: string
   role: AppRole
   backendRole: "seller" | "staff" | "moderator" | "admin"
+  activeWorkspaceId: string | null
   status: string
   dashboardPath: string
 }
 
 export interface AuthResponse {
   user: AuthUserProfile
+  redirectTo: string
+}
+
+export interface SellerOrganization {
+  id: string
+  name: string
+  slug: string | null
+  clerkOrganizationId: string | null
+  status: string
+  isActive: boolean
+  createdAt: string | null
+}
+
+export interface SellerOrganizationsResponse {
+  organizations: SellerOrganization[]
+  activeWorkspaceId: string | null
+  hasOrganizations: boolean
+}
+
+export interface SellerOrganizationMutationResponse {
+  organization: SellerOrganization
   redirectTo: string
 }
 
@@ -160,6 +182,30 @@ export interface WhatnotInventoryLiveResponse {
         }
       }
     }
+  }
+}
+
+export interface WhatnotEarlyPayoutMoney {
+  amount?: number | null
+  currency?: string | null
+  amountSafe?: number | null
+}
+
+export interface WhatnotEarlyPayoutBalanceResponse {
+  syncedAt: string | null
+  responsePayload: {
+    data?: {
+      me?: {
+        id?: string | null
+        balances?: {
+          completedSalesBalance?: WhatnotEarlyPayoutMoney | null
+          processingSalesBalance?: WhatnotEarlyPayoutMoney | null
+          totalSalesBalance?: WhatnotEarlyPayoutMoney | null
+          totalSalesAltCurrencyBalance?: WhatnotEarlyPayoutMoney | null
+        } | null
+      } | null
+    } | null
+    errors?: Array<{ message?: string }>
   }
 }
 
@@ -692,6 +738,36 @@ export async function getCurrentUserProfile(token: string) {
   })
 }
 
+export async function getSellerOrganizations(token: string) {
+  return request<SellerOrganizationsResponse>("/api/auth/seller-organizations", {
+    token,
+  })
+}
+
+export async function createSellerOrganization(token: string, payload: { name: string; slug?: string }) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function activateSellerOrganization(token: string, workspaceId: string) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations/activate", {
+    token,
+    method: "POST",
+    body: { workspaceId },
+  })
+}
+
+export async function syncSellerActiveOrganization(token: string, clerkOrganizationId: string) {
+  return request<SellerOrganizationMutationResponse>("/api/auth/seller-organizations/sync-active", {
+    token,
+    method: "POST",
+    body: { clerkOrganizationId },
+  })
+}
+
 export async function getConnectedAccounts(token: string) {
   return request<ConnectedAccountResponse>("/api/integrations/accounts", {
     token,
@@ -858,6 +934,17 @@ export async function syncWhatnotInventoryLive(
     method: "POST",
     body: { status },
   })
+}
+
+export async function syncWhatnotEarlyPayoutBalance(token: string) {
+  return request<WhatnotEarlyPayoutBalanceResponse>(
+    "/api/integrations/whatnot/finance/early-payout-balance-sync",
+    {
+      token,
+      method: "POST",
+      body: {},
+    },
+  )
 }
 
 export async function getWhatnotInventoryCreateFormOptions(token: string) {
