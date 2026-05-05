@@ -22,6 +22,7 @@ import {
   Package,
   PackageSearch,
   CircleDollarSign,
+  Building2,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -54,6 +55,7 @@ const sellerNavigation = [
   {
     label: "Account",
     items: [
+      { title: "Organization", href: "/seller/organization", icon: Building2 },
       { title: "Manage Staff", href: "/seller/manage-staff", icon: UserPlus },
       { title: "Subscription", href: "/seller/subscription", icon: CreditCard },
       { title: "Settings", href: "/seller/settings", icon: Settings },
