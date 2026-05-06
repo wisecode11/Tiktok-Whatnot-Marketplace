@@ -6,6 +6,7 @@ const {
 	getSellerOrganizations,
 	login,
 	me,
+	syncSellerOrganizationMembersEntry,
 	syncSellerActiveOrganizationEntry,
 	syncUser,
 } = require("../controllers/authController");
@@ -20,5 +21,6 @@ router.get("/seller-organizations", authenticateRequest, getSellerOrganizations)
 router.post("/seller-organizations", authenticateRequest, createSellerOrganizationEntry);
 router.post("/seller-organizations/activate", authenticateRequest, activateSellerOrganizationEntry);
 router.post("/seller-organizations/sync-active", authenticateRequest, syncSellerActiveOrganizationEntry);
+router.post("/seller-organizations/sync-members", authenticateRequest, syncSellerOrganizationMembersEntry);
 
 module.exports = router;

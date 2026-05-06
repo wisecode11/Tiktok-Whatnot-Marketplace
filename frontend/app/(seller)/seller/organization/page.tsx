@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   CreateOrganization,
   OrganizationProfile,
@@ -10,13 +10,33 @@ import {
 } from "@clerk/nextjs"
 import { Loader2 } from "lucide-react"
 
-import { getClerkErrorMessage, syncSellerActiveOrganization, waitForSessionToken } from "@/lib/auth"
+import {
+  getClerkErrorMessage,
+  syncSellerActiveOrganization,
+  syncSellerOrganizationMembers,
+  waitForSessionToken,
+} from "@/lib/auth"
 
 export default function SellerOrganizationPage() {
   const { getToken } = useAuth()
   const { organization } = useOrganization()
   const [isSyncing, setIsSyncing] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
+  const isMemberSyncInFlightRef = useRef(false)
+
+  async function syncOrganizationMembersOnce(organizationId: string) {
+    if (isMemberSyncInFlightRef.current) {
+      return
+    }
+
+    isMemberSyncInFlightRef.current = true
+    try {
+      const token = await waitForSessionToken(getToken)
+      await syncSellerOrganizationMembers(token, organizationId)
+    } finally {
+      isMemberSyncInFlightRef.current = false
+    }
+  }
 
   useEffect(() => {
     const organizationId = organization?.id
@@ -33,6 +53,7 @@ export default function SellerOrganizationPage() {
         setErrorMessage("")
         const token = await waitForSessionToken(getToken)
         await syncSellerActiveOrganization(token, organizationId as string)
+        await syncOrganizationMembersOnce(organizationId as string)
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(getClerkErrorMessage(error))
@@ -48,6 +69,22 @@ export default function SellerOrganizationPage() {
 
     return () => {
       cancelled = true
+    }
+  }, [getToken, organization?.id])
+
+  useEffect(() => {
+    const organizationId = organization?.id
+
+    if (!organizationId) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      void syncOrganizationMembersOnce(organizationId as string).catch(() => null)
+    }, 15000)
+
+    return () => {
+      window.clearInterval(intervalId)
     }
   }, [getToken, organization?.id])
 
@@ -101,7 +138,7 @@ export default function SellerOrganizationPage() {
       {isSyncing ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Syncing selected organization with workspace...
+          Syncing organization and team members with workspace...
         </div>
       ) : null}
 

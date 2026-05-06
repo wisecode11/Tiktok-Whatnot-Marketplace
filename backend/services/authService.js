@@ -207,6 +207,186 @@ async function ensureWorkspaceMembershipForUser({ user, workspace, clerkRole }) 
   return existingMembership;
 }
 
+function getMembershipUserId(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  if (entry.publicUserData && typeof entry.publicUserData.userId === "string") {
+    return entry.publicUserData.userId.trim() || null;
+  }
+
+  if (entry.public_user_data && typeof entry.public_user_data.user_id === "string") {
+    return entry.public_user_data.user_id.trim() || null;
+  }
+
+  return null;
+}
+
+function getMembershipEmail(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  if (entry.publicUserData && typeof entry.publicUserData.identifier === "string") {
+    const value = entry.publicUserData.identifier.trim().toLowerCase();
+    return value || null;
+  }
+
+  if (entry.public_user_data && typeof entry.public_user_data.identifier === "string") {
+    const value = entry.public_user_data.identifier.trim().toLowerCase();
+    return value || null;
+  }
+
+  return null;
+}
+
+async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId }) {
+  const user = await loadUserByClerkId(clerkUserId);
+  assertSellerRole(user);
+
+  const normalizedOrgId =
+    typeof clerkOrganizationId === "string" ? clerkOrganizationId.trim() : "";
+
+  if (!normalizedOrgId) {
+    throw createHttpError(400, "clerkOrganizationId is required.");
+  }
+
+  const clerkClient = getClerkClient();
+  const requesterMemberships = await clerkClient.users.getOrganizationMembershipList({
+    userId: clerkUserId,
+    limit: 100,
+  });
+
+  const requesterMembership = requesterMemberships.data.find((entry) => {
+    return entry && entry.organization && entry.organization.id === normalizedOrgId;
+  });
+
+  if (!requesterMembership) {
+    throw createHttpError(403, "You are not a member of this organization.");
+  }
+
+  const organization = await clerkClient.organizations.getOrganization({
+    organizationId: normalizedOrgId,
+  });
+
+  const now = new Date();
+  let workspace = await SellerWorkspace.findOne({
+    clerk_organization_id: normalizedOrgId,
+  });
+
+  if (!workspace) {
+    workspace = new SellerWorkspace({
+      owner_user_id: user._id,
+      clerk_organization_id: normalizedOrgId,
+      slug: organization.slug || null,
+      business_name: organization.name || "Seller Organization",
+      billing_email: user.email,
+      billing_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email,
+      status: "trial",
+      created_at: now,
+      updated_at: now,
+    });
+    await workspace.save();
+  }
+
+  const membershipsPage = await clerkClient.organizations.getOrganizationMembershipList({
+    organizationId: normalizedOrgId,
+    limit: 100,
+  });
+  const membershipEntries = membershipsPage && Array.isArray(membershipsPage.data) ? membershipsPage.data : [];
+
+  let syncedUsers = 0;
+  let syncedMemberships = 0;
+
+  for (const membership of membershipEntries) {
+    const memberClerkUserId = getMembershipUserId(membership);
+    const fallbackEmail = getMembershipEmail(membership);
+
+    let clerkMemberUser = null;
+    if (memberClerkUserId) {
+      clerkMemberUser = await clerkClient.users.getUser(memberClerkUserId).catch(() => null);
+    }
+
+    const primaryEmail = clerkMemberUser ? pickPrimaryEmail(clerkMemberUser) : null;
+    const email = (primaryEmail || fallbackEmail || "").trim().toLowerCase();
+
+    if (!memberClerkUserId && !email) {
+      continue;
+    }
+
+    const userLookupFilters = [];
+    if (memberClerkUserId) {
+      userLookupFilters.push({ clerk_user_id: memberClerkUserId });
+    }
+    if (email) {
+      userLookupFilters.push({ email });
+    }
+
+    const existingUser = userLookupFilters.length
+      ? await User.findOne({ $or: userLookupFilters })
+      : null;
+
+    const memberUser = existingUser || new User({ created_at: now });
+
+    if (memberClerkUserId) {
+      memberUser.clerk_user_id = memberClerkUserId;
+    }
+    if (email) {
+      memberUser.email = email;
+    }
+
+    const firstName = clerkMemberUser
+      ? clerkMemberUser.firstName
+      : membership && membership.publicUserData && membership.publicUserData.firstName;
+    const lastName = clerkMemberUser
+      ? clerkMemberUser.lastName
+      : membership && membership.publicUserData && membership.publicUserData.lastName;
+
+    if (typeof firstName === "string" && firstName.trim()) {
+      memberUser.first_name = firstName.trim();
+    }
+    if (typeof lastName === "string" && lastName.trim()) {
+      memberUser.last_name = lastName.trim();
+    }
+
+    if (!memberUser.user_type) {
+      memberUser.user_type = memberUser._id === workspace.owner_user_id ? "seller" : "staff";
+    }
+
+    if (memberUser.user_type === "staff") {
+      memberUser.parent_seller_user_id = workspace.owner_user_id || memberUser.parent_seller_user_id || null;
+    }
+
+    if (!memberUser.status) {
+      memberUser.status = "active";
+    }
+
+    memberUser.updated_at = now;
+    await memberUser.save();
+    syncedUsers += 1;
+
+    await ensureWorkspaceMembershipForUser({
+      user: memberUser,
+      workspace,
+      clerkRole: membership && membership.role ? membership.role : null,
+    });
+    syncedMemberships += 1;
+  }
+
+  if (!user.active_workspace_id || user.active_workspace_id !== workspace._id) {
+    user.active_workspace_id = workspace._id;
+    user.updated_at = now;
+    await user.save();
+  }
+
+  return {
+    organization: serializeSellerOrganization(workspace, user.active_workspace_id || workspace._id),
+    syncedUsers,
+    syncedMemberships,
+  };
+}
+
 async function listSellerWorkspacesForUser(userId) {
   return SellerWorkspace.find({ owner_user_id: userId }).sort({ created_at: 1, _id: 1 });
 }
@@ -726,6 +906,7 @@ module.exports = {
   listSellerOrganizations,
   loginWithRole,
   normalizeRole,
+  syncSellerOrganizationMembers,
   syncSellerActiveOrganization,
   upsertUserFromClerk,
 };

@@ -4,6 +4,7 @@ const {
   getCurrentUser,
   listSellerOrganizations,
   loginWithRole,
+  syncSellerOrganizationMembers,
   upsertUserFromClerk,
   syncSellerActiveOrganization,
 } = require("../services/authService");
@@ -106,12 +107,26 @@ async function syncSellerActiveOrganizationEntry(req, res) {
   }
 }
 
+async function syncSellerOrganizationMembersEntry(req, res) {
+  try {
+    const result = await syncSellerOrganizationMembers({
+      clerkUserId: req.auth.userId,
+      clerkOrganizationId: req.body && req.body.clerkOrganizationId,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
   activateSellerOrganizationEntry,
   createSellerOrganizationEntry,
   getSellerOrganizations,
   login,
   me,
+  syncSellerOrganizationMembersEntry,
   syncSellerActiveOrganizationEntry,
   syncUser,
 };

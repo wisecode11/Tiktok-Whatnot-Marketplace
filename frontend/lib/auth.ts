@@ -39,6 +39,12 @@ export interface SellerOrganizationMutationResponse {
   redirectTo: string
 }
 
+export interface SellerOrganizationMembersSyncResponse {
+  organization: SellerOrganization
+  syncedUsers: number
+  syncedMemberships: number
+}
+
 export interface ConnectedAccountResponse {
   accounts: Array<{
     id: string
@@ -523,6 +529,35 @@ export interface FetchWhatnotMyLiveStatsResponse {
   raw: Record<string, unknown>
 }
 
+export interface WhatnotUpcomingShowSummary {
+  id: string | null
+  uuid: string | null
+  title: string | null
+  scheduledAt: string | number | null
+  userId: string | null
+  raw: Record<string, unknown>
+}
+
+export interface WhatnotLiveShowItem {
+  id: string | null
+  title: string | null
+  startTime: number | null
+  endTime: number | null
+  status: string | null
+  userId: string | null
+  showType: "Live" | "Upcoming" | "Past"
+  link: string | null
+}
+
+export interface WhatnotShowTabResponse {
+  sellerId: string | null
+  upcomingShowUserId: string | null
+  upcomingShows: WhatnotUpcomingShowSummary[]
+  shows: WhatnotLiveShowItem[]
+  liveReadiness: Record<string, unknown> | null
+  sellerHomeDashboard: Record<string, unknown> | null
+}
+
 export interface WhatnotLivestreamIdSummary {
   id: string
   title: string | null
@@ -768,6 +803,14 @@ export async function syncSellerActiveOrganization(token: string, clerkOrganizat
   })
 }
 
+export async function syncSellerOrganizationMembers(token: string, clerkOrganizationId: string) {
+  return request<SellerOrganizationMembersSyncResponse>("/api/auth/seller-organizations/sync-members", {
+    token,
+    method: "POST",
+    body: { clerkOrganizationId },
+  })
+}
+
 export async function getConnectedAccounts(token: string) {
   return request<ConnectedAccountResponse>("/api/integrations/accounts", {
     token,
@@ -904,6 +947,14 @@ export async function fetchWhatnotMyLiveStats(token: string, liveId: string) {
     token,
     method: "POST",
     body: { liveId },
+  })
+}
+
+export async function fetchWhatnotShowTabData(token: string, upcomingShowsCount = 0) {
+  return request<WhatnotShowTabResponse>("/api/integrations/whatnot/show-tab", {
+    token,
+    method: "POST",
+    body: { upcomingShowsCount },
   })
 }
 

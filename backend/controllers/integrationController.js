@@ -24,6 +24,7 @@ const {
   createWhatnotListingFromPlatform,
   updateWhatnotBioFromPlatform,
   fetchMyLiveStatsFromExtension,
+  fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 } = require("../services/integrationService");
@@ -161,6 +162,19 @@ async function fetchMyLiveStatsData(req, res) {
     const result = await fetchMyLiveStatsFromExtension({
       clerkUserId: req.auth.userId,
       liveId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function fetchWhatnotShowTabData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await fetchWhatnotShowTabDataFromExtension({
+      clerkUserId: req.auth.userId,
+      upcomingShowsCount: body.upcomingShowsCount != null ? Number(body.upcomingShowsCount) : 0,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -488,6 +502,7 @@ module.exports = {
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
   fetchMyLiveStatsData,
+  fetchWhatnotShowTabData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
   syncWhatnotEarlyPayoutBalanceData,

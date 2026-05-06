@@ -12,6 +12,8 @@ const state = {
 
 let ws = null;
 let stateHydrated = false;
+const observedGraphqlWaiters = new Map();
+let pendingShowTabRequestContext = null;
 const MARKETPLACE_API_BASE = "http://localhost:5000";
 const WHATNOT_EXTENSION_API_KEY = "";
 const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
@@ -19,6 +21,10 @@ const SELLER_HUB_INVENTORY_QUERY =
   "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
 const MY_LIVE_STATS_QUERY =
   "query MyLiveStats($liveId:String!){myLiveStatistic(liveId:$liveId){totalCount totalSales{amount currency amountSafe __typename}totalEarned{amount currency amountSafe __typename}totalEarnings{amount currency amountSafe __typename}totalPendingEarned{amount currency amountSafe __typename}totalCancellations totalShippingSpend{amount currency amountSafe __typename}totalCouponSpend{amount currency amountSafe __typename}pendingShipments deliveredShipments runningTask manifestUrls __typename}}";
+const GET_SELLER_LIVE_READINESS_QUERY =
+  "query GetSellerLiveReadiness{me{id sellerLiveReadinessState{firstScheduledShow{uuid title scheduledAt __typename}completedChecklistAt overviewStatus scheduleShowStatus addProductsStatus connectShopifyStatus importProductsFromShopifyStatus bringInBuyersStatus goLiveStatus __typename}__typename}}";
+const MY_LIVES_QUERY =
+  "query MyLives($sellerId:ID){currentLives:myLiveStreams(status:[PLAYING STOPPED]){id title startTime endTime status userId userDeviceId streamToken isHiddenBySeller minEligibleLoyaltyTier __typename}upcomingLives:myLiveStreams(status:[CREATED]){id title startTime endTime status userId userDeviceId isHiddenBySeller minEligibleLoyaltyTier __typename}pastLives:myLiveStreams(status:[CANCELLED ENDED]){id title startTime endTime status userId userDeviceId isHiddenBySeller minEligibleLoyaltyTier __typename}getSellerAnalyticsLivestreams(sellerId:$sellerId){livestreams{id __typename}__typename}}";
 const GET_SHIPMENTS_LIVESTREAMS_QUERY =
   "query GetShipmentsLivestreams($statuses:[LiveStreamStatus!],$categoryType:String,$userId:ID,$before:String,$after:String,$first:Int,$last:Int,$reverse:Boolean){livestreamsByUserId(statuses:$statuses,categoryType:$categoryType,userId:$userId,before:$before,after:$after,first:$first,last:$last,reverse:$reverse){edges{cursor node{id title startTime pendingShippingShipmentsCount __typename}__typename}pageInfo{hasNextPage hasPreviousPage startCursor endCursor __typename}__typename}}";
 const GET_SHIPMENT_QUERY =
@@ -923,6 +929,22 @@ async function handlePlatformAction(payload) {
       await persistState();
     }
     result = await executeMyLiveStatsFromPlatform(payload);
+  } else if (payload?.action === "fetch_whatnot_show_tab") {
+    pendingShowTabRequestContext = {
+      requestId: payload?.requestId || null,
+      sellerId: null,
+      createdAt: Date.now(),
+    };
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    try {
+      result = await executeWhatnotShowTabFromPlatform(payload);
+    } finally {
+      pendingShowTabRequestContext = null;
+    }
   } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -1103,6 +1125,295 @@ async function executeMyLiveStatsFromPlatform(payload) {
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
   });
+}
+
+async function executeGetSellerLiveReadinessFromPlatform() {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const template = state?.observedGraphqlTemplates?.GetSellerLiveReadiness;
+  let requestBody = {
+    operationName: "GetSellerLiveReadiness",
+    query: GET_SELLER_LIVE_READINESS_QUERY,
+    variables: {}
+  };
+
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetSellerLiveReadiness";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    if (typeof requestBody.query !== "string" || !requestBody.query.trim()) {
+      requestBody.query = GET_SELLER_LIVE_READINESS_QUERY;
+    }
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetSellerLiveReadiness&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
+}
+
+async function executeMyLivesFromPlatform(sellerId) {
+  const normalizedSellerId = typeof sellerId === "string" ? sellerId.trim() : "";
+  if (!normalizedSellerId) {
+    return { success: false, error: "sellerId is required for MyLives." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const variables = { sellerId: normalizedSellerId };
+  const template = state?.observedGraphqlTemplates?.MyLives;
+  let requestBody = {
+    operationName: "MyLives",
+    query: MY_LIVES_QUERY,
+    variables,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "MyLives";
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = { ...requestBody.variables, sellerId: normalizedSellerId };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=MyLives&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+}
+
+async function executeGetSellerHomeDashboardFromPlatform({ sellerId, upcomingShowsCount = 0 } = {}) {
+  const normalizedSellerId = typeof sellerId === "string" ? sellerId.trim() : "";
+  if (!normalizedSellerId) {
+    return { success: false, error: "sellerID is required for GetSellerHomeDashboard." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  let template = state?.observedGraphqlTemplates?.GetSellerHomeDashboard;
+  let observedDashboardPayload = null;
+  if (!template?.requestBody || typeof template.requestBody !== "object") {
+    const captureUrls = [
+      "https://www.whatnot.com/en-GB/dashboard/home",
+    ];
+    await ensureObservedGraphqlTemplateCaptured("GetSellerHomeDashboard", captureUrls, 8000);
+    template = state?.observedGraphqlTemplates?.GetSellerHomeDashboard;
+
+    // If capture tab closes and the API fires on the user's tab right after,
+    // use the observed response directly so backend request does not stay pending.
+    if (!template?.requestBody || typeof template.requestBody !== "object") {
+      try {
+        const observed = await waitForObservedGraphqlOperation("GetSellerHomeDashboard", 20000);
+        const observedBody = observed && typeof observed.responseBody === "object"
+          ? observed.responseBody
+          : null;
+        if (observedBody) {
+          observedDashboardPayload = observedBody;
+        }
+      } catch (_e) {
+        // Keep existing error path below when no observed API is seen in time.
+      }
+      template = state?.observedGraphqlTemplates?.GetSellerHomeDashboard;
+    }
+  }
+
+  if (!template?.requestBody || typeof template.requestBody !== "object") {
+    if (observedDashboardPayload) {
+      return {
+        success: true,
+        status: 200,
+        data: observedDashboardPayload,
+      };
+    }
+    return {
+      success: false,
+      error: "GetSellerHomeDashboard template not captured yet. The extension could not observe the seller dashboard request in Whatnot."
+    };
+  }
+
+  const requestBody = structuredClone(template.requestBody);
+  requestBody.operationName = "GetSellerHomeDashboard";
+  if (!requestBody.variables || typeof requestBody.variables !== "object") {
+    requestBody.variables = {};
+  }
+  requestBody.variables = {
+    ...requestBody.variables,
+    includeSignalMigrationContent: false,
+    sellerID: normalizedSellerId,
+    upcomingShowsCount: Number.isFinite(Number(upcomingShowsCount)) ? Number(upcomingShowsCount) : 0,
+  };
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  const apiResult = await executeApi(state.tabId, {
+    url: template.url || "https://www.whatnot.com/services/graphql/?operationName=GetSellerHomeDashboard&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (apiResult?.success && apiResult?.data) {
+    return apiResult;
+  }
+
+  // Fallback: if direct call misses but browser emits the same operation, return that payload.
+  try {
+    const observed = await waitForObservedGraphqlOperation("GetSellerHomeDashboard", 15000);
+    const observedBody = observed && typeof observed.responseBody === "object"
+      ? observed.responseBody
+      : null;
+    if (observedBody) {
+      return {
+        success: true,
+        status: observed && Number.isFinite(Number(observed.status)) ? Number(observed.status) : 200,
+        data: observedBody,
+      };
+    }
+  } catch (_e) {
+    // Fall through to original failure response from direct executeApi.
+  }
+
+  return apiResult;
+}
+
+async function executeWhatnotShowTabFromPlatform(payload) {
+  const readinessResponse = await executeGetSellerLiveReadinessFromPlatform();
+  if (!readinessResponse?.success) {
+    return readinessResponse;
+  }
+
+  const readinessSellerId =
+    readinessResponse?.data && readinessResponse.data.data && readinessResponse.data.data.me
+      ? String(readinessResponse.data.data.me.id || "").trim()
+      : "";
+  if (!readinessSellerId) {
+    return { success: false, error: "GetSellerLiveReadiness did not return data.me.id." };
+  }
+
+  if (pendingShowTabRequestContext) {
+    pendingShowTabRequestContext.sellerId = readinessSellerId;
+  }
+
+  const dashboardResponse = await executeGetSellerHomeDashboardFromPlatform({
+    sellerId: readinessSellerId,
+    upcomingShowsCount: payload?.upcomingShowsCount ?? 0,
+  });
+  if (!dashboardResponse?.success) {
+    return dashboardResponse;
+  }
+
+  const dashboardSellerId =
+    dashboardResponse?.data &&
+    dashboardResponse.data.data &&
+    dashboardResponse.data.data.upcomingShows &&
+    Array.isArray(dashboardResponse.data.data.upcomingShows.edges) &&
+    dashboardResponse.data.data.upcomingShows.edges[0] &&
+    dashboardResponse.data.data.upcomingShows.edges[0].node &&
+    dashboardResponse.data.data.upcomingShows.edges[0].node.user &&
+    dashboardResponse.data.data.upcomingShows.edges[0].node.user.id
+      ? String(dashboardResponse.data.data.upcomingShows.edges[0].node.user.id || "").trim() || null
+      : null;
+
+  const sellerId = dashboardSellerId || readinessSellerId;
+
+  if (pendingShowTabRequestContext) {
+    pendingShowTabRequestContext.sellerId = sellerId || null;
+  }
+
+  const myLivesResponse = await executeMyLivesFromPlatform(sellerId);
+
+  const upcomingShowUserId =
+    dashboardResponse?.data &&
+    dashboardResponse.data.data &&
+    dashboardResponse.data.data.upcomingShows &&
+    Array.isArray(dashboardResponse.data.data.upcomingShows.edges) &&
+    dashboardResponse.data.data.upcomingShows.edges[0] &&
+    dashboardResponse.data.data.upcomingShows.edges[0].node &&
+    dashboardResponse.data.data.upcomingShows.edges[0].node.user
+      ? String(dashboardResponse.data.data.upcomingShows.edges[0].node.user.id || "").trim() || null
+      : null;
+
+  return {
+    success: true,
+    status: dashboardResponse.status || readinessResponse.status || 200,
+    data: {
+      sellerId,
+      upcomingShowUserId,
+      liveReadiness: readinessResponse.data || null,
+      sellerHomeDashboard: dashboardResponse.data || null,
+      myLives: myLivesResponse?.success ? (myLivesResponse.data || null) : null,
+    }
+  };
 }
 
 async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
@@ -1785,6 +2096,9 @@ function getOperationName(payload) {
   if (payload?.action === "fetch_my_live_stats") {
     return "MyLiveStats";
   }
+  if (payload?.action === "fetch_whatnot_show_tab") {
+    return "GetSellerHomeDashboard";
+  }
   if (payload?.action === "fetch_shipments_livestreams") {
     return "GetShipmentsLivestreams";
   }
@@ -1888,7 +2202,64 @@ function ingestShipmentIdsFromObservedApiPayload(payload) {
 async function onObservedApi(payload) {
   state.lastObservedApi = payload;
   captureGraphqlTemplate(payload);
+  resolveObservedGraphqlWaiters(payload);
   ingestShipmentIdsFromObservedApiPayload(payload);
+
+  const observedOperationName = extractObservedOperationName(payload);
+  if (
+    observedOperationName === "GetSellerHomeDashboard" &&
+    pendingShowTabRequestContext &&
+    pendingShowTabRequestContext.requestId &&
+    payload &&
+    typeof payload.responseBody === "object" &&
+    payload.responseBody
+  ) {
+    const dashboardPayload = payload.responseBody;
+    const upcomingShowUserId =
+      dashboardPayload &&
+      dashboardPayload.data &&
+      dashboardPayload.data.upcomingShows &&
+      Array.isArray(dashboardPayload.data.upcomingShows.edges) &&
+      dashboardPayload.data.upcomingShows.edges[0] &&
+      dashboardPayload.data.upcomingShows.edges[0].node &&
+      dashboardPayload.data.upcomingShows.edges[0].node.user &&
+      dashboardPayload.data.upcomingShows.edges[0].node.user.id
+        ? String(dashboardPayload.data.upcomingShows.edges[0].node.user.id).trim() || null
+        : null;
+
+    const observedSellerId = pendingShowTabRequestContext.sellerId || null;
+    let myLivesData = null;
+    if (observedSellerId) {
+      try {
+        const myLivesResponse = await executeMyLivesFromPlatform(observedSellerId);
+        if (myLivesResponse?.success) {
+          myLivesData = myLivesResponse.data || null;
+        }
+      } catch (_e) {
+        // MyLives failure does not block the observed-path response
+      }
+    }
+
+    sendSocketMessage("action_response", {
+      requestId: pendingShowTabRequestContext.requestId,
+      status: "success",
+      operationName: "GetSellerHomeDashboard",
+      response: {
+        success: true,
+        status: payload.status >= 200 && payload.status < 300 ? payload.status : 200,
+        data: {
+          sellerId: observedSellerId,
+          upcomingShowUserId,
+          liveReadiness: null,
+          sellerHomeDashboard: dashboardPayload,
+          myLives: myLivesData,
+        },
+        observed: true,
+      },
+      timestamp: Date.now(),
+    });
+  }
+
   await persistState();
   sendSocketMessage("action_response", {
     status: payload.status >= 200 && payload.status < 300 ? "success" : "error",
@@ -1927,6 +2298,123 @@ function captureGraphqlTemplate(payload) {
   if (!prevTemplate || scoreTemplate(nextTemplate) >= scoreTemplate(prevTemplate)) {
     state.observedGraphqlTemplates[operationName] = nextTemplate;
   }
+}
+
+function extractObservedOperationName(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const requestBody = payload.requestBody && typeof payload.requestBody === "object"
+    ? payload.requestBody
+    : null;
+  if (requestBody && typeof requestBody.operationName === "string" && requestBody.operationName.trim()) {
+    return requestBody.operationName.trim();
+  }
+
+  if (typeof payload.url === "string") {
+    try {
+      const parsed = new URL(payload.url);
+      const op = parsed.searchParams.get("operationName") || "";
+      return op.trim();
+    } catch (_e) {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function resolveObservedGraphqlWaiters(payload) {
+  const operationName = extractObservedOperationName(payload);
+  if (!operationName) {
+    return;
+  }
+
+  const waiters = observedGraphqlWaiters.get(operationName);
+  if (!Array.isArray(waiters) || !waiters.length) {
+    return;
+  }
+
+  observedGraphqlWaiters.delete(operationName);
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timeoutId);
+    waiter.resolve(payload);
+  }
+}
+
+function waitForObservedGraphqlOperation(operationName, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const normalizedOperationName = typeof operationName === "string" ? operationName.trim() : "";
+    if (!normalizedOperationName) {
+      reject(new Error("operationName is required."));
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      const current = observedGraphqlWaiters.get(normalizedOperationName) || [];
+      observedGraphqlWaiters.set(
+        normalizedOperationName,
+        current.filter((entry) => entry.timeoutId !== timeoutId)
+      );
+      reject(new Error(`Timed out waiting for observed GraphQL operation ${normalizedOperationName}.`));
+    }, timeoutMs);
+
+    const current = observedGraphqlWaiters.get(normalizedOperationName) || [];
+    current.push({ resolve, reject, timeoutId });
+    observedGraphqlWaiters.set(normalizedOperationName, current);
+  });
+}
+
+async function ensureObservedGraphqlTemplateCaptured(operationName, candidateUrls = [], waitTimeoutMs = 8000) {
+  const normalizedOperationName = typeof operationName === "string" ? operationName.trim() : "";
+  if (!normalizedOperationName) {
+    return false;
+  }
+
+  if (state?.observedGraphqlTemplates?.[normalizedOperationName]?.requestBody) {
+    return true;
+  }
+
+  let tempTabId = null;
+  try {
+    for (let index = 0; index < candidateUrls.length; index += 1) {
+      const nextUrl = typeof candidateUrls[index] === "string" ? candidateUrls[index].trim() : "";
+      if (!nextUrl) {
+        continue;
+      }
+
+      const waitPromise = waitForObservedGraphqlOperation(normalizedOperationName, waitTimeoutMs);
+      if (tempTabId == null) {
+        const createdTab = await chrome.tabs.create({ url: nextUrl, active: false });
+        tempTabId = createdTab && createdTab.id ? createdTab.id : null;
+        if (tempTabId == null) {
+          continue;
+        }
+      } else {
+        await chrome.tabs.update(tempTabId, { url: nextUrl });
+      }
+
+      await waitForTabComplete(tempTabId, waitTimeoutMs);
+      await waitPromise;
+
+      if (state?.observedGraphqlTemplates?.[normalizedOperationName]?.requestBody) {
+        return true;
+      }
+    }
+  } catch (_e) {
+    // Continue to final false return below when capture is not observed in time.
+  } finally {
+    if (tempTabId != null) {
+      try {
+        await chrome.tabs.remove(tempTabId);
+      } catch (_e) {
+        // Ignore cleanup failures.
+      }
+    }
+  }
+
+  return Boolean(state?.observedGraphqlTemplates?.[normalizedOperationName]?.requestBody);
 }
 
 function scoreTemplate(template) {

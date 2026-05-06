@@ -30,6 +30,7 @@ const {
   generateWhatnotMediaUploadUrls,
   publishWhatnotInventory,
   fetchMyLiveStatsData,
+  fetchWhatnotShowTabData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
 } = require("../controllers/integrationController");
@@ -62,6 +63,7 @@ router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLi
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData);
+router.post("/whatnot/show-tab", authenticateRequest, fetchWhatnotShowTabData);
 router.get(
   "/whatnot/shipments-livestreams/current",
   authenticateRequest,

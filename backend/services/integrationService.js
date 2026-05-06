@@ -3130,6 +3130,195 @@ async function fetchMyLiveStatsFromExtension({ clerkUserId, liveId }) {
   };
 }
 
+async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShowsCount = 0 }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
+
+  console.log("[Whatnot Show Tab] Waiting for extension response...");
+
+  const actionResult = await requestWhatnotAction({
+    action: "fetch_whatnot_show_tab",
+    clerkUserId: normalizedClerkUserId,
+    upcomingShowsCount: Number.isFinite(Number(upcomingShowsCount)) ? Number(upcomingShowsCount) : 0,
+  }, 300000);
+
+  console.log("[Whatnot Show Tab] Extension response received.");
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to fetch Whatnot show tab data through extension.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult.data && typeof actionResult.data === "object" ? actionResult.data : {};
+  const readinessPayload = body.liveReadiness && typeof body.liveReadiness === "object"
+    ? body.liveReadiness
+    : null;
+  const dashboardPayload = body.sellerHomeDashboard && typeof body.sellerHomeDashboard === "object"
+    ? body.sellerHomeDashboard
+    : null;
+
+  const readinessErrors =
+    readinessPayload && Array.isArray(readinessPayload.errors) ? readinessPayload.errors : [];
+  if (readinessErrors.length) {
+    const firstError = readinessErrors[0] && readinessErrors[0].message
+      ? String(readinessErrors[0].message)
+      : "GetSellerLiveReadiness GraphQL returned errors.";
+    throw createHttpError(502, firstError, readinessPayload);
+  }
+
+  const dashboardErrors =
+    dashboardPayload && Array.isArray(dashboardPayload.errors) ? dashboardPayload.errors : [];
+  if (dashboardErrors.length) {
+    const firstError = dashboardErrors[0] && dashboardErrors[0].message
+      ? String(dashboardErrors[0].message)
+      : "GetSellerHomeDashboard GraphQL returned errors.";
+    throw createHttpError(502, firstError, dashboardPayload);
+  }
+
+  const sellerIdFromDashboardPath =
+    dashboardPayload &&
+    dashboardPayload.data &&
+    dashboardPayload.data.upcomingShows &&
+    Array.isArray(dashboardPayload.data.upcomingShows.edges) &&
+    dashboardPayload.data.upcomingShows.edges[0] &&
+    dashboardPayload.data.upcomingShows.edges[0].node &&
+    dashboardPayload.data.upcomingShows.edges[0].node.user &&
+    dashboardPayload.data.upcomingShows.edges[0].node.user.id
+      ? String(dashboardPayload.data.upcomingShows.edges[0].node.user.id).trim()
+      : "";
+
+  const sellerId =
+    sellerIdFromDashboardPath ||
+    (typeof body.sellerId === "string" && body.sellerId.trim()
+      ? body.sellerId.trim()
+      : readinessPayload &&
+          readinessPayload.data &&
+          readinessPayload.data.me &&
+          readinessPayload.data.me.id
+        ? String(readinessPayload.data.me.id).trim()
+        : "");
+
+  if (sellerId) {
+    console.log(`Seller ID fetched successfully: ${sellerId}`);
+    try {
+      await User.findOneAndUpdate(
+        { clerk_user_id: normalizedClerkUserId },
+        { whatnot_seller_id: sellerId, updated_at: new Date() },
+        { new: false },
+      );
+      console.log(`[Whatnot Show Tab] whatnot_seller_id saved to user: ${sellerId}`);
+    } catch (saveErr) {
+      console.error("[Whatnot Show Tab] Failed to save whatnot_seller_id:", saveErr.message);
+    }
+  } else {
+    console.log("Seller ID fetched successfully: <missing>");
+  }
+
+  const upcomingShowUserId =
+    typeof body.upcomingShowUserId === "string" && body.upcomingShowUserId.trim()
+      ? body.upcomingShowUserId.trim()
+      : dashboardPayload &&
+          dashboardPayload.data &&
+          dashboardPayload.data.upcomingShows &&
+          Array.isArray(dashboardPayload.data.upcomingShows.edges) &&
+          dashboardPayload.data.upcomingShows.edges[0] &&
+          dashboardPayload.data.upcomingShows.edges[0].node &&
+          dashboardPayload.data.upcomingShows.edges[0].node.user &&
+          dashboardPayload.data.upcomingShows.edges[0].node.user.id
+        ? String(dashboardPayload.data.upcomingShows.edges[0].node.user.id).trim()
+        : "";
+
+  if (upcomingShowUserId) {
+    console.log(`Upcoming show user ID: ${upcomingShowUserId}`);
+  } else {
+    console.log("Upcoming show user ID: <missing>");
+  }
+
+  const myLivesPayload = body.myLives && typeof body.myLives === "object" ? body.myLives : null;
+  const myLivesData = myLivesPayload && myLivesPayload.data && typeof myLivesPayload.data === "object"
+    ? myLivesPayload.data
+    : null;
+
+  function mapLiveShow(live, showType) {
+    return {
+      id: live.id ? String(live.id) : null,
+      title: live.title ? String(live.title).trim() : null,
+      startTime: live.startTime != null ? Number(live.startTime) : null,
+      endTime: live.endTime != null ? Number(live.endTime) : null,
+      status: live.status ? String(live.status) : null,
+      userId: live.userId ? String(live.userId) : null,
+      showType,
+      link: live.id ? `https://www.whatnot.com/live/${live.id}` : null,
+    };
+  }
+
+  const currentLivesRaw = myLivesData && Array.isArray(myLivesData.currentLives) ? myLivesData.currentLives : [];
+  const upcomingLivesRaw = myLivesData && Array.isArray(myLivesData.upcomingLives) ? myLivesData.upcomingLives : [];
+  const pastLivesRaw = myLivesData && Array.isArray(myLivesData.pastLives) ? myLivesData.pastLives : [];
+
+  const shows = [
+    ...currentLivesRaw.map((l) => mapLiveShow(l, "Live")),
+    ...upcomingLivesRaw.map((l) => mapLiveShow(l, "Upcoming")),
+    ...pastLivesRaw.map((l) => mapLiveShow(l, "Past")),
+  ];
+
+  console.log(`[Whatnot Show Tab] MyLives: ${currentLivesRaw.length} live, ${upcomingLivesRaw.length} upcoming, ${pastLivesRaw.length} past.`);
+
+  const edges = dashboardPayload &&
+    dashboardPayload.data &&
+    dashboardPayload.data.upcomingShows &&
+    Array.isArray(dashboardPayload.data.upcomingShows.edges)
+    ? dashboardPayload.data.upcomingShows.edges
+    : [];
+
+  const upcomingShows = edges
+    .map((edge) => (edge && typeof edge === "object" ? edge.node : null))
+    .filter((node) => node && typeof node === "object")
+    .map((node) => ({
+      id: node.id ? String(node.id) : null,
+      uuid: node.uuid ? String(node.uuid) : null,
+      title: node.title ? String(node.title) : null,
+      scheduledAt: node.scheduledAt || node.startTime || null,
+      userId: node.user && node.user.id ? String(node.user.id) : null,
+      raw: node,
+    }));
+
+  return {
+    sellerId: sellerId || null,
+    upcomingShowUserId: upcomingShowUserId || null,
+    upcomingShows,
+    shows,
+    liveReadiness: readinessPayload,
+    sellerHomeDashboard: dashboardPayload,
+  };
+}
+
 /** Whatnot Relay ids sometimes confuse `l` vs `1` when copied (ShipmentNode segment). */
 function normalizeShipmentGraphqlId(id) {
   const s = typeof id === "string" ? id.trim() : "";
@@ -3699,6 +3888,7 @@ module.exports = {
   getWhatnotOrders,
   syncWhatnotOrdersFromExtension,
   fetchMyLiveStatsFromExtension,
+  fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 };
