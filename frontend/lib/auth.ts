@@ -219,6 +219,7 @@ export interface WhatnotInventoryCreateFormOptionsResponse {
   subcategories: Array<{
     id: string
     label: string
+    categoryId?: string | null
   }>
   shippingProfiles: Array<{
     id: string

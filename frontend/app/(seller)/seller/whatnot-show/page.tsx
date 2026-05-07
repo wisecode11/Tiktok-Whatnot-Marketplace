@@ -5,9 +5,21 @@ import { useEffect, useState } from "react"
 import { Clock3, ExternalLink, Radio } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -18,6 +30,7 @@ import {
 } from "@/components/ui/table"
 import {
   fetchWhatnotShowTabData,
+  getWhatnotInventoryCreateFormOptions,
   waitForSessionToken,
   type WhatnotLiveShowItem,
 } from "@/lib/auth"
@@ -25,6 +38,14 @@ import {
 type FilterType = "All" | "Live" | "Upcoming" | "Past"
 
 const FILTERS: FilterType[] = ["All", "Live", "Upcoming", "Past"]
+const REPEAT_OPTIONS = ["Does not repeat", "Daily", "Weekly", "Monthly"] as const
+const LANGUAGE_OPTIONS = ["English", "Netherlands", "Francais", "Deutsch", "Chienese"] as const
+
+interface ShowCategoryOption {
+  id: string
+  label: string
+  categoryId: string | null
+}
 
 function formatStartTime(startTime: number | null): { date: string; time: string } {
   if (!startTime) return { date: "—", time: "—" }
@@ -40,6 +61,23 @@ export default function SellerWhatnotShowPage() {
   const [shows, setShows] = useState<WhatnotLiveShowItem[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState<FilterType>("All")
+  const [openScheduleDialog, setOpenScheduleDialog] = useState(false)
+  const [categoryOptions, setCategoryOptions] = useState<ShowCategoryOption[]>([])
+  const [categorySearchValue, setCategorySearchValue] = useState("")
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
+  const [scheduleError, setScheduleError] = useState("")
+  const [scheduleNotice, setScheduleNotice] = useState("")
+  const [scheduleForm, setScheduleForm] = useState({
+    name: "",
+    showDate: "",
+    showTime: "",
+    repeats: "Does not repeat",
+    primaryCategoryId: "",
+    subcategoryId: "",
+    moderator: "",
+    primaryLanguage: "English",
+    showDiscovery: "public" as "public" | "private",
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -65,8 +103,96 @@ export default function SellerWhatnotShowPage() {
     }
   }, [getToken, isLoaded])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCategoryOptions() {
+      if (!isLoaded) return
+      try {
+        const token = await waitForSessionToken(getToken)
+        const response = await getWhatnotInventoryCreateFormOptions(token)
+        if (cancelled) return
+        const normalized = Array.isArray(response.subcategories)
+          ? response.subcategories
+              .filter((item) => item.id && item.label)
+              .map((item) => ({
+                id: item.id,
+                label: item.label,
+                categoryId: item.categoryId || null,
+              }))
+          : []
+        setCategoryOptions(normalized)
+      } catch (_error) {
+        if (!cancelled) {
+          setCategoryOptions([])
+        }
+      }
+    }
+
+    void loadCategoryOptions()
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, isLoaded])
+
+  function resetScheduleForm() {
+    setScheduleError("")
+    setScheduleNotice("")
+    setCategorySearchValue("")
+    setIsCategoryDropdownOpen(false)
+    setScheduleForm({
+      name: "",
+      showDate: "",
+      showTime: "",
+      repeats: "Does not repeat",
+      primaryCategoryId: "",
+      subcategoryId: "",
+      moderator: "",
+      primaryLanguage: "English",
+      showDiscovery: "public",
+    })
+  }
+
+  function openScheduleModal() {
+    resetScheduleForm()
+    setOpenScheduleDialog(true)
+  }
+
+  function handleCategorySelect(subcategoryId: string) {
+    const option = categoryOptions.find((item) => item.id === subcategoryId)
+    setScheduleForm((current) => ({
+      ...current,
+      subcategoryId,
+      primaryCategoryId: option?.categoryId || "",
+    }))
+    if (option) {
+      setCategorySearchValue(option.label)
+    }
+    setIsCategoryDropdownOpen(false)
+    setScheduleError("")
+  }
+
+  function handleScheduleSubmit() {
+    if (
+      !scheduleForm.name.trim() ||
+      !scheduleForm.showDate ||
+      !scheduleForm.showTime ||
+      !scheduleForm.subcategoryId ||
+      !scheduleForm.moderator.trim()
+    ) {
+      setScheduleError("Please fill all required fields before scheduling.")
+      return
+    }
+    setScheduleError("")
+    setScheduleNotice("Schedule details captured successfully.")
+    setOpenScheduleDialog(false)
+  }
+
   const rows = (shows ?? []).filter(
     (s) => activeFilter === "All" || s.showType === activeFilter,
+  )
+  const filteredCategoryOptions = categoryOptions.filter((option) =>
+    option.label.toLowerCase().includes(categorySearchValue.trim().toLowerCase()),
   )
 
   const statusLabel = loading
@@ -78,11 +204,12 @@ export default function SellerWhatnotShowPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Whatnot Show" description="Launch upcoming Whatnot sessions from one place.">
-        <Button className="gap-2">
+        <Button className="gap-2" onClick={openScheduleModal}>
           <Radio className="h-4 w-4" />
           Schedule a show
         </Button>
       </PageHeader>
+      {scheduleNotice ? <p className="text-sm text-emerald-600">{scheduleNotice}</p> : null}
 
       <Card className="overflow-hidden border-border/60 bg-card">
         <CardContent className="space-y-4 p-4 md:p-6">
@@ -200,6 +327,235 @@ export default function SellerWhatnotShowPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={openScheduleDialog} onOpenChange={setOpenScheduleDialog}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Schedule a show</DialogTitle>
+            <DialogDescription>Complete the details below to prepare your next Whatnot show.</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 py-1">
+            <div className="grid gap-2">
+              <Label htmlFor="show-name">Name of show *</Label>
+              <Input
+                id="show-name"
+                value={scheduleForm.name}
+                onChange={(event) => {
+                  setScheduleForm((current) => ({ ...current, name: event.target.value }))
+                  setScheduleError("")
+                }}
+                placeholder="Enter show name"
+                className="h-10 w-full"
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="show-date">Show date *</Label>
+                <Input
+                  id="show-date"
+                  type="date"
+                  value={scheduleForm.showDate}
+                  onChange={(event) => {
+                    setScheduleForm((current) => ({ ...current, showDate: event.target.value }))
+                    setScheduleError("")
+                  }}
+                  className="h-10 w-full"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="show-time">Show time *</Label>
+                <Input
+                  id="show-time"
+                  type="time"
+                  value={scheduleForm.showTime}
+                  onChange={(event) => {
+                    setScheduleForm((current) => ({ ...current, showTime: event.target.value }))
+                    setScheduleError("")
+                  }}
+                  className="h-10 w-full"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Repeats</Label>
+                <Select
+                  value={scheduleForm.repeats}
+                  onValueChange={(value) => {
+                    setScheduleForm((current) => ({ ...current, repeats: value }))
+                  }}
+                >
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Select repeat frequency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REPEAT_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Primary language</Label>
+                <Select
+                  value={scheduleForm.primaryLanguage}
+                  onValueChange={(value) => setScheduleForm((current) => ({ ...current, primaryLanguage: value }))}
+                >
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Primary category *</Label>
+              <div className="relative">
+                <Input
+                  value={categorySearchValue}
+                  onChange={(event) => {
+                    setCategorySearchValue(event.target.value)
+                    setScheduleForm((current) => ({
+                      ...current,
+                      subcategoryId: "",
+                      primaryCategoryId: "",
+                    }))
+                    setIsCategoryDropdownOpen(true)
+                    setScheduleError("")
+                  }}
+                  onFocus={() => setIsCategoryDropdownOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setIsCategoryDropdownOpen(false), 120)
+                  }}
+                  placeholder="Type and select primary category"
+                  className="h-10 w-full"
+                />
+                {isCategoryDropdownOpen ? (
+                  <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
+                    {filteredCategoryOptions.length ? (
+                      filteredCategoryOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            handleCategorySelect(option.id)
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No category found.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              {scheduleForm.primaryCategoryId ? (
+                <p className="text-xs text-muted-foreground">
+                  Selected category id: {scheduleForm.primaryCategoryId}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="show-moderator">Moderator *</Label>
+              <Input
+                id="show-moderator"
+                value={scheduleForm.moderator}
+                onChange={(event) => {
+                  setScheduleForm((current) => ({ ...current, moderator: event.target.value }))
+                  setScheduleError("")
+                }}
+                placeholder="Enter moderator name"
+                className="h-10 w-full"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Show discovery</Label>
+              <div className="grid w-full gap-2 rounded-xl border border-border/60 bg-muted/20 p-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className={[
+                    "flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left transition-colors",
+                    scheduleForm.showDiscovery === "public"
+                      ? "border-emerald-300 bg-emerald-50/80"
+                      : "border-border bg-background hover:bg-accent/40",
+                  ].join(" ")}
+                  onClick={() => setScheduleForm((current) => ({ ...current, showDiscovery: "public" }))}
+                >
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Public</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Visible to all users in Whatnot discovery.
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "mt-0.5 inline-block h-4 w-4 rounded-full border",
+                      scheduleForm.showDiscovery === "public"
+                        ? "border-emerald-600 bg-emerald-600"
+                        : "border-muted-foreground/40 bg-transparent",
+                    ].join(" ")}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className={[
+                    "flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left transition-colors",
+                    scheduleForm.showDiscovery === "private"
+                      ? "border-slate-400 bg-slate-100/80"
+                      : "border-border bg-background hover:bg-accent/40",
+                  ].join(" ")}
+                  onClick={() => setScheduleForm((current) => ({ ...current, showDiscovery: "private" }))}
+                >
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Private</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Hidden from public discovery feed.
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "mt-0.5 inline-block h-4 w-4 rounded-full border",
+                      scheduleForm.showDiscovery === "private"
+                        ? "border-slate-700 bg-slate-700"
+                        : "border-muted-foreground/40 bg-transparent",
+                    ].join(" ")}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {scheduleError ? <p className="text-sm text-destructive">{scheduleError}</p> : null}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={() => setOpenScheduleDialog(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleScheduleSubmit}>
+              Schedule show
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -2273,6 +2273,7 @@ async function getWhatnotInventoryCreateFormOptions() {
     subcategories: subcategories.map((item) => ({
       id: item.subcategory_id,
       label: item.label,
+      categoryId: item.whatnot_category_id || null,
     })),
     shippingProfiles: shippingProfiles.map((item) => ({
       id: item.WhatnotProfileShipping_id,
