@@ -559,6 +559,56 @@ export interface WhatnotShowTabResponse {
   sellerHomeDashboard: Record<string, unknown> | null
 }
 
+export interface ScheduleWhatnotShowPayload {
+  name: string
+  showDate: string
+  showTime: string
+  repeats: string
+  primarySellingFormat: string
+  primarySellingFormatId: string | null
+  primarySellingFormatName: string | null
+  primarySellingFormatLabel: string | null
+  primaryLanguage: string
+  moderator: string
+  discovery: "public" | "private"
+  categoryId: string
+  mainCategoryId: string | null
+}
+
+export interface WhatnotPrimaryShowFormatTag {
+  id: string | null
+  name: string | null
+  label: string | null
+  description: string | null
+  canScheduleLive: boolean
+  applicationLink: string | null
+  raw: Record<string, unknown>
+}
+
+export interface WhatnotPrimaryShowFormatTagsResponse {
+  categoryId: string
+  primaryShowFormatTags: WhatnotPrimaryShowFormatTag[]
+  response: Record<string, unknown>
+}
+
+export interface WhatnotLivestreamRefinementCategoryItem {
+  id: string
+  mainCategoryId: string
+  name: string | null
+  label: string | null
+}
+
+export interface WhatnotLivestreamMainCategoryItem {
+  id: string
+  name: string | null
+  label: string | null
+  refinements: WhatnotLivestreamRefinementCategoryItem[]
+}
+
+export interface WhatnotLivestreamCategoryTreeResponse {
+  categories: WhatnotLivestreamMainCategoryItem[]
+}
+
 export interface WhatnotLivestreamIdSummary {
   id: string
   title: string | null
@@ -951,11 +1001,40 @@ export async function fetchWhatnotMyLiveStats(token: string, liveId: string) {
   })
 }
 
-export async function fetchWhatnotShowTabData(token: string, upcomingShowsCount = 0) {
+export async function fetchWhatnotShowTabData(
+  token: string,
+  upcomingShowsCount = 0,
+  options?: { forceRefresh?: boolean },
+) {
   return request<WhatnotShowTabResponse>("/api/integrations/whatnot/show-tab", {
     token,
     method: "POST",
-    body: { upcomingShowsCount },
+    body: { upcomingShowsCount, forceRefresh: Boolean(options?.forceRefresh) },
+  })
+}
+
+export async function getWhatnotLivestreamCategoryTree(token: string) {
+  return request<WhatnotLivestreamCategoryTreeResponse>("/api/integrations/whatnot/livestream-category-tree", {
+    token,
+  })
+}
+
+export async function scheduleWhatnotShow(token: string, payload: ScheduleWhatnotShowPayload) {
+  return request<{ success: boolean; accepted: boolean; message: string }>(
+    "/api/integrations/whatnot/show-tab/schedule",
+    {
+      token,
+      method: "POST",
+      body: payload as unknown as Record<string, unknown>,
+    },
+  )
+}
+
+export async function fetchWhatnotPrimaryShowFormatTags(token: string, categoryId: string) {
+  return request<WhatnotPrimaryShowFormatTagsResponse>("/api/integrations/whatnot/show-tab/primary-show-format-tags", {
+    token,
+    method: "POST",
+    body: { categoryId },
   })
 }
 
