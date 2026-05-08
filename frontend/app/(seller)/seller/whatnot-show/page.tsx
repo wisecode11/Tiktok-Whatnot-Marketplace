@@ -80,7 +80,6 @@ export default function SellerWhatnotShowPage() {
     primarySellingFormatId: "",
     primarySellingFormatName: "",
     primarySellingFormatLabel: "",
-    moderator: "",
     primaryLanguage: "English",
     showDiscovery: "public" as "public" | "private",
   })
@@ -166,7 +165,6 @@ export default function SellerWhatnotShowPage() {
       primarySellingFormatId: "",
       primarySellingFormatName: "",
       primarySellingFormatLabel: "",
-      moderator: "",
       primaryLanguage: "English",
       showDiscovery: "public",
     })
@@ -289,8 +287,7 @@ export default function SellerWhatnotShowPage() {
       !scheduleForm.showDate ||
       !scheduleForm.showTime ||
       !scheduleForm.selectedCategoryId ||
-      !scheduleForm.primarySellingFormatId ||
-      !scheduleForm.moderator.trim()
+      !scheduleForm.primarySellingFormatId
     ) {
       setScheduleError("Please fill all required fields before scheduling.")
       return
@@ -306,7 +303,6 @@ export default function SellerWhatnotShowPage() {
       primarySellingFormatLabel: scheduleForm.primarySellingFormatLabel || null,
       primaryLanguage: scheduleForm.primaryLanguage,
       discovery: scheduleForm.showDiscovery,
-      moderator: scheduleForm.moderator.trim(),
       categoryId: scheduleForm.selectedCategoryId,
       mainCategoryId: scheduleForm.primaryCategoryId || null,
     }
@@ -704,20 +700,6 @@ export default function SellerWhatnotShowPage() {
               {isPrimaryShowFormatLoading ? (
                 <p className="text-xs text-muted-foreground">Loading selling formats...</p>
               ) : null}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="show-moderator">Moderator *</Label>
-              <Input
-                id="show-moderator"
-                value={scheduleForm.moderator}
-                onChange={(event) => {
-                  setScheduleForm((current) => ({ ...current, moderator: event.target.value }))
-                  setScheduleError("")
-                }}
-                placeholder="Enter moderator name"
-                className="h-10 w-full"
-              />
             </div>
 
             <div className="grid gap-2">

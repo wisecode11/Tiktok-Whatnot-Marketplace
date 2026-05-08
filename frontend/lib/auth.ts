@@ -569,7 +569,6 @@ export interface ScheduleWhatnotShowPayload {
   primarySellingFormatName: string | null
   primarySellingFormatLabel: string | null
   primaryLanguage: string
-  moderator: string
   discovery: "public" | "private"
   categoryId: string
   mainCategoryId: string | null

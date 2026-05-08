@@ -3676,12 +3676,133 @@ async function scheduleWhatnotShowFromPlatform({ clerkUserId, schedulePayload = 
     throw createHttpError(400, "name and categoryId are required.");
   }
 
-  // Placeholder for final Whatnot scheduling mutation hookup.
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
+
+  const showDate = typeof payload.showDate === "string" ? payload.showDate.trim() : "";
+  const showTime = typeof payload.showTime === "string" ? payload.showTime.trim() : "";
+  const parsedDate = showDate && showTime ? new Date(`${showDate}T${showTime}`) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    throw createHttpError(400, "showDate and showTime are required in valid format.");
+  }
+
+  const startTime = parsedDate.getTime();
+  const formatTagName = typeof payload.primarySellingFormatName === "string"
+    ? payload.primarySellingFormatName.trim()
+    : "";
+  const selectedCategoryId = typeof payload.categoryId === "string" ? payload.categoryId.trim() : "";
+  const languageMap = {
+    english: "en",
+    netherlands: "nl",
+    francais: "fr",
+    deutsch: "de",
+    chienese: "zh",
+  };
+  const selectedLanguage = typeof payload.primaryLanguage === "string"
+    ? payload.primaryLanguage.trim().toLowerCase()
+    : "";
+  const language = languageMap[selectedLanguage] || "en";
+  const isHiddenBySeller = String(payload.discovery || "public").trim().toLowerCase() === "private";
+
+  const variables = {
+    categories: [selectedCategoryId],
+    description: typeof payload.description === "string" ? payload.description : "",
+    explicitContent: false,
+    language,
+    livestreamAdsSettings: {
+      enabled: false,
+      budget: null,
+    },
+    livestreamShippingSettingUpdates: {
+      optionBooleanUpdates: [
+        {
+          isEnabled: false,
+          shippingSettingId: "first_class_mail_letters_enabled",
+        },
+      ],
+      optionRadioInputUpdates: [
+        {
+          optionId: "usps_priority_mail",
+          shippingSettingId: "us_domestic_shipments_1_to_5_lbs",
+        },
+        {
+          optionId: "usps_ground_advantage",
+          shippingSettingId: "us_domestic_shipments_over_5_lbs",
+        },
+        {
+          optionId: "buyer_pays_all",
+          shippingSettingId: "us_domestic_shipping_costs",
+        },
+      ],
+      optionRadioPriceInputUpdates: [],
+    },
+    minEligibleLoyaltyTier: null,
+    mutedWords: [],
+    nominatedModerators: [],
+    startTime,
+    tags: formatTagName ? [formatTagName] : [],
+    title: showName,
+    isUnifiedShopEnabled: true,
+    isHiddenBySeller,
+    seonSession: "",
+  };
+
+  const actionResult = await requestWhatnotAction({
+    action: "schedule_whatnot_show",
+    clerkUserId: normalizedClerkUserId,
+    variables,
+  }, 180000);
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to schedule Whatnot show through extension.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult.data && typeof actionResult.data === "object" ? actionResult.data : {};
+  const gqlErrors = Array.isArray(body.errors) ? body.errors : [];
+  if (gqlErrors.length) {
+    const firstError = gqlErrors[0] && gqlErrors[0].message
+      ? String(gqlErrors[0].message)
+      : "ScheduleLiveStream GraphQL returned errors.";
+    throw createHttpError(502, firstError, body);
+  }
+
+  const scheduledLiveId =
+    body &&
+    body.data &&
+    body.data.addLiveStream &&
+    body.data.addLiveStream.id
+      ? String(body.data.addLiveStream.id)
+      : null;
+
   return {
     success: true,
     accepted: true,
+    scheduledLiveId,
+    startTime,
+    isHiddenBySeller,
     schedulePayload: payload,
-    message: "Schedule payload received. Whatnot mutation hook can be attached next.",
+    response: body,
+    message: "Whatnot show scheduled via extension.",
   };
 }
 

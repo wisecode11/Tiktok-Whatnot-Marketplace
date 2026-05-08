@@ -41,6 +41,8 @@ const GET_SHIPPING_PROFILES_QUERY =
   "query GetShippingProfiles($categoryId:ID){shippingProfiles(categoryId:$categoryId){...ShippingProfile __typename}}fragment ShippingProfile on ShippingProfileNode{id name weightAmount weightScale weightName length width height dimensionScale bundleConfiguration{maxWeight amount __typename} incrementalWeight{amount scale __typename} __typename}";
 const GET_PRIMARY_SHOW_FORMAT_TAGS_QUERY =
   "query GetPrimaryShowFormatTags($categoryId:ID!){primaryShowFormatTags(categoryId:$categoryId){id name label description canScheduleLive(categoryId:$categoryId)applicationLink __typename}}";
+const SCHEDULE_LIVE_STREAM_MUTATION =
+  "mutation ScheduleLiveStream($title:String!$description:String$categories:[String]$startTime:Float$thumbnailKey:String$language:String$trailerUploadId:String$nominatedModerators:[ID]$explicitContent:Boolean$mutedWords:[String!]$tags:[String]$livestreamShippingSettingUpdates:LivestreamShippingSettingUpdates$localPickupSettings:LocalPickupSettingsInput$isUnifiedShopEnabled:Boolean$isHiddenBySeller:Boolean$minEligibleLoyaltyTier:LoyaltyTierLevel$prebidsDisabled:Boolean$auctionNumberingEnabled:Boolean$livestreamAdsSettings:LivestreamAdsSettingsInput$seonSession:String)@attribution(owner:\"commerce\"){addLiveStream(title:$title description:$description categories:$categories startTime:$startTime thumbnailKey:$thumbnailKey language:$language trailerUploadId:$trailerUploadId nominatedModerators:$nominatedModerators explicitContent:$explicitContent mutedWords:$mutedWords tags:$tags livestreamShippingSettingUpdates:$livestreamShippingSettingUpdates localPickupSettings:$localPickupSettings isUnifiedShopEnabled:$isUnifiedShopEnabled isHiddenBySeller:$isHiddenBySeller minEligibleLoyaltyTier:$minEligibleLoyaltyTier prebidsDisabled:$prebidsDisabled auctionNumberingEnabled:$auctionNumberingEnabled livestreamAdsSettings:$livestreamAdsSettings seonSession:$seonSession){id adCampaignMetadata{campaignStateChangeErrorFromShowScheduler{message __typename}__typename}__typename}}";
 const GENERATE_MEDIA_UPLOAD_URLS_MUTATION =
   "mutation GenerateMediaUploadUrls($media:[GenerateMediaUploadInput!]!){generateMediaUploadURLs(media:$media){uploads{id method url headers{name value __typename} targetKey expiresAt error __typename} error __typename}}";
 const ADD_LISTING_PHOTO_MUTATION =
@@ -1103,6 +1105,13 @@ async function handlePlatformAction(payload) {
       await persistState();
     }
     result = await executeGetPrimaryShowFormatTagsFromPlatform(payload);
+  } else if (payload?.action === "schedule_whatnot_show") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeScheduleLiveStreamFromPlatform(payload);
   } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -1442,6 +1451,59 @@ async function executeGetPrimaryShowFormatTagsFromPlatform(payload) {
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetPrimaryShowFormatTags&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+}
+
+async function executeScheduleLiveStreamFromPlatform(payload) {
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const rawVariables = payload?.variables && typeof payload.variables === "object" ? payload.variables : {};
+  const template = state?.observedGraphqlTemplates?.ScheduleLiveStream;
+  let requestBody = {
+    operationName: "ScheduleLiveStream",
+    variables: rawVariables,
+    query: SCHEDULE_LIVE_STREAM_MUTATION,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "ScheduleLiveStream";
+    requestBody.query = SCHEDULE_LIVE_STREAM_MUTATION;
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      ...rawVariables,
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=ScheduleLiveStream&ssr=0",
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody),
@@ -2317,6 +2379,9 @@ function getOperationName(payload) {
   }
   if (payload?.action === "fetch_primary_show_format_tags") {
     return "GetPrimaryShowFormatTags";
+  }
+  if (payload?.action === "schedule_whatnot_show") {
+    return "ScheduleLiveStream";
   }
   if (payload?.action === "fetch_shipments_livestreams") {
     return "GetShipmentsLivestreams";
