@@ -6,6 +6,7 @@ const {
   getWhatnotExtensionConnectionStatus,
   getLatestWhatnotInventorySnapshot,
   getWhatnotInventoryCreateFormOptions,
+  getWhatnotLivestreamCategoryTree,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
@@ -15,6 +16,7 @@ const {
   handleTikTokCallback,
   saveGetSessionApiData,
   saveWhatnotInventoryEditCategories,
+  saveWhatnotLivestreamTagDirectDescendants,
   saveWhatnotShippingProfiles,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
@@ -25,6 +27,8 @@ const {
   updateWhatnotBioFromPlatform,
   fetchMyLiveStatsFromExtension,
   fetchWhatnotShowTabDataFromExtension,
+  fetchWhatnotPrimaryShowFormatTagsFromExtension,
+  scheduleWhatnotShowFromPlatform,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 } = require("../services/integrationService");
@@ -144,6 +148,15 @@ async function getWhatnotInventoryCreateFormOptionsData(_req, res) {
   }
 }
 
+async function getWhatnotLivestreamCategoryTreeData(_req, res) {
+  try {
+    const result = await getWhatnotLivestreamCategoryTree();
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function syncWhatnotInventoryLiveData(req, res) {
   try {
     const result = await syncWhatnotInventoryFromPlatform({
@@ -175,6 +188,34 @@ async function fetchWhatnotShowTabData(req, res) {
     const result = await fetchWhatnotShowTabDataFromExtension({
       clerkUserId: req.auth.userId,
       upcomingShowsCount: body.upcomingShowsCount != null ? Number(body.upcomingShowsCount) : 0,
+      forceRefresh: Boolean(body.forceRefresh),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function scheduleWhatnotShowData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await scheduleWhatnotShowFromPlatform({
+      clerkUserId: req.auth.userId,
+      schedulePayload: body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function fetchWhatnotPrimaryShowFormatTagsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const categoryId = typeof body.categoryId === "string" ? body.categoryId.trim() : "";
+    const result = await fetchWhatnotPrimaryShowFormatTagsFromExtension({
+      clerkUserId: req.auth.userId,
+      categoryId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -384,6 +425,23 @@ async function saveWhatnotShippingProfilesEntry(req, res) {
   }
 }
 
+async function saveWhatnotLivestreamTagDirectDescendantsEntry(req, res) {
+  try {
+    const result = await saveWhatnotLivestreamTagDirectDescendants({
+      responsePayload: req.body && req.body.responsePayload ? req.body.responsePayload : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function listWhatnotOrders(req, res) {
   try {
     const result = await getWhatnotOrders({
@@ -486,6 +544,7 @@ module.exports = {
   getWhatnotInventorySnapshotData,
   getWhatnotInventoryLiveData,
   getWhatnotInventoryCreateFormOptionsData,
+  getWhatnotLivestreamCategoryTreeData,
   getWhatnotExtensionStatusData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -497,12 +556,15 @@ module.exports = {
   removeConnection,
   saveGetSessionApiDataEntry,
   saveWhatnotInventoryEditCategoriesEntry,
+  saveWhatnotLivestreamTagDirectDescendantsEntry,
   saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
   fetchMyLiveStatsData,
   fetchWhatnotShowTabData,
+  fetchWhatnotPrimaryShowFormatTagsData,
+  scheduleWhatnotShowData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
   syncWhatnotEarlyPayoutBalanceData,

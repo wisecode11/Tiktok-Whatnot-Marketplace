@@ -25,6 +25,8 @@ const GET_SELLER_LIVE_READINESS_QUERY =
   "query GetSellerLiveReadiness{me{id sellerLiveReadinessState{firstScheduledShow{uuid title scheduledAt __typename}completedChecklistAt overviewStatus scheduleShowStatus addProductsStatus connectShopifyStatus importProductsFromShopifyStatus bringInBuyersStatus goLiveStatus __typename}__typename}}";
 const MY_LIVES_QUERY =
   "query MyLives($sellerId:ID){currentLives:myLiveStreams(status:[PLAYING STOPPED]){id title startTime endTime status userId userDeviceId streamToken isHiddenBySeller minEligibleLoyaltyTier __typename}upcomingLives:myLiveStreams(status:[CREATED]){id title startTime endTime status userId userDeviceId isHiddenBySeller minEligibleLoyaltyTier __typename}pastLives:myLiveStreams(status:[CANCELLED ENDED]){id title startTime endTime status userId userDeviceId isHiddenBySeller minEligibleLoyaltyTier __typename}getSellerAnalyticsLivestreams(sellerId:$sellerId){livestreams{id __typename}__typename}}";
+const LIVESTREAM_TAG_DIRECT_DESCENDANTS_QUERY =
+  "query LivestreamTagDirectDescendants($startingEntityId:ID$useCase:UseCase$sortBy:LivestreamTagSort=null)@attribution(owner:\"disco\"){livestreamTaxonomyDirectDescendants(starting_entity_id:$startingEntityId use_case:$useCase sortBy:$sortBy){...TaxonomyTagFragment refinements(use_case:$useCase sortBy:$sortBy){...TaxonomyTagFragment __typename}__typename}}fragment TaxonomyTagFragment on LivestreamTagNode{id name label canScheduleLive applicationLink quizLink image{id smallImage:url(width:316 height:244 format:WEBP fit:COVER)__typename}__typename}";
 const GET_SHIPMENTS_LIVESTREAMS_QUERY =
   "query GetShipmentsLivestreams($statuses:[LiveStreamStatus!],$categoryType:String,$userId:ID,$before:String,$after:String,$first:Int,$last:Int,$reverse:Boolean){livestreamsByUserId(statuses:$statuses,categoryType:$categoryType,userId:$userId,before:$before,after:$after,first:$first,last:$last,reverse:$reverse){edges{cursor node{id title startTime pendingShippingShipmentsCount __typename}__typename}pageInfo{hasNextPage hasPreviousPage startCursor endCursor __typename}__typename}}";
 const GET_SHIPMENT_QUERY =
@@ -33,8 +35,12 @@ const GET_EARLY_PAYOUT_BALANCE_DATA_QUERY =
   "query GetEarlyPayoutBalanceData{me{id balances{completedSalesBalance{...Money __typename}processingSalesBalance{...Money __typename}totalSalesBalance{...Money __typename}totalSalesAltCurrencyBalance{...Money __typename}__typename}__typename}}fragment Money on Money{amount currency amountSafe __typename}";
 const SELLER_HUB_INVENTORY_EDIT_QUERY =
   "query SellerHubInventoryEdit($listingId:ID!$includeListing:Boolean!){categories:categoryBrowse{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption subcategories{...ProductCategoryOption __typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}__typename}getListing(id:$listingId)@include(if:$includeListing){...SellerHubInventoryListing __typename}}fragment Money on Money{amount currency amountSafe __typename}fragment SellerHubInventoryListingPriceFormat on ListingNode{id transactionProps{isOfferable auction{endTime isSuddenDeath __typename}purchaseLimits{type limit __typename}__typename}reservedForSalesChannel price{...Money __typename}salesChannels{id type __typename}__typename}fragment SellerHubInventoryListingImages on ListingNode{id images{id url label key __typename}__typename}fragment SellerHubInventoryListingVideos on ListingNode{id videos{id url thumbnailUrl duration status __typename}__typename}fragment SellerHubInventoryListingAttribute on ProductAttributeValueNode{value unit attribute{id key label valueType isRequired __typename}__typename}fragment SellerHubInventoryListingUpcomingFlashSale on ListingNode{id upcomingTimedListingEvent{id type ...on FlashSaleListingEvent{discountType discountPercent originalPrice{...Money __typename}discountPrice{...Money __typename}durationSeconds isAvailableForFullPrice __typename}__typename}__typename}fragment SellerHubInventoryListingVariants on ListingNode{id variants{id title quantity productVariant{id images{id url __typename}subtitle quantity price{...Money __typename}attributes{id key label value __typename}__typename}__typename}variantEnabled variantV3Enabled __typename}fragment SellerHubInventoryListingActions on ListingNode{id inventoryActions{actionType label description enabled disabledReason __typename}__typename}fragment ProductCategoryOption on CategoryNode{id label type position hazmatType __typename}fragment SellerHubInventoryListing on ListingNode{id uuid title description status publicStatus updatedAt ...SellerHubInventoryListingPriceFormat ineligibleSalesChannels{type reasons __typename}livestreams{id status title startTime categoryNodes{id label __typename}tags{id name label __typename}__typename}...SellerHubInventoryListingImages ...SellerHubInventoryListingVideos actions{action label description __typename}listingAttributeValues{...SellerHubInventoryListingAttribute __typename}quantity sku product{id externalSource name externalId category{id label hazmatType __typename}shippingProfile{id __typename}hazmatType hasVariants variantOptions{id productAttribute{id key label __typename}__typename}variants{edges{node{id listingId quantity price{...Money __typename}attributes{id key value __typename}__typename}__typename}__typename}__typename}transactionType orders{edges{node{id shipmentId status __typename}__typename}__typename}auctionInfo{bidCount currentPrice{...Money __typename}auctionWinner{id username __typename}endTime __typename}order{id __typename}isEditable uneditableFields costPerItem{...Money __typename}barcode isMyListing ...SellerHubInventoryListingUpcomingFlashSale ...SellerHubInventoryListingVariants ...SellerHubInventoryListingActions __typename}";
+const GET_SUGGESTED_SHIPPING_PROFILES_QUERY =
+  "query GetSuggestedShippingProfiles($categoryId:ID){suggestedShippingProfiles(categoryId:$categoryId){header profiles{...ShippingProfile __typename}__typename}}fragment ShippingProfile on ShippingProfileNode{id name weightAmount weightScale weightName length width height dimensionScale bundleConfiguration{maxBundleSize boxDimensions{length width height scale __typename}flatRateBoxId __typename}incrementalWeight{amount scale __typename}__typename}";
 const GET_SHIPPING_PROFILES_QUERY =
   "query GetShippingProfiles($categoryId:ID){shippingProfiles(categoryId:$categoryId){...ShippingProfile __typename}}fragment ShippingProfile on ShippingProfileNode{id name weightAmount weightScale weightName length width height dimensionScale bundleConfiguration{maxWeight amount __typename} incrementalWeight{amount scale __typename} __typename}";
+const GET_PRIMARY_SHOW_FORMAT_TAGS_QUERY =
+  "query GetPrimaryShowFormatTags($categoryId:ID!){primaryShowFormatTags(categoryId:$categoryId){id name label description canScheduleLive(categoryId:$categoryId)applicationLink __typename}}";
 const GENERATE_MEDIA_UPLOAD_URLS_MUTATION =
   "mutation GenerateMediaUploadUrls($media:[GenerateMediaUploadInput!]!){generateMediaUploadURLs(media:$media){uploads{id method url headers{name value __typename} targetKey expiresAt error __typename} error __typename}}";
 const ADD_LISTING_PHOTO_MUTATION =
@@ -253,6 +259,30 @@ async function saveShippingProfilesToMarketplace(payload) {
   }
 }
 
+async function saveLivestreamTagDirectDescendantsToMarketplace(payload) {
+  const headers = {
+    "content-type": "application/json"
+  };
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  try {
+    await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/livestream-tag-direct-descendants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        source: "whatnot-extension",
+        tabId: payload?.tabId ?? state.tabId ?? null,
+        responsePayload: payload?.responsePayload || {}
+      })
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 async function fetchSellerHubInventoryEditData(tabId) {
   const csrfToken = String(state?.auth?.csrf_token || "").trim();
   if (!csrfToken || csrfToken === "-") {
@@ -318,28 +348,91 @@ async function fetchShippingProfilesData(tabId) {
     headers.authorization = `Bearer ${accessToken}`;
   }
 
-  const template = state?.observedGraphqlTemplates?.GetShippingProfiles;
-  let requestBody = {
-    operationName: "GetShippingProfiles",
-    query: GET_SHIPPING_PROFILES_QUERY,
-    variables: {
-      categoryId: null
+  const attempts = [
+    {
+      operationName: "GetSuggestedShippingProfiles",
+      query: GET_SUGGESTED_SHIPPING_PROFILES_QUERY,
+      url: "https://www.whatnot.com/services/graphql/?operationName=GetSuggestedShippingProfiles&ssr=0",
+      template: state?.observedGraphqlTemplates?.GetSuggestedShippingProfiles
+    },
+    {
+      operationName: "GetShippingProfiles",
+      query: GET_SHIPPING_PROFILES_QUERY,
+      url: "https://www.whatnot.com/services/graphql/?operationName=GetShippingProfiles&ssr=0",
+      template: state?.observedGraphqlTemplates?.GetShippingProfiles
     }
-  };
-  if (template?.requestBody && typeof template.requestBody === "object") {
-    requestBody = structuredClone(template.requestBody);
-    requestBody.operationName = "GetShippingProfiles";
-    if (!requestBody.variables || typeof requestBody.variables !== "object") {
-      requestBody.variables = {};
-    }
-    requestBody.variables = {
-      ...requestBody.variables,
-      categoryId: null
+  ];
+
+  let lastFailure = null;
+  for (const attempt of attempts) {
+    let requestBody = {
+      operationName: attempt.operationName,
+      query: attempt.query,
+      variables: {
+        categoryId: null
+      }
     };
+    if (attempt.template?.requestBody && typeof attempt.template.requestBody === "object") {
+      requestBody = structuredClone(attempt.template.requestBody);
+      requestBody.operationName = attempt.operationName;
+      requestBody.query = attempt.query;
+      if (!requestBody.variables || typeof requestBody.variables !== "object") {
+        requestBody.variables = {};
+      }
+      requestBody.variables = {
+        ...requestBody.variables,
+        categoryId: null
+      };
+    }
+
+    const response = await executeApi(tabId, {
+      url: attempt.url,
+      method: "POST",
+      headers,
+      body: JSON.stringify(requestBody)
+    });
+
+    if (response?.success && response?.data) {
+      return response;
+    }
+    lastFailure = response;
   }
 
+  return {
+    success: false,
+    error: lastFailure?.error || "Failed to fetch shipping profiles from all known endpoints."
+  };
+}
+
+async function fetchLivestreamTagDirectDescendantsData(tabId) {
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1"
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  const requestBody = {
+    operationName: "LivestreamTagDirectDescendants",
+    variables: {
+      sortBy: null,
+      startingEntityId: null,
+      useCase: "LIVESTREAM"
+    },
+    query: LIVESTREAM_TAG_DIRECT_DESCENDANTS_QUERY
+  };
+
   return executeApi(tabId, {
-    url: "https://www.whatnot.com/services/graphql/?operationName=GetShippingProfiles&ssr=0",
+    url: "https://www.whatnot.com/services/graphql/?operationName=LivestreamTagDirectDescendants&ssr=0",
     method: "POST",
     headers,
     body: JSON.stringify(requestBody)
@@ -347,30 +440,81 @@ async function fetchShippingProfilesData(tabId) {
 }
 
 async function syncSellerHubInventoryEditCatalog(tabId) {
-  try {
-    const response = await fetchSellerHubInventoryEditData(tabId);
-    if (!response?.success || !response?.data) {
-      return { success: false, error: response?.error || "Failed to fetch SellerHubInventoryEdit data." };
-    }
-    await saveInventoryEditCategoriesToMarketplace({
-      tabId,
-      responsePayload: response.data
-    });
+  const steps = {
+    categoriesFetch: false,
+    categoriesSave: false,
+    shippingFetch: false,
+    shippingSave: false,
+    livestreamFetch: false,
+    livestreamSave: false,
+  };
+  const errors = [];
 
-    // Recommended flow: call shipping profiles right after categories/subcategories.
+  try {
+    const categoriesResponse = await fetchSellerHubInventoryEditData(tabId);
+    if (categoriesResponse?.success && categoriesResponse?.data) {
+      steps.categoriesFetch = true;
+      const categorySaveResponse = await saveInventoryEditCategoriesToMarketplace({
+        tabId,
+        responsePayload: categoriesResponse.data
+      });
+      steps.categoriesSave = Boolean(categorySaveResponse?.success);
+      if (!steps.categoriesSave) {
+        errors.push(categorySaveResponse?.error || "Failed to save inventory edit categories.");
+      }
+    } else {
+      errors.push(categoriesResponse?.error || "Failed to fetch SellerHubInventoryEdit data.");
+    }
+  } catch (error) {
+    errors.push(error?.message || "Unexpected categories sync error.");
+  }
+
+  // Continue shipping sync even when categories fails.
+  try {
     const shippingResponse = await fetchShippingProfilesData(tabId);
     if (shippingResponse?.success && shippingResponse?.data) {
-      await saveShippingProfilesToMarketplace({
+      steps.shippingFetch = true;
+      const shippingSaveResponse = await saveShippingProfilesToMarketplace({
         tabId,
         categoryId: null,
         responsePayload: shippingResponse.data
       });
+      steps.shippingSave = Boolean(shippingSaveResponse?.success);
+      if (!steps.shippingSave) {
+        errors.push(shippingSaveResponse?.error || "Failed to save shipping profiles.");
+      }
+    } else {
+      errors.push(shippingResponse?.error || "Failed to fetch shipping profiles.");
     }
-
-    return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    errors.push(error?.message || "Unexpected shipping sync error.");
   }
+
+  // Continue livestream tags sync regardless of previous step results.
+  try {
+    const livestreamTagsResponse = await fetchLivestreamTagDirectDescendantsData(tabId);
+    if (livestreamTagsResponse?.success && livestreamTagsResponse?.data) {
+      steps.livestreamFetch = true;
+      const livestreamSaveResponse = await saveLivestreamTagDirectDescendantsToMarketplace({
+        tabId,
+        responsePayload: livestreamTagsResponse.data
+      });
+      steps.livestreamSave = Boolean(livestreamSaveResponse?.success);
+      if (!steps.livestreamSave) {
+        errors.push(livestreamSaveResponse?.error || "Failed to save livestream tag direct descendants.");
+      }
+    } else {
+      errors.push(livestreamTagsResponse?.error || "Failed to fetch LivestreamTagDirectDescendants data.");
+    }
+  } catch (error) {
+    errors.push(error?.message || "Unexpected livestream tags sync error.");
+  }
+
+  return {
+    success: true,
+    steps,
+    errors
+  };
 }
 
 function extractApolloSSRData(htmlString) {
@@ -945,6 +1089,20 @@ async function handlePlatformAction(payload) {
     } finally {
       pendingShowTabRequestContext = null;
     }
+  } else if (payload?.action === "fetch_whatnot_my_lives") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeMyLivesFromPlatform(payload?.sellerId);
+  } else if (payload?.action === "fetch_primary_show_format_tags") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeGetPrimaryShowFormatTagsFromPlatform(payload);
   } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -1226,6 +1384,64 @@ async function executeMyLivesFromPlatform(sellerId) {
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=MyLives&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+}
+
+async function executeGetPrimaryShowFormatTagsFromPlatform(payload) {
+  const categoryId = typeof payload?.categoryId === "string" ? payload.categoryId.trim() : "";
+  if (!categoryId) {
+    return { success: false, error: "categoryId is required for GetPrimaryShowFormatTags." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const variables = { categoryId };
+  const template = state?.observedGraphqlTemplates?.GetPrimaryShowFormatTags;
+  let requestBody = {
+    operationName: "GetPrimaryShowFormatTags",
+    query: GET_PRIMARY_SHOW_FORMAT_TAGS_QUERY,
+    variables,
+  };
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "GetPrimaryShowFormatTags";
+    requestBody.query = GET_PRIMARY_SHOW_FORMAT_TAGS_QUERY;
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      categoryId,
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  return executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=GetPrimaryShowFormatTags&ssr=0",
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody),
@@ -2098,6 +2314,9 @@ function getOperationName(payload) {
   }
   if (payload?.action === "fetch_whatnot_show_tab") {
     return "GetSellerHomeDashboard";
+  }
+  if (payload?.action === "fetch_primary_show_format_tags") {
+    return "GetPrimaryShowFormatTags";
   }
   if (payload?.action === "fetch_shipments_livestreams") {
     return "GetShipmentsLivestreams";

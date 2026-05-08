@@ -1,14 +1,13 @@
 "use client"
 
 import { useAuth } from "@clerk/nextjs"
-import { useEffect, useState } from "react"
-import { Clock3, ExternalLink, Radio } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { ChevronDown, ChevronRight, Clock3, ExternalLink, Radio } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -30,9 +29,13 @@ import {
 } from "@/components/ui/table"
 import {
   fetchWhatnotShowTabData,
-  getWhatnotInventoryCreateFormOptions,
+  fetchWhatnotPrimaryShowFormatTags,
+  getWhatnotLivestreamCategoryTree,
+  scheduleWhatnotShow,
   waitForSessionToken,
+  type WhatnotLivestreamMainCategoryItem,
   type WhatnotLiveShowItem,
+  type WhatnotPrimaryShowFormatTag,
 } from "@/lib/auth"
 
 type FilterType = "All" | "Live" | "Upcoming" | "Past"
@@ -40,13 +43,6 @@ type FilterType = "All" | "Live" | "Upcoming" | "Past"
 const FILTERS: FilterType[] = ["All", "Live", "Upcoming", "Past"]
 const REPEAT_OPTIONS = ["Does not repeat", "Daily", "Weekly", "Monthly"] as const
 const LANGUAGE_OPTIONS = ["English", "Netherlands", "Francais", "Deutsch", "Chienese"] as const
-
-interface ShowCategoryOption {
-  id: string
-  label: string
-  categoryId: string | null
-}
-
 function formatStartTime(startTime: number | null): { date: string; time: string } {
   if (!startTime) return { date: "—", time: "—" }
   const d = new Date(startTime)
@@ -60,20 +56,30 @@ export default function SellerWhatnotShowPage() {
   const { getToken, isLoaded } = useAuth()
   const [shows, setShows] = useState<WhatnotLiveShowItem[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [activeFilter, setActiveFilter] = useState<FilterType>("All")
   const [openScheduleDialog, setOpenScheduleDialog] = useState(false)
-  const [categoryOptions, setCategoryOptions] = useState<ShowCategoryOption[]>([])
+  const [categoryOptions, setCategoryOptions] = useState<WhatnotLivestreamMainCategoryItem[]>([])
+  const [expandedMainCategoryIds, setExpandedMainCategoryIds] = useState<Set<string>>(new Set())
   const [categorySearchValue, setCategorySearchValue] = useState("")
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
+  const [primaryShowFormatOptions, setPrimaryShowFormatOptions] = useState<WhatnotPrimaryShowFormatTag[]>([])
+  const [isPrimaryShowFormatLoading, setIsPrimaryShowFormatLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState("")
   const [scheduleNotice, setScheduleNotice] = useState("")
+  const primaryShowFormatRequestIdRef = useRef(0)
   const [scheduleForm, setScheduleForm] = useState({
     name: "",
     showDate: "",
     showTime: "",
     repeats: "Does not repeat",
     primaryCategoryId: "",
-    subcategoryId: "",
+    selectedCategoryId: "",
+    selectedCategoryLabel: "",
+    primarySellingFormat: "",
+    primarySellingFormatId: "",
+    primarySellingFormatName: "",
+    primarySellingFormatLabel: "",
     moderator: "",
     primaryLanguage: "English",
     showDiscovery: "public" as "public" | "private",
@@ -88,7 +94,7 @@ export default function SellerWhatnotShowPage() {
       try {
         const token = await waitForSessionToken(getToken)
         if (cancelled) return
-        const data = await fetchWhatnotShowTabData(token, 0)
+        const data = await fetchWhatnotShowTabData(token, 0, { forceRefresh: false })
         if (!cancelled) setShows(data.shows ?? [])
       } catch (_e) {
         // shows stays null → empty state shown
@@ -103,6 +109,20 @@ export default function SellerWhatnotShowPage() {
     }
   }, [getToken, isLoaded])
 
+  async function handleRefetchShows() {
+    if (!isLoaded || refreshing) return
+    setRefreshing(true)
+    try {
+      const token = await waitForSessionToken(getToken)
+      const data = await fetchWhatnotShowTabData(token, 0, { forceRefresh: true })
+      setShows(data.shows ?? [])
+    } catch (_error) {
+      // keep previous data on refetch failure
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -110,18 +130,9 @@ export default function SellerWhatnotShowPage() {
       if (!isLoaded) return
       try {
         const token = await waitForSessionToken(getToken)
-        const response = await getWhatnotInventoryCreateFormOptions(token)
+        const response = await getWhatnotLivestreamCategoryTree(token)
         if (cancelled) return
-        const normalized = Array.isArray(response.subcategories)
-          ? response.subcategories
-              .filter((item) => item.id && item.label)
-              .map((item) => ({
-                id: item.id,
-                label: item.label,
-                categoryId: item.categoryId || null,
-              }))
-          : []
-        setCategoryOptions(normalized)
+        setCategoryOptions(Array.isArray(response.categories) ? response.categories : [])
       } catch (_error) {
         if (!cancelled) {
           setCategoryOptions([])
@@ -140,17 +151,77 @@ export default function SellerWhatnotShowPage() {
     setScheduleNotice("")
     setCategorySearchValue("")
     setIsCategoryDropdownOpen(false)
+    setPrimaryShowFormatOptions([])
+    setIsPrimaryShowFormatLoading(false)
+    setExpandedMainCategoryIds(new Set())
     setScheduleForm({
       name: "",
       showDate: "",
       showTime: "",
       repeats: "Does not repeat",
       primaryCategoryId: "",
-      subcategoryId: "",
+      selectedCategoryId: "",
+      selectedCategoryLabel: "",
+      primarySellingFormat: "",
+      primarySellingFormatId: "",
+      primarySellingFormatName: "",
+      primarySellingFormatLabel: "",
       moderator: "",
       primaryLanguage: "English",
       showDiscovery: "public",
     })
+  }
+
+  async function loadPrimaryShowFormatTags(categoryId: string) {
+    const normalizedCategoryId = categoryId.trim()
+    if (!normalizedCategoryId) {
+      setPrimaryShowFormatOptions([])
+      setIsPrimaryShowFormatLoading(false)
+      setScheduleForm((current) => ({
+        ...current,
+        primarySellingFormat: "",
+        primarySellingFormatId: "",
+        primarySellingFormatName: "",
+        primarySellingFormatLabel: "",
+      }))
+      return
+    }
+
+    const requestId = primaryShowFormatRequestIdRef.current + 1
+    primaryShowFormatRequestIdRef.current = requestId
+    setIsPrimaryShowFormatLoading(true)
+    setPrimaryShowFormatOptions([])
+    setScheduleForm((current) => ({
+      ...current,
+      primarySellingFormat: "",
+      primarySellingFormatId: "",
+      primarySellingFormatName: "",
+      primarySellingFormatLabel: "",
+    }))
+
+    try {
+      const token = await waitForSessionToken(getToken)
+      const response = await fetchWhatnotPrimaryShowFormatTags(token, normalizedCategoryId)
+      if (primaryShowFormatRequestIdRef.current !== requestId) {
+        return
+      }
+
+      const nextOptions = Array.isArray(response.primaryShowFormatTags) ? response.primaryShowFormatTags : []
+      setPrimaryShowFormatOptions(nextOptions)
+      if (!nextOptions.length) {
+        setScheduleError("No primary selling format options found for this category.")
+      }
+    } catch (_error) {
+      if (primaryShowFormatRequestIdRef.current !== requestId) {
+        return
+      }
+      setPrimaryShowFormatOptions([])
+      setScheduleError("Failed to load primary selling formats for this category.")
+    } finally {
+      if (primaryShowFormatRequestIdRef.current === requestId) {
+        setIsPrimaryShowFormatLoading(false)
+      }
+    }
   }
 
   function openScheduleModal() {
@@ -158,42 +229,120 @@ export default function SellerWhatnotShowPage() {
     setOpenScheduleDialog(true)
   }
 
-  function handleCategorySelect(subcategoryId: string) {
-    const option = categoryOptions.find((item) => item.id === subcategoryId)
-    setScheduleForm((current) => ({
-      ...current,
-      subcategoryId,
-      primaryCategoryId: option?.categoryId || "",
-    }))
-    if (option) {
-      setCategorySearchValue(option.label)
-    }
-    setIsCategoryDropdownOpen(false)
-    setScheduleError("")
+  function toggleMainCategory(mainCategoryId: string) {
+    setExpandedMainCategoryIds((current) => {
+      const next = new Set(current)
+      if (next.has(mainCategoryId)) {
+        next.delete(mainCategoryId)
+      } else {
+        next.add(mainCategoryId)
+      }
+      return next
+    })
   }
 
-  function handleScheduleSubmit() {
+  function handleMainCategorySelect(mainCategory: WhatnotLivestreamMainCategoryItem) {
+    const hasRefinements = Array.isArray(mainCategory.refinements) && mainCategory.refinements.length > 0
+    setScheduleForm((current) => ({
+      ...current,
+      primaryCategoryId: mainCategory.id,
+      selectedCategoryId: hasRefinements ? "" : mainCategory.id,
+      selectedCategoryLabel: mainCategory.label || mainCategory.name || "",
+      primarySellingFormat: "",
+      primarySellingFormatId: "",
+      primarySellingFormatName: "",
+      primarySellingFormatLabel: "",
+    }))
+    setCategorySearchValue(mainCategory.label || mainCategory.name || "")
+    if (hasRefinements) {
+      setExpandedMainCategoryIds((current) => new Set(current).add(mainCategory.id))
+    } else {
+      setIsCategoryDropdownOpen(false)
+    }
+    setScheduleError("")
+    void loadPrimaryShowFormatTags(mainCategory.id)
+  }
+
+  function handleRefinementCategorySelect(
+    mainCategory: WhatnotLivestreamMainCategoryItem,
+    refinement: { id: string; label: string | null; name: string | null },
+  ) {
+    setScheduleForm((current) => ({
+      ...current,
+      primaryCategoryId: mainCategory.id,
+      selectedCategoryId: refinement.id,
+      selectedCategoryLabel: refinement.label || refinement.name || "",
+      primarySellingFormat: "",
+      primarySellingFormatId: "",
+      primarySellingFormatName: "",
+      primarySellingFormatLabel: "",
+    }))
+    setCategorySearchValue(refinement.label || refinement.name || "")
+    setIsCategoryDropdownOpen(false)
+    setScheduleError("")
+    void loadPrimaryShowFormatTags(mainCategory.id)
+  }
+
+  async function handleScheduleSubmit() {
     if (
       !scheduleForm.name.trim() ||
       !scheduleForm.showDate ||
       !scheduleForm.showTime ||
-      !scheduleForm.subcategoryId ||
+      !scheduleForm.selectedCategoryId ||
+      !scheduleForm.primarySellingFormatId ||
       !scheduleForm.moderator.trim()
     ) {
       setScheduleError("Please fill all required fields before scheduling.")
       return
     }
-    setScheduleError("")
-    setScheduleNotice("Schedule details captured successfully.")
-    setOpenScheduleDialog(false)
+    const schedulePayload = {
+      name: scheduleForm.name.trim(),
+      showDate: scheduleForm.showDate,
+      showTime: scheduleForm.showTime,
+      repeats: scheduleForm.repeats,
+      primarySellingFormat: scheduleForm.primarySellingFormat,
+      primarySellingFormatId: scheduleForm.primarySellingFormatId || null,
+      primarySellingFormatName: scheduleForm.primarySellingFormatName || null,
+      primarySellingFormatLabel: scheduleForm.primarySellingFormatLabel || null,
+      primaryLanguage: scheduleForm.primaryLanguage,
+      discovery: scheduleForm.showDiscovery,
+      moderator: scheduleForm.moderator.trim(),
+      categoryId: scheduleForm.selectedCategoryId,
+      mainCategoryId: scheduleForm.primaryCategoryId || null,
+    }
+    try {
+      const token = await waitForSessionToken(getToken)
+      await scheduleWhatnotShow(token, schedulePayload)
+      setScheduleError("")
+      setScheduleNotice(`Schedule details captured successfully (category id: ${scheduleForm.selectedCategoryId}).`)
+      setOpenScheduleDialog(false)
+    } catch {
+      setScheduleError("Failed to submit schedule payload. Please try again.")
+    }
   }
 
   const rows = (shows ?? []).filter(
     (s) => activeFilter === "All" || s.showType === activeFilter,
   )
-  const filteredCategoryOptions = categoryOptions.filter((option) =>
-    option.label.toLowerCase().includes(categorySearchValue.trim().toLowerCase()),
-  )
+  const filteredCategoryOptions = categoryOptions
+    .map((mainCategory) => {
+      const query = categorySearchValue.trim().toLowerCase()
+      if (!query) {
+        return mainCategory
+      }
+      const mainLabel = `${mainCategory.label || ""} ${mainCategory.name || ""}`.toLowerCase()
+      const refinements = (mainCategory.refinements || []).filter((refinement) =>
+        `${refinement.label || ""} ${refinement.name || ""}`.toLowerCase().includes(query),
+      )
+      if (mainLabel.includes(query) || refinements.length) {
+        return {
+          ...mainCategory,
+          refinements: mainLabel.includes(query) ? mainCategory.refinements : refinements,
+        }
+      }
+      return null
+    })
+    .filter((item): item is WhatnotLivestreamMainCategoryItem => Boolean(item))
 
   const statusLabel = loading
     ? "Fetching shows from Whatnot…"
@@ -213,23 +362,28 @@ export default function SellerWhatnotShowPage() {
 
       <Card className="overflow-hidden border-border/60 bg-card">
         <CardContent className="space-y-4 p-4 md:p-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">{statusLabel}</p>
-            <div className="inline-flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
-              {FILTERS.map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setActiveFilter(f)}
-                  className={[
-                    "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                    activeFilter === f
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  ].join(" ")}
-                >
-                  {f}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => void handleRefetchShows()} disabled={refreshing}>
+                {refreshing ? "Refetching..." : "Refetch"}
+              </Button>
+              <div className="inline-flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+                {FILTERS.map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setActiveFilter(f)}
+                    className={[
+                      "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                      activeFilter === f
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -429,9 +583,15 @@ export default function SellerWhatnotShowPage() {
                     setCategorySearchValue(event.target.value)
                     setScheduleForm((current) => ({
                       ...current,
-                      subcategoryId: "",
+                      selectedCategoryId: "",
+                      selectedCategoryLabel: "",
                       primaryCategoryId: "",
+                      primarySellingFormat: "",
+                      primarySellingFormatId: "",
+                      primarySellingFormatName: "",
+                      primarySellingFormatLabel: "",
                     }))
+                    setPrimaryShowFormatOptions([])
                     setIsCategoryDropdownOpen(true)
                     setScheduleError("")
                   }}
@@ -445,29 +605,104 @@ export default function SellerWhatnotShowPage() {
                 {isCategoryDropdownOpen ? (
                   <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
                     {filteredCategoryOptions.length ? (
-                      filteredCategoryOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
-                          onMouseDown={(event) => {
-                            event.preventDefault()
-                            handleCategorySelect(option.id)
-                          }}
-                        >
-                          {option.label}
-                        </button>
-                      ))
+                      filteredCategoryOptions.map((mainCategory) => {
+                        const hasRefinements = Array.isArray(mainCategory.refinements) && mainCategory.refinements.length > 0
+                        const isExpanded = expandedMainCategoryIds.has(mainCategory.id)
+                        return (
+                          <div key={mainCategory.id} className="rounded-sm">
+                            <div className="flex items-center">
+                              {hasRefinements ? (
+                                <button
+                                  type="button"
+                                  className="mr-1 rounded-sm p-1 text-muted-foreground hover:bg-accent"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => toggleMainCategory(mainCategory.id)}
+                                  aria-label={isExpanded ? "Collapse category" : "Expand category"}
+                                >
+                                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                </button>
+                              ) : (
+                                <span className="mr-1 inline-block h-6 w-6" />
+                              )}
+                              <button
+                                type="button"
+                                className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => handleMainCategorySelect(mainCategory)}
+                              >
+                                {mainCategory.label || mainCategory.name || mainCategory.id}
+                              </button>
+                            </div>
+                            {hasRefinements && isExpanded ? (
+                              <div className="ml-8 space-y-1 pb-1">
+                                {mainCategory.refinements.map((refinement) => (
+                                  <button
+                                    key={refinement.id}
+                                    type="button"
+                                    className="w-full rounded-sm px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => handleRefinementCategorySelect(mainCategory, refinement)}
+                                  >
+                                    {refinement.label || refinement.name || refinement.id}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })
                     ) : (
                       <p className="px-3 py-2 text-sm text-muted-foreground">No category found.</p>
                     )}
                   </div>
                 ) : null}
               </div>
-              {scheduleForm.primaryCategoryId ? (
+              {scheduleForm.selectedCategoryId ? (
                 <p className="text-xs text-muted-foreground">
-                  Selected category id: {scheduleForm.primaryCategoryId}
+                  Selected category id: {scheduleForm.selectedCategoryId}
                 </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Primary selling format *</Label>
+              <Select
+                value={scheduleForm.primarySellingFormatId}
+                onValueChange={(value) => {
+                  const selectedOption = primaryShowFormatOptions.find((option) => option.id === value)
+                  setScheduleForm((current) => ({
+                    ...current,
+                    primarySellingFormatId: selectedOption?.id || "",
+                    primarySellingFormatName: selectedOption?.name || "",
+                    primarySellingFormatLabel: selectedOption?.label || "",
+                    primarySellingFormat: selectedOption?.label || "",
+                  }))
+                  setScheduleError("")
+                }}
+              >
+                <SelectTrigger className="h-10 w-full" disabled={!scheduleForm.primaryCategoryId || isPrimaryShowFormatLoading}>
+                  <SelectValue placeholder="Select primary selling format" />
+                </SelectTrigger>
+                <SelectContent>
+                  {primaryShowFormatOptions
+                    .filter((option) => typeof option.id === "string" && option.id.trim().length > 0)
+                    .map((option) => (
+                    <SelectItem key={option.id || option.name || option.label || "unknown"} value={option.id || ""}>
+                      <div className="space-y-0.5">
+                        <p className="text-sm">{option.label || option.name || option.id || "Unknown format"}</p>
+                        {option.description ? (
+                          <p className="text-xs text-muted-foreground">{option.description}</p>
+                        ) : null}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!scheduleForm.primaryCategoryId ? (
+                <p className="text-xs text-muted-foreground">Select a primary category first.</p>
+              ) : null}
+              {isPrimaryShowFormatLoading ? (
+                <p className="text-xs text-muted-foreground">Loading selling formats...</p>
               ) : null}
             </div>
 
@@ -550,7 +785,7 @@ export default function SellerWhatnotShowPage() {
             <Button variant="outline" type="button" onClick={() => setOpenScheduleDialog(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleScheduleSubmit}>
+            <Button type="button" onClick={() => void handleScheduleSubmit()}>
               Schedule show
             </Button>
           </DialogFooter>

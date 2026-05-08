@@ -6,6 +6,7 @@ const {
   createTikTokVideoPost,
   getWhatnotExtensionStatusData,
   getWhatnotInventoryCreateFormOptionsData,
+  getWhatnotLivestreamCategoryTreeData,
   getWhatnotInventoryLiveData,
   getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
@@ -18,6 +19,7 @@ const {
   removeConnection,
   saveGetSessionApiDataEntry,
   saveWhatnotInventoryEditCategoriesEntry,
+  saveWhatnotLivestreamTagDirectDescendantsEntry,
   saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
@@ -31,6 +33,8 @@ const {
   publishWhatnotInventory,
   fetchMyLiveStatsData,
   fetchWhatnotShowTabData,
+  fetchWhatnotPrimaryShowFormatTagsData,
+  scheduleWhatnotShowData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
 } = require("../controllers/integrationController");
@@ -61,9 +65,12 @@ router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyti
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
+router.get("/whatnot/livestream-category-tree", authenticateRequest, getWhatnotLivestreamCategoryTreeData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData);
 router.post("/whatnot/show-tab", authenticateRequest, fetchWhatnotShowTabData);
+router.post("/whatnot/show-tab/primary-show-format-tags", authenticateRequest, fetchWhatnotPrimaryShowFormatTagsData);
+router.post("/whatnot/show-tab/schedule", authenticateRequest, scheduleWhatnotShowData);
 router.get(
   "/whatnot/shipments-livestreams/current",
   authenticateRequest,
@@ -86,6 +93,11 @@ router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatno
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
 router.post("/whatnot/inventory-edit-categories", authenticateWhatnotExtension, saveWhatnotInventoryEditCategoriesEntry);
 router.post("/whatnot/shipping-profiles", authenticateWhatnotExtension, saveWhatnotShippingProfilesEntry);
+router.post(
+  "/whatnot/livestream-tag-direct-descendants",
+  authenticateWhatnotExtension,
+  saveWhatnotLivestreamTagDirectDescendantsEntry,
+);
 router.post("/whatnot/orders", authenticateWhatnotExtension, saveWhatnotOrdersEntry);
 router.post("/whatnot/profile/bio", authenticateRequest, updateWhatnotBio);
 router.post("/whatnot/media/upload-urls", authenticateRequest, generateWhatnotMediaUploadUrls);

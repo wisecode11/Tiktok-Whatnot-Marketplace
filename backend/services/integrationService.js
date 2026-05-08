@@ -7,11 +7,14 @@ const SellerSession = require("../models/SellerSession");
 const WhatnotOrder = require("../models/WhatnotOrder");
 const WhatnotInventorySnapshot = require("../models/WhatnotInventorySnapshot");
 const WhatnotLiveStatsSnapshot = require("../models/WhatnotLiveStatsSnapshot");
+const WhatnotShowSnapshot = require("../models/WhatnotShowSnapshot");
 const WhatnotShipmentDetail = require("../models/WhatnotShipmentDetail");
 const WhatnotCategory = require("../models/WhatnotCategory");
 const WhatnotSubCategory = require("../models/WhatnotSubCategory");
 const WhatnotHazmatType = require("../models/WhatnotHazmatType");
 const WhatnotProfileShipping = require("../models/WhatnotProfileShipping");
+const WhatnotLivestreamMainCategory = require("../models/WhatnotLivestreamMainCategory");
+const WhatnotLivestreamRefinementCategory = require("../models/WhatnotLivestreamRefinementCategory");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const User = require("../models/Users");
 const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
@@ -2257,6 +2260,121 @@ async function saveWhatnotShippingProfiles({
   };
 }
 
+async function saveWhatnotLivestreamTagDirectDescendants({
+  responsePayload = {},
+}) {
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+  const mainCategories = Array.isArray(payload?.data?.livestreamTaxonomyDirectDescendants)
+    ? payload.data.livestreamTaxonomyDirectDescendants
+    : [];
+  const now = new Date();
+
+  let savedMainCategoryCount = 0;
+  let savedRefinementCount = 0;
+
+  for (const category of mainCategories) {
+    if (!category || typeof category !== "object") {
+      continue;
+    }
+    const mainCategoryId = typeof category.id === "string" ? category.id.trim() : "";
+    if (!mainCategoryId) {
+      continue;
+    }
+
+    await WhatnotLivestreamMainCategory.findOneAndUpdate(
+      {
+        _id: mainCategoryId,
+      },
+      {
+        $set: {
+          name: typeof category.name === "string" ? category.name : null,
+          label: typeof category.label === "string" ? category.label : null,
+          can_schedule_live:
+            typeof category.canScheduleLive === "boolean" ? category.canScheduleLive : false,
+          application_link:
+            typeof category.applicationLink === "string" ? category.applicationLink : null,
+          quiz_link: typeof category.quizLink === "string" ? category.quizLink : null,
+          image_id:
+            category.image && typeof category.image === "object" && typeof category.image.id === "string"
+              ? category.image.id
+              : null,
+          image_url:
+            category.image && typeof category.image === "object" && typeof category.image.smallImage === "string"
+              ? category.image.smallImage
+              : null,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+        new: false,
+        setDefaultsOnInsert: true,
+      },
+    );
+    savedMainCategoryCount += 1;
+
+    const refinements = Array.isArray(category.refinements) ? category.refinements : [];
+    for (const refinement of refinements) {
+      if (!refinement || typeof refinement !== "object") {
+        continue;
+      }
+      const refinementId = typeof refinement.id === "string" ? refinement.id.trim() : "";
+      if (!refinementId) {
+        continue;
+      }
+
+      await WhatnotLivestreamRefinementCategory.findOneAndUpdate(
+        {
+          _id: refinementId,
+        },
+        {
+          $set: {
+            main_category_id: mainCategoryId,
+            name: typeof refinement.name === "string" ? refinement.name : null,
+            label: typeof refinement.label === "string" ? refinement.label : null,
+            can_schedule_live:
+              typeof refinement.canScheduleLive === "boolean" ? refinement.canScheduleLive : false,
+            application_link:
+              typeof refinement.applicationLink === "string" ? refinement.applicationLink : null,
+            quiz_link: typeof refinement.quizLink === "string" ? refinement.quizLink : null,
+            image_id:
+              refinement.image &&
+              typeof refinement.image === "object" &&
+              typeof refinement.image.id === "string"
+                ? refinement.image.id
+                : null,
+            image_url:
+              refinement.image &&
+              typeof refinement.image === "object" &&
+              typeof refinement.image.smallImage === "string"
+                ? refinement.image.smallImage
+                : null,
+            updated_at: now,
+          },
+          $setOnInsert: {
+            created_at: now,
+          },
+        },
+        {
+          upsert: true,
+          new: false,
+          setDefaultsOnInsert: true,
+        },
+      );
+      savedRefinementCount += 1;
+    }
+  }
+
+  return {
+    receivedMainCategoryCount: mainCategories.length,
+    savedMainCategoryCount,
+    savedRefinementCount,
+  };
+}
+
 async function getWhatnotInventoryCreateFormOptions() {
   const [subcategories, shippingProfiles] = await Promise.all([
     WhatnotSubCategory.find({
@@ -2278,6 +2396,40 @@ async function getWhatnotInventoryCreateFormOptions() {
     shippingProfiles: shippingProfiles.map((item) => ({
       id: item.WhatnotProfileShipping_id,
       name: item.name,
+    })),
+  };
+}
+
+async function getWhatnotLivestreamCategoryTree() {
+  const [mainCategories, refinements] = await Promise.all([
+    WhatnotLivestreamMainCategory.find({ _id: { $exists: true, $type: "string" } }).sort({ label: 1, name: 1 }),
+    WhatnotLivestreamRefinementCategory.find({
+      _id: { $exists: true, $type: "string" },
+      main_category_id: { $exists: true, $type: "string" },
+    }).sort({ label: 1, name: 1 }),
+  ]);
+
+  const refinementsByMainCategoryId = new Map();
+  for (const refinement of refinements) {
+    const mainCategoryId = typeof refinement.main_category_id === "string" ? refinement.main_category_id : "";
+    if (!mainCategoryId) continue;
+    if (!refinementsByMainCategoryId.has(mainCategoryId)) {
+      refinementsByMainCategoryId.set(mainCategoryId, []);
+    }
+    refinementsByMainCategoryId.get(mainCategoryId).push({
+      id: refinement._id,
+      mainCategoryId,
+      name: refinement.name || null,
+      label: refinement.label || null,
+    });
+  }
+
+  return {
+    categories: mainCategories.map((item) => ({
+      id: item._id,
+      name: item.name || null,
+      label: item.label || null,
+      refinements: refinementsByMainCategoryId.get(item._id) || [],
     })),
   };
 }
@@ -3131,13 +3283,101 @@ async function fetchMyLiveStatsFromExtension({ clerkUserId, liveId }) {
   };
 }
 
-async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShowsCount = 0 }) {
+function mapLiveShow(live, showType) {
+  return {
+    id: live && live.id ? String(live.id) : null,
+    title: live && live.title ? String(live.title).trim() : null,
+    startTime: live && live.startTime != null ? Number(live.startTime) : null,
+    endTime: live && live.endTime != null ? Number(live.endTime) : null,
+    status: live && live.status ? String(live.status) : null,
+    userId: live && live.userId ? String(live.userId) : null,
+    showType,
+    link: live && live.id ? `https://www.whatnot.com/live/${live.id}` : null,
+  };
+}
+
+function buildShowsFromMyLivesPayload(myLivesPayload) {
+  const myLivesData = myLivesPayload && myLivesPayload.data && typeof myLivesPayload.data === "object"
+    ? myLivesPayload.data
+    : null;
+
+  const currentLivesRaw = myLivesData && Array.isArray(myLivesData.currentLives) ? myLivesData.currentLives : [];
+  const upcomingLivesRaw = myLivesData && Array.isArray(myLivesData.upcomingLives) ? myLivesData.upcomingLives : [];
+  const pastLivesRaw = myLivesData && Array.isArray(myLivesData.pastLives) ? myLivesData.pastLives : [];
+
+  const shows = [
+    ...currentLivesRaw.map((l) => mapLiveShow(l, "Live")),
+    ...upcomingLivesRaw.map((l) => mapLiveShow(l, "Upcoming")),
+    ...pastLivesRaw.map((l) => mapLiveShow(l, "Past")),
+  ];
+
+  return {
+    shows,
+    currentCount: currentLivesRaw.length,
+    upcomingCount: upcomingLivesRaw.length,
+    pastCount: pastLivesRaw.length,
+  };
+}
+
+async function saveWhatnotShowSnapshot({
+  clerkUserId,
+  whatnotSellerId,
+  myLivesPayload,
+  shows,
+  source = "whatnot-extension",
+}) {
+  const now = new Date();
+  await WhatnotShowSnapshot.findOneAndUpdate(
+    {
+      platform: "whatnot",
+      clerk_user_id: clerkUserId,
+    },
+    {
+      $set: {
+        whatnot_seller_id: whatnotSellerId || null,
+        source,
+        my_lives_payload: myLivesPayload && typeof myLivesPayload === "object" ? myLivesPayload : {},
+        shows_payload: Array.isArray(shows) ? shows : [],
+        synced_at: now,
+        updated_at: now,
+      },
+      $setOnInsert: {
+        created_at: now,
+      },
+    },
+    {
+      upsert: true,
+      new: false,
+      setDefaultsOnInsert: true,
+    },
+  );
+}
+
+async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShowsCount = 0, forceRefresh = false }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
     throw createHttpError(400, "Missing Clerk user id.");
   }
 
-  await findLocalUser(normalizedClerkUserId);
+  const user = await findLocalUser(normalizedClerkUserId);
+
+  if (!forceRefresh) {
+    const cachedSnapshot = await WhatnotShowSnapshot.findOne({
+      platform: "whatnot",
+      clerk_user_id: normalizedClerkUserId,
+    }).sort({ updated_at: -1 });
+
+    if (cachedSnapshot && Array.isArray(cachedSnapshot.shows_payload) && cachedSnapshot.shows_payload.length) {
+      return {
+        sellerId: cachedSnapshot.whatnot_seller_id || user.whatnot_seller_id || null,
+        upcomingShowUserId: null,
+        upcomingShows: [],
+        shows: cachedSnapshot.shows_payload,
+        liveReadiness: null,
+        sellerHomeDashboard: null,
+      };
+    }
+  }
 
   const bridgeState = getWhatnotExtensionBridgeState();
   const authPayload = bridgeState && bridgeState.extensionAuthState
@@ -3156,6 +3396,52 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
       403,
       "Extension is not connected for this seller. Sign in on the extension with the same account.",
     );
+  }
+
+  const existingSellerId = user && typeof user.whatnot_seller_id === "string" ? user.whatnot_seller_id.trim() : "";
+
+  if (existingSellerId) {
+    const myLivesAction = await requestWhatnotAction({
+      action: "fetch_whatnot_my_lives",
+      clerkUserId: normalizedClerkUserId,
+      sellerId: existingSellerId,
+    }, 300000);
+
+    if (!myLivesAction || !myLivesAction.success) {
+      throw createHttpError(
+        (myLivesAction && myLivesAction.status) || 502,
+        (myLivesAction && myLivesAction.error) || "Failed to fetch MyLives through extension.",
+        myLivesAction || null,
+      );
+    }
+
+    const myLivesPayload = myLivesAction.data && typeof myLivesAction.data === "object" ? myLivesAction.data : {};
+    const myLivesErrors = Array.isArray(myLivesPayload.errors) ? myLivesPayload.errors : [];
+    if (myLivesErrors.length) {
+      const firstError = myLivesErrors[0] && myLivesErrors[0].message
+        ? String(myLivesErrors[0].message)
+        : "MyLives GraphQL returned errors.";
+      throw createHttpError(502, firstError, myLivesPayload);
+    }
+
+    const { shows, currentCount, upcomingCount, pastCount } = buildShowsFromMyLivesPayload(myLivesPayload);
+    console.log(`[Whatnot Show Tab] MyLives (direct): ${currentCount} live, ${upcomingCount} upcoming, ${pastCount} past.`);
+
+    await saveWhatnotShowSnapshot({
+      clerkUserId: normalizedClerkUserId,
+      whatnotSellerId: existingSellerId,
+      myLivesPayload,
+      shows,
+    });
+
+    return {
+      sellerId: existingSellerId,
+      upcomingShowUserId: null,
+      upcomingShows: [],
+      shows,
+      liveReadiness: null,
+      sellerHomeDashboard: null,
+    };
   }
 
   console.log("[Whatnot Show Tab] Waiting for extension response...");
@@ -3261,35 +3547,9 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
     console.log("Upcoming show user ID: <missing>");
   }
 
-  const myLivesPayload = body.myLives && typeof body.myLives === "object" ? body.myLives : null;
-  const myLivesData = myLivesPayload && myLivesPayload.data && typeof myLivesPayload.data === "object"
-    ? myLivesPayload.data
-    : null;
-
-  function mapLiveShow(live, showType) {
-    return {
-      id: live.id ? String(live.id) : null,
-      title: live.title ? String(live.title).trim() : null,
-      startTime: live.startTime != null ? Number(live.startTime) : null,
-      endTime: live.endTime != null ? Number(live.endTime) : null,
-      status: live.status ? String(live.status) : null,
-      userId: live.userId ? String(live.userId) : null,
-      showType,
-      link: live.id ? `https://www.whatnot.com/live/${live.id}` : null,
-    };
-  }
-
-  const currentLivesRaw = myLivesData && Array.isArray(myLivesData.currentLives) ? myLivesData.currentLives : [];
-  const upcomingLivesRaw = myLivesData && Array.isArray(myLivesData.upcomingLives) ? myLivesData.upcomingLives : [];
-  const pastLivesRaw = myLivesData && Array.isArray(myLivesData.pastLives) ? myLivesData.pastLives : [];
-
-  const shows = [
-    ...currentLivesRaw.map((l) => mapLiveShow(l, "Live")),
-    ...upcomingLivesRaw.map((l) => mapLiveShow(l, "Upcoming")),
-    ...pastLivesRaw.map((l) => mapLiveShow(l, "Past")),
-  ];
-
-  console.log(`[Whatnot Show Tab] MyLives: ${currentLivesRaw.length} live, ${upcomingLivesRaw.length} upcoming, ${pastLivesRaw.length} past.`);
+  const myLivesPayload = body.myLives && typeof body.myLives === "object" ? body.myLives : {};
+  const { shows, currentCount, upcomingCount, pastCount } = buildShowsFromMyLivesPayload(myLivesPayload);
+  console.log(`[Whatnot Show Tab] MyLives: ${currentCount} live, ${upcomingCount} upcoming, ${pastCount} past.`);
 
   const edges = dashboardPayload &&
     dashboardPayload.data &&
@@ -3310,6 +3570,13 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
       raw: node,
     }));
 
+  await saveWhatnotShowSnapshot({
+    clerkUserId: normalizedClerkUserId,
+    whatnotSellerId: sellerId || null,
+    myLivesPayload,
+    shows,
+  });
+
   return {
     sellerId: sellerId || null,
     upcomingShowUserId: upcomingShowUserId || null,
@@ -3317,6 +3584,104 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
     shows,
     liveReadiness: readinessPayload,
     sellerHomeDashboard: dashboardPayload,
+  };
+}
+
+async function fetchWhatnotPrimaryShowFormatTagsFromExtension({ clerkUserId, categoryId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+  await findLocalUser(normalizedClerkUserId);
+
+  const normalizedCategoryId = typeof categoryId === "string" ? categoryId.trim() : "";
+  if (!normalizedCategoryId) {
+    throw createHttpError(400, "categoryId is required.");
+  }
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "fetch_primary_show_format_tags",
+    clerkUserId: normalizedClerkUserId,
+    categoryId: normalizedCategoryId,
+  }, 120000);
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to fetch primary show format tags through extension.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult.data && typeof actionResult.data === "object" ? actionResult.data : {};
+  const gqlErrors = Array.isArray(body.errors) ? body.errors : [];
+  if (gqlErrors.length) {
+    const firstError = gqlErrors[0] && gqlErrors[0].message
+      ? String(gqlErrors[0].message)
+      : "GetPrimaryShowFormatTags GraphQL returned errors.";
+    throw createHttpError(502, firstError, body);
+  }
+
+  const tags = body &&
+    body.data &&
+    Array.isArray(body.data.primaryShowFormatTags)
+    ? body.data.primaryShowFormatTags
+    : [];
+
+  return {
+    categoryId: normalizedCategoryId,
+    primaryShowFormatTags: tags.map((tag) => ({
+      id: tag && tag.id ? String(tag.id) : null,
+      name: tag && tag.name ? String(tag.name) : null,
+      label: tag && tag.label ? String(tag.label) : null,
+      description: tag && tag.description ? String(tag.description) : null,
+      canScheduleLive: Boolean(tag && tag.canScheduleLive),
+      applicationLink: tag && tag.applicationLink ? String(tag.applicationLink) : null,
+      raw: tag && typeof tag === "object" ? tag : {},
+    })),
+    response: body,
+  };
+}
+
+async function scheduleWhatnotShowFromPlatform({ clerkUserId, schedulePayload = {} }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+  await findLocalUser(normalizedClerkUserId);
+
+  const payload = schedulePayload && typeof schedulePayload === "object" ? schedulePayload : {};
+  const categoryId = typeof payload.categoryId === "string" ? payload.categoryId.trim() : "";
+  const showName = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (!showName || !categoryId) {
+    throw createHttpError(400, "name and categoryId are required.");
+  }
+
+  // Placeholder for final Whatnot scheduling mutation hookup.
+  return {
+    success: true,
+    accepted: true,
+    schedulePayload: payload,
+    message: "Schedule payload received. Whatnot mutation hook can be attached next.",
   };
 }
 
@@ -3885,11 +4250,15 @@ module.exports = {
   saveWhatnotSellerSession,
   saveWhatnotInventoryEditCategories,
   saveWhatnotShippingProfiles,
+  saveWhatnotLivestreamTagDirectDescendants,
   getWhatnotInventoryCreateFormOptions,
+  getWhatnotLivestreamCategoryTree,
   getWhatnotOrders,
   syncWhatnotOrdersFromExtension,
   fetchMyLiveStatsFromExtension,
   fetchWhatnotShowTabDataFromExtension,
+  fetchWhatnotPrimaryShowFormatTagsFromExtension,
+  scheduleWhatnotShowFromPlatform,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 };
