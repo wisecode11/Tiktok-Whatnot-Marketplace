@@ -1,3 +1,5 @@
+const { searchTiktokShopOrders, getTiktokShopOrderDetail } = require("../services/tiktokShopService");
+
 const {
   checkStripeAccountStatus,
   createConnectionSession,
@@ -465,6 +467,39 @@ async function syncWhatnotOrders(req, res) {
   }
 }
 
+async function searchTikTokShopOrdersData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await searchTiktokShopOrders({
+      clerkUserId: req.auth.userId,
+      filters: body.filters,
+      pageSize: body.pageSize != null ? Number(body.pageSize) : undefined,
+      pageToken: typeof body.pageToken === "string" ? body.pageToken : undefined,
+      sortOrder: body.sortOrder === "ASC" || body.sortOrder === "DESC" ? body.sortOrder : undefined,
+      sortField: typeof body.sortField === "string" ? body.sortField : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getTikTokShopOrderDetailData(req, res) {
+  try {
+    const rawId =
+      typeof req.params.orderId === "string"
+        ? req.params.orderId
+        : String(req.params.orderId ?? "");
+    const result = await getTiktokShopOrderDetail({
+      clerkUserId: req.auth.userId,
+      orderId: decodeURIComponent(rawId.trim()),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function updateWhatnotBio(req, res) {
   try {
     const result = await updateWhatnotBioFromPlatform({
@@ -550,6 +585,8 @@ module.exports = {
   getTikTokPostStatusData,
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
+  searchTikTokShopOrdersData,
+  getTikTokShopOrderDetailData,
   getWhatnotOrders: listWhatnotOrders,
   syncWhatnotOrders,
   listConnections,

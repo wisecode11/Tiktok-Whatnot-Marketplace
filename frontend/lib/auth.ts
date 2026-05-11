@@ -501,6 +501,33 @@ export interface WhatnotOrdersSyncResponse {
   fetchedCount: number | null
 }
 
+/** Proxies TikTok Shop Partner API `POST /order/202309/orders/search`. */
+export interface TikTokShopOrdersSearchResponse {
+  configured: boolean
+  /** True when Partner app + shop token + shop_cipher are wired and live API calls are used (not demo data). */
+  shopConnected: boolean
+  /** Demo dataset from the server when shop is not connected yet. */
+  isMockData: boolean
+  reason?: string | null
+  /** Human-readable UX note (e.g. mock mode explanation). */
+  note?: string | null
+  totalCount: number
+  nextPageToken: string | null
+  orders: Record<string, unknown>[]
+  requestId?: string | null
+}
+
+/** `GET /order/202309/orders` (proxied) single order detail envelope. */
+export interface TikTokShopOrderDetailResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  order: Record<string, unknown> | null
+  requestId?: string | null
+}
+
 export interface WhatnotMoneySnapshot {
   amount?: number
   currency?: string
@@ -990,6 +1017,34 @@ export async function syncWhatnotOrders(token: string) {
     token,
     method: "POST",
   })
+}
+
+export async function searchTikTokShopOrders(
+  token: string,
+  payload?: {
+    filters?: Record<string, unknown>
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  return request<TikTokShopOrdersSearchResponse>("/api/integrations/tiktok/shop/orders/search", {
+    token,
+    method: "POST",
+    body: (payload || {}) as Record<string, unknown>,
+  })
+}
+
+export async function getTikTokShopOrderDetail(token: string, orderId: string) {
+  const id = typeof orderId === "string" ? orderId.trim() : ""
+  if (!id) {
+    throw new Error("orderId is required.")
+  }
+  return request<TikTokShopOrderDetailResponse>(
+    `/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}`,
+    { token },
+  )
 }
 
 export async function fetchWhatnotMyLiveStats(token: string, liveId: string) {

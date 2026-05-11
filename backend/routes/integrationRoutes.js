@@ -13,6 +13,8 @@ const {
   getTikTokPostStatusData,
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
+  searchTikTokShopOrdersData,
+  getTikTokShopOrderDetailData,
   getWhatnotOrders,
   syncWhatnotOrders,
   listConnections,
@@ -62,6 +64,8 @@ router.get("/accounts", authenticateRequest, listConnections);
 router.get("/tiktok/creator-info", authenticateRequest, getTikTokCreatorInfoData);
 router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
+router.post("/tiktok/shop/orders/search", authenticateRequest, searchTikTokShopOrdersData);
+router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
