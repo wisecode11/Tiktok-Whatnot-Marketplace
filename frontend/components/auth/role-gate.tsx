@@ -1,6 +1,6 @@
 "use client"
 
-import { ReactNode, useEffect, useMemo, useState } from "react"
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { Loader2 } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
@@ -22,6 +22,12 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
   const [isChecking, setIsChecking] = useState(true)
 
   const allowedKey = useMemo(() => allowedRoles.join("|"), [allowedRoles])
+  const allowedSet = useMemo(() => new Set(allowedRoles), [allowedKey])
+  const getTokenRef = useRef(getToken)
+
+  useEffect(() => {
+    getTokenRef.current = getToken
+  }, [getToken])
 
   useEffect(() => {
     let cancelled = false
@@ -37,7 +43,7 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
       }
 
       try {
-        const token = await getToken()
+        const token = await getTokenRef.current()
 
         if (!token) {
           router.replace(unauthenticatedPath)
@@ -50,7 +56,7 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
           return
         }
 
-        if (!allowedRoles.includes(user.role)) {
+        if (!allowedSet.has(user.role)) {
           router.replace(redirectTo)
           return
         }
@@ -91,7 +97,7 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
     return () => {
       cancelled = true
     }
-  }, [allowedKey, allowedRoles, getToken, isLoaded, pathname, router, unauthenticatedPath, userId])
+  }, [allowedKey, allowedSet, isLoaded, pathname, router, unauthenticatedPath, userId])
 
   if (isChecking || !authorizedUser) {
     return (

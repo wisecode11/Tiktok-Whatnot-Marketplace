@@ -34,7 +34,7 @@ const sellerNavigation = [
       { title: "Connect Platforms", href: "/seller", icon: Rocket },
       { title: "Dashboard", href: "/seller/dashboard", icon: LayoutDashboard },
       { title: "Inventory Management", href: "/seller/inventory-management", icon: PackageSearch, requiresSubscription: true },
-      { title: "Pending Inventory", href: "/seller/pending-inventory", icon: Clock4, requiresSubscription: true },
+      { title: "Staff Listings", href: "/seller/pending-inventory", icon: Clock4, requiresSubscription: true },
       { title: "Calendar", href: "/seller/calendar", icon: CalendarDays, requiresSubscription: true },
       { title: "Whatnot Show", href: "/seller/whatnot-show", icon: Radio, requiresSubscription: true },
       { title: "Analytics", href: "/seller/analytics", icon: BarChart3, requiresSubscription: true },

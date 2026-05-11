@@ -16,6 +16,7 @@ const aiRoutes = require("./routes/aiRoutes");
 const staffRoutes = require("./routes/staffRoutes");
 const { initializeChatSocket } = require("./socket/chatSocket");
 const { initializeWhatnotExtensionBridge } = require("./socket/whatnotExtensionBridge");
+const { startPendingInventoryAutoSyncWorker } = require("./services/pendingInventoryService");
 const models = require("./models");
 
 const app = express();
@@ -79,6 +80,7 @@ async function start() {
   const server = http.createServer(app);
   initializeChatSocket({ server, allowedOrigins });
   initializeWhatnotExtensionBridge({ server });
+  startPendingInventoryAutoSyncWorker();
   server.listen(port, () => console.log(`Server running on ${port}`));
 }
 

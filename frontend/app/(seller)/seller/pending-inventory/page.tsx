@@ -91,7 +91,7 @@ export default function SellerPendingInventoryPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Pending Inventory" description="Products created by staff and waiting to be synced to Whatnot.">
+      <PageHeader title="Staff Listings" description="Products created by staff and waiting to be synced to Whatnot.">
         <Button variant="outline" onClick={() => void loadPendingInventory(true)} disabled={isRefreshing}>
           {isRefreshing ? (
             <span className="inline-flex items-center gap-2">
@@ -120,15 +120,16 @@ export default function SellerPendingInventoryPage() {
                   <TableHead>Staff</TableHead>
                   <TableHead>Qty</TableHead>
                   <TableHead>Price (USD)</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Sync Error</TableHead>
+                  <TableHead className="w-[130px]">Status</TableHead>
+                  <TableHead className="w-[120px]">Sync Error</TableHead>
+                  <TableHead className="w-[170px]">Created By</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Loading pending inventory...
@@ -157,13 +158,17 @@ export default function SellerPendingInventoryPage() {
                             {status}
                           </span>
                         </TableCell>
-                        <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                        <TableCell className="max-w-[120px] truncate text-xs text-muted-foreground">
                           {item.syncError || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {item.createdByName || "-"}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
                             type="button"
                             size="sm"
+                            className="h-8 px-3 text-xs"
                             onClick={() => void handleSyncProduct(item.id)}
                             disabled={!isSyncable || isSyncing}
                           >
@@ -173,7 +178,7 @@ export default function SellerPendingInventoryPage() {
                                 Syncing...
                               </span>
                             ) : (
-                              "Sync Product"
+                              "Sync"
                             )}
                           </Button>
                         </TableCell>
@@ -182,7 +187,7 @@ export default function SellerPendingInventoryPage() {
                   })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                       No pending inventory created by staff yet.
                     </TableCell>
                   </TableRow>

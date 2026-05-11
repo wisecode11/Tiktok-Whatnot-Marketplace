@@ -5,7 +5,15 @@ const WhatnotSubCategory = require("../models/WhatnotSubCategory");
 const {
   createWhatnotListingFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
+  getWhatnotExtensionConnectionStatus,
 } = require("./integrationService");
+
+const AUTO_SYNC_INTERVAL_MS = Number(process.env.PENDING_INVENTORY_AUTO_SYNC_INTERVAL_MS || 15000);
+const AUTO_SYNC_BATCH_SIZE = Number(process.env.PENDING_INVENTORY_AUTO_SYNC_BATCH_SIZE || 5);
+
+let autoSyncWorkerTimer = null;
+let autoSyncWorkerRunning = false;
+const inFlightPendingSyncIds = new Set();
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -16,6 +24,40 @@ function createHttpError(status, message, details) {
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isRetryableAutoSyncError(error) {
+  const status = Number(error && error.status);
+  if ([401, 403, 503, 504].includes(status)) {
+    return true;
+  }
+
+  const message = normalizeString(error && error.message).toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return [
+    "extension",
+    "offline",
+    "reconnect",
+    "relogin",
+    "timed out",
+    "timeout",
+    "not connected",
+    "disconnected",
+  ].some((token) => message.includes(token));
+}
+
+function scheduleAutoSyncForPendingItem(pendingInventoryId) {
+  const normalizedPendingInventoryId = normalizeString(pendingInventoryId);
+  if (!normalizedPendingInventoryId) {
+    return;
+  }
+
+  setTimeout(() => {
+    void autoSyncPendingInventoryById({ pendingInventoryId: normalizedPendingInventoryId });
+  }, 0);
 }
 
 async function findAuthenticatedUser(clerkUserId) {
@@ -134,6 +176,7 @@ async function createPendingInventory({
   });
 
   await pendingInventory.save();
+  scheduleAutoSyncForPendingItem(pendingInventory._id);
 
   return {
     item: {
@@ -226,25 +269,7 @@ function extractImageIdFromAddListingPhotoResponse(payload) {
   return value;
 }
 
-async function syncPendingInventoryForSeller({ clerkUserId, pendingInventoryId }) {
-  const user = await findAuthenticatedUser(clerkUserId);
-  if (user.user_type !== "seller") {
-    throw createHttpError(403, "Only sellers can sync pending inventory.");
-  }
-
-  const normalizedPendingId = normalizeString(pendingInventoryId);
-  if (!normalizedPendingId) {
-    throw createHttpError(400, "pendingInventoryId is required.");
-  }
-
-  const pendingItem = await PendingInventory.findOne({
-    _id: normalizedPendingId,
-    owner_seller_user_id: user._id,
-  });
-  if (!pendingItem) {
-    throw createHttpError(404, "Pending inventory item not found.");
-  }
-
+async function syncPendingInventoryItem({ pendingItem, markFailedOnError = true }) {
   const imagePayload = pendingItem.image_payload && typeof pendingItem.image_payload === "object"
     ? pendingItem.image_payload
     : null;
@@ -277,8 +302,7 @@ async function syncPendingInventoryForSeller({ clerkUserId, pendingInventoryId }
     throw createHttpError(502, "Failed to resolve image id from AddListingPhoto response.", uploadResponse);
   }
 
-  const imageId = imageIdFromPhoto;
-  pendingItem.image_id = imageId;
+  pendingItem.image_id = imageIdFromPhoto;
 
   try {
     const listingResponse = await createWhatnotListingFromPlatform({
@@ -289,7 +313,7 @@ async function syncPendingInventoryForSeller({ clerkUserId, pendingInventoryId }
       subcategoryId: pendingItem.subcategory_id,
       shippingProfileId: pendingItem.shipping_profile_id,
       hazmatType: pendingItem.hazmat_type,
-      imageId,
+      imageId: imageIdFromPhoto,
     });
 
     const listingNode =
@@ -322,16 +346,134 @@ async function syncPendingInventoryForSeller({ clerkUserId, pendingInventoryId }
       message: "Pending inventory synced successfully.",
     };
   } catch (error) {
-    pendingItem.status = "FAILED";
+    const shouldRetryInBackground = !markFailedOnError && isRetryableAutoSyncError(error);
+
+    if (!shouldRetryInBackground) {
+      pendingItem.status = "FAILED";
+    }
+
     pendingItem.sync_error = error && error.message ? String(error.message) : "Sync failed.";
     pendingItem.updated_at = new Date();
     await pendingItem.save();
+
+    if (shouldRetryInBackground) {
+      return {
+        item: {
+          id: pendingItem._id,
+          status: pendingItem.status,
+          imageId: pendingItem.image_id || "",
+          syncedListingId: pendingItem.synced_listing_id,
+          syncedListingUuid: pendingItem.synced_listing_uuid,
+          syncedAt: pendingItem.synced_at,
+          syncError: pendingItem.sync_error,
+        },
+        message: "Pending inventory kept in queue. Auto-sync will retry when extension is connected.",
+      };
+    }
+
     throw error;
   }
+}
+
+async function autoSyncPendingInventoryById({ pendingInventoryId }) {
+  const normalizedPendingId = normalizeString(pendingInventoryId);
+  if (!normalizedPendingId || inFlightPendingSyncIds.has(normalizedPendingId)) {
+    return;
+  }
+
+  inFlightPendingSyncIds.add(normalizedPendingId);
+  try {
+    const pendingItem = await PendingInventory.findOne({ _id: normalizedPendingId });
+    if (!pendingItem || pendingItem.status !== "PENDING") {
+      return;
+    }
+
+    const ownerSeller = await User.findOne({ _id: pendingItem.owner_seller_user_id });
+    const ownerSellerClerkUserId = normalizeString(ownerSeller && ownerSeller.clerk_user_id);
+    if (!ownerSellerClerkUserId) {
+      return;
+    }
+
+    const extensionStatus = await getWhatnotExtensionConnectionStatus({
+      clerkUserId: ownerSellerClerkUserId,
+    });
+
+    if (!extensionStatus || !extensionStatus.connected) {
+      return;
+    }
+
+    await syncPendingInventoryItem({ pendingItem, markFailedOnError: false });
+  } catch (_error) {
+    // Keep worker resilient; item-level status handling is done in syncPendingInventoryItem.
+  } finally {
+    inFlightPendingSyncIds.delete(normalizedPendingId);
+  }
+}
+
+async function processPendingInventoryAutoSyncQueue() {
+  if (autoSyncWorkerRunning) {
+    return;
+  }
+
+  autoSyncWorkerRunning = true;
+  try {
+    const pendingItems = await PendingInventory.find({
+      status: "PENDING",
+      source: "staff-dashboard",
+    })
+      .sort({ created_at: 1 })
+      .limit(Math.max(1, AUTO_SYNC_BATCH_SIZE));
+
+    for (const item of pendingItems) {
+      // eslint-disable-next-line no-await-in-loop
+      await autoSyncPendingInventoryById({ pendingInventoryId: item._id });
+    }
+  } finally {
+    autoSyncWorkerRunning = false;
+  }
+}
+
+function startPendingInventoryAutoSyncWorker() {
+  if (autoSyncWorkerTimer) {
+    return;
+  }
+
+  autoSyncWorkerTimer = setInterval(() => {
+    void processPendingInventoryAutoSyncQueue();
+  }, Math.max(5000, AUTO_SYNC_INTERVAL_MS));
+
+  if (typeof autoSyncWorkerTimer.unref === "function") {
+    autoSyncWorkerTimer.unref();
+  }
+
+  void processPendingInventoryAutoSyncQueue();
+}
+
+async function syncPendingInventoryForSeller({ clerkUserId, pendingInventoryId }) {
+  const user = await findAuthenticatedUser(clerkUserId);
+  if (user.user_type !== "seller") {
+    throw createHttpError(403, "Only sellers can sync pending inventory.");
+  }
+
+  const normalizedPendingId = normalizeString(pendingInventoryId);
+  if (!normalizedPendingId) {
+    throw createHttpError(400, "pendingInventoryId is required.");
+  }
+
+  const pendingItem = await PendingInventory.findOne({
+    _id: normalizedPendingId,
+    owner_seller_user_id: user._id,
+  });
+  if (!pendingItem) {
+    throw createHttpError(404, "Pending inventory item not found.");
+  }
+
+  return syncPendingInventoryItem({ pendingItem, markFailedOnError: true });
 }
 
 module.exports = {
   createPendingInventory,
   listPendingInventoryForSeller,
+  startPendingInventoryAutoSyncWorker,
   syncPendingInventoryForSeller,
 };
