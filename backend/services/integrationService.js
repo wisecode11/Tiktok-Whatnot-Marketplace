@@ -2198,6 +2198,51 @@ async function saveWhatnotInventoryEditCategories({
   };
 }
 
+/**
+ * Whatnot returns either:
+ * - `data.shippingProfiles` (flat list) — e.g. GetShippingProfiles
+ * - `data.suggestedShippingProfiles` — array of sections `{ header, profiles: [...] }` — GetSuggestedShippingProfiles
+ */
+function collectWhatnotShippingProfileNodes(responsePayload) {
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+  const data = payload.data && typeof payload.data === "object" ? payload.data : null;
+  if (!data) {
+    return [];
+  }
+
+  const byId = new Map();
+
+  const flat = Array.isArray(data.shippingProfiles) ? data.shippingProfiles : [];
+  for (const profile of flat) {
+    if (!profile || typeof profile !== "object") {
+      continue;
+    }
+    const id = typeof profile.id === "string" ? profile.id.trim() : "";
+    if (id) {
+      byId.set(id, profile);
+    }
+  }
+
+  const sections = Array.isArray(data.suggestedShippingProfiles) ? data.suggestedShippingProfiles : [];
+  for (const section of sections) {
+    if (!section || typeof section !== "object") {
+      continue;
+    }
+    const inner = Array.isArray(section.profiles) ? section.profiles : [];
+    for (const profile of inner) {
+      if (!profile || typeof profile !== "object") {
+        continue;
+      }
+      const id = typeof profile.id === "string" ? profile.id.trim() : "";
+      if (id && !byId.has(id)) {
+        byId.set(id, profile);
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
 async function saveWhatnotShippingProfiles({
   responsePayload = {},
   tabId = null,
@@ -2205,7 +2250,7 @@ async function saveWhatnotShippingProfiles({
   categoryId = null,
 }) {
   const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
-  const shippingProfiles = Array.isArray(payload?.data?.shippingProfiles) ? payload.data.shippingProfiles : [];
+  const shippingProfiles = collectWhatnotShippingProfileNodes(payload);
   const extensionTabId = Number.isFinite(Number(tabId)) ? Number(tabId) : null;
   const normalizedCategoryId = typeof categoryId === "string" && categoryId.trim() ? categoryId.trim() : null;
   const now = new Date();
@@ -2257,6 +2302,12 @@ async function saveWhatnotShippingProfiles({
   return {
     receivedProfileCount: shippingProfiles.length,
     savedProfileCount,
+    sources: {
+      flatShippingProfiles: Array.isArray(payload?.data?.shippingProfiles) ? payload.data.shippingProfiles.length : 0,
+      suggestedSections: Array.isArray(payload?.data?.suggestedShippingProfiles)
+        ? payload.data.suggestedShippingProfiles.length
+        : 0,
+    },
   };
 }
 
