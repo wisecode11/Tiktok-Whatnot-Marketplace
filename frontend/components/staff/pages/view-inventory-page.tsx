@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { ImagePlus, Loader2, Plus } from "lucide-react"
 
@@ -149,6 +149,8 @@ function toInventoryRows(payload: WhatnotInventoryLiveResponse | null): Inventor
 
 export function ViewInventoryPage() {
   const { getToken, isLoaded } = useAuth()
+  const getTokenRef = useRef(getToken)
+  const hasLoadedInventoryRef = useRef(false)
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -173,6 +175,10 @@ export function ViewInventoryPage() {
     hazardousMaterials: "",
   })
 
+  useEffect(() => {
+    getTokenRef.current = getToken
+  }, [getToken])
+
   const loadInventory = useCallback(
     async (isManualRefresh: boolean) => {
       try {
@@ -183,7 +189,7 @@ export function ViewInventoryPage() {
         }
 
         setError(null)
-        const token = await waitForSessionToken(getToken)
+        const token = await waitForSessionToken(getTokenRef.current)
         const result = await syncWhatnotInventoryLive(token, "ACTIVE")
         setRows(toInventoryRows(result))
         setLastUpdated(result.syncedAt ? new Date(result.syncedAt) : new Date())
@@ -195,13 +201,14 @@ export function ViewInventoryPage() {
         setIsRefreshing(false)
       }
     },
-    [getToken],
+    [],
   )
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!isLoaded || hasLoadedInventoryRef.current) {
       return
     }
+    hasLoadedInventoryRef.current = true
     void loadInventory(false)
   }, [isLoaded, loadInventory])
 

@@ -34,7 +34,7 @@ export function useSimulatedFetch<T>(
   loader: () => T | Promise<T>,
   options: Options = {},
 ): SimulatedFetchState<T> & { refetch: () => Promise<void> } {
-  const { minDelay = 450, pollInterval, refreshDelay = 320 } = options
+  const { minDelay = 450, refreshDelay = 320 } = options
   const [state, setState] = useState<SimulatedFetchState<T>>({
     data: null,
     isLoading: true,
@@ -117,17 +117,8 @@ export function useSimulatedFetch<T>(
     }
   }, [fetchKey, run])
 
-  useEffect(() => {
-    if (!pollInterval || pollInterval <= 0) {
-      return undefined
-    }
-
-    const id = window.setInterval(() => {
-      void run("poll")
-    }, pollInterval)
-
-    return () => window.clearInterval(id)
-  }, [pollInterval, run])
+  // Auto polling is intentionally disabled for staff pages.
+  // Data refresh should only happen on explicit user action.
 
   const refetch = useCallback(async () => {
     await run(hasLoadedRef.current ? "poll" : "initial")

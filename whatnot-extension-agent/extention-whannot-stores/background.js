@@ -2116,9 +2116,11 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
       ? payload.fileContentType.trim()
       : "application/octet-stream";
 
-  let fileBuffer;
+  // Validate base64 encoding without converting to ArrayBuffer yet.
+  // Keep as base64 string for message passing; inject.js will decode it in page context.
   try {
-    fileBuffer = base64ToArrayBuffer(fileBase64Raw);
+    // Quick validation: try decoding first few bytes
+    atob(fileBase64Raw.slice(0, 100));
   } catch (_e) {
     return {
       success: false,
@@ -2137,11 +2139,13 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
     presignHeaders["Content-Type"] = fileContentType;
   }
 
+  // Pass base64 string directly; inject.js will decode in page context
   const putResponse = await executeApi(state.tabId, {
     url: uploadUrl,
     method: uploadMethod,
     headers: presignHeaders,
-    body: fileBuffer,
+    body: fileBase64Raw,
+    fileContentType: fileContentType,
   });
 
   if (!putResponse?.success) {

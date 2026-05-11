@@ -75,10 +75,31 @@
           ? "include"
           : "omit";
 
+    // Handle base64-encoded image uploads for S3 presigned URLs.
+    // These come as base64 strings and need to be decoded to binary for proper PUT.
+    let fetchBody = options.body;
+    if (
+      typeof options.body === "string" &&
+      urlStr.includes("amazonaws.com") &&
+      options.fileContentType
+    ) {
+      try {
+        const binaryString = atob(options.body);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        fetchBody = bytes.buffer;
+      } catch (_e) {
+        // If decoding fails, fall back to sending as-is
+        fetchBody = options.body;
+      }
+    }
+
     const res = await fetch(options.url, {
       method: options.method || "GET",
       headers: options.headers || {},
-      body: options.body,
+      body: fetchBody,
       credentials,
     });
 
