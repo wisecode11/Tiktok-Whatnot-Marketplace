@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { Info, PackageSearch, RefreshCw, Store } from "lucide-react"
+import { Activity, Info, PackageSearch, RefreshCw, ShoppingBag, Store, Truck, Wallet } from "lucide-react"
 
+import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -485,6 +487,61 @@ function tiktokConnectHint(reason: string | null) {
   return "Add TIKTOK_SHOP_ACCESS_TOKEN and TIKTOK_SHOP_SHOP_CIPHER from TikTok Shop Partner authorization, or set metadata_json.tiktok_shop (access_token, shop_cipher) on the seller’s TikTok ConnectedAccount record."
 }
 
+function whatnotStatusVariant(status: string) {
+  const normalized = status.trim().toLowerCase()
+  if (normalized.includes("deliver") || normalized.includes("complete")) {
+    return "success" as const
+  }
+  if (normalized.includes("cancel") || normalized.includes("refund")) {
+    return "danger" as const
+  }
+  if (normalized.includes("ship") || normalized.includes("label") || normalized.includes("process")) {
+    return "warning" as const
+  }
+  return "default" as const
+}
+
+function tiktokStatusVariant(status: string) {
+  const normalized = status.trim().toLowerCase()
+  if (normalized.includes("deliver") || normalized.includes("completed")) {
+    return "success" as const
+  }
+  if (normalized.includes("cancel") || normalized.includes("return")) {
+    return "danger" as const
+  }
+  if (normalized.includes("await") || normalized.includes("fulfill") || normalized.includes("ship")) {
+    return "warning" as const
+  }
+  return "info" as const
+}
+
+function OrdersMetricCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  hint: string
+  icon: typeof ShoppingBag
+}) {
+  return (
+    <Card className="border-border/60 bg-card/80 shadow-sm">
+      <CardContent className="flex items-start justify-between gap-4 p-5">
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold tracking-tight text-foreground">{value}</p>
+          <p className="text-sm text-muted-foreground">{hint}</p>
+        </div>
+        <div className="rounded-2xl border border-border/60 bg-background/90 p-2.5 text-muted-foreground">
+          <Icon className="h-4 w-4" />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SellerOrdersPage() {
   const { getToken, isLoaded } = useAuth()
   const [orders, setOrders] = useState<WhatnotOrderItem[]>([])
@@ -656,6 +713,10 @@ export default function SellerOrdersPage() {
     return orderRows.reduce((total, row) => total + (row.subtotalAmount || 0), 0)
   }, [orderRows])
 
+  const uniqueWhatnotCustomers = useMemo(() => {
+    return new Set(orderRows.map((row) => row.customer).filter((value) => value && value !== "N/A")).size
+  }, [orderRows])
+
   const tiktokPageTotal = useMemo(() => {
     let sum = 0
     let currency = ""
@@ -681,6 +742,14 @@ export default function SellerOrdersPage() {
     return { amount: tiktokRows.length ? sum : null, currency: currency || "USD" }
   }, [tiktokRows])
 
+  const tiktokAwaitingCount = useMemo(() => {
+    return tiktokRows.filter((row) => /await|fulfill|ship/i.test(row.status)).length
+  }, [tiktokRows])
+
+  const tiktokBuyerCount = useMemo(() => {
+    return new Set(tiktokRows.map((row) => row.buyer).filter((value) => value && value !== "N/A")).size
+  }, [tiktokRows])
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -696,59 +765,20 @@ export default function SellerOrdersPage() {
   const tiktokShopLiveConnected = Boolean(
     tiktokShop && (tiktokShop.shopConnected ?? tiktokShop.configured),
   )
+  const platformMixLabel =
+    tiktokShop == null
+      ? "Waiting"
+      : tiktokPageTotal.amount != null && tiktokPageTotal.currency
+        ? tiktokPageTotal.currency
+        : tiktokRows.length > 0
+          ? "Mixed"
+          : "None"
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Orders</h1>
-          <p className="text-sm text-muted-foreground">
-            Whatnot orders sync from the browser extension; TikTok Shop orders load from the Partner API. Each channel is
-            listed in its own section below.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => void loadOrders(true)} disabled={isRefreshing} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
-      </div>
+    <div className="space-y-6">
+     
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Whatnot orders</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{orderRows.length}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Whatnot revenue (subtotal)</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">${totalWhatnotSales.toFixed(2)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">TikTok Shop matches</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {tiktokShop != null ? tiktokShop.totalCount : "—"}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">TikTok page total</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {tiktokShop == null
-              ? "—"
-              : tiktokPageTotal.amount != null && tiktokPageTotal.currency
-                ? toCurrency(tiktokPageTotal.amount, tiktokPageTotal.currency)
-                : tiktokRows.length > 0
-                  ? "Mixed currencies"
-                  : "—"}
-          </CardContent>
-        </Card>
-      </div>
+      
 
       {(errorMessage || tiktokErrorMessage) && (
         <div className="grid gap-3 md:grid-cols-2">
@@ -771,155 +801,216 @@ export default function SellerOrdersPage() {
         </div>
       )}
 
-      {/* Whatnot section */}
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <PackageSearch className="h-5 w-5 text-muted-foreground" aria-hidden />
-          <h2 className="text-lg font-semibold">Whatnot</h2>
-          <Badge variant="secondary">Extension sync</Badge>
+      <Tabs defaultValue="whatnot" className="space-y-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight">Platform order streams</h3>
+            <p className="text-sm text-muted-foreground">Use the tabs to switch between Whatnot and TikTok data without changing pages.</p>
+          </div>
+          <TabsList className="grid w-full grid-cols-2 rounded-2xl bg-muted/70 p-1 lg:w-[22rem]">
+            <TabsTrigger value="whatnot" className="rounded-xl">
+              <PackageSearch className="h-4 w-4" />
+              Whatnot
+            </TabsTrigger>
+            <TabsTrigger value="tiktok" className="rounded-xl">
+              <Store className="h-4 w-4" />
+              TikTok Shop
+            </TabsTrigger>
+          </TabsList>
         </div>
-        {orderRows.length === 0 ? (
-          <EmptyState
-            icon={PackageSearch}
-            title="No Whatnot orders synced yet"
-            description="Orders sync when this tab opens. Keep the Whatnot extension connected to your seller session."
-          />
-        ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Whatnot orders</CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Order</th>
-                    <th className="px-3 py-2 font-medium">Date</th>
-                    <th className="px-3 py-2 font-medium">Customer</th>
-                    <th className="px-3 py-2 font-medium">Items</th>
-                    <th className="px-3 py-2 font-medium">Sales channel</th>
-                    <th className="px-3 py-2 font-medium">Price</th>
-                    <th className="px-3 py-2 font-medium">Order status</th>
-                    <th className="px-3 py-2 font-medium">Earning status</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orderRows.map((order) => (
-                    <tr key={order.id} className="border-b last:border-b-0">
-                      <td className="px-3 py-3">
-                        <div className="font-medium">{order.title}</div>
-                      </td>
-                      <td className="px-3 py-3">{formatDate(order.createdAt)}</td>
-                      <td className="px-3 py-3">{order.customer}</td>
-                      <td className="px-3 py-3">{order.quantity}</td>
-                      <td className="px-3 py-3">{order.salesChannel}</td>
-                      <td className="px-3 py-3">{toCurrency(order.subtotalAmount, order.subtotalCurrency)}</td>
-                      <td className="px-3 py-3">
-                        <StatusBadge variant="warning">{order.prettyStatus}</StatusBadge>
-                      </td>
-                      <td className="px-3 py-3">{order.earningStatus}</td>
-                      <td className="px-3 py-3">
-                        <Button variant="outline" size="sm" onClick={() => setSelectedOrder(order)}>
-                          View detail
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        )}
-      </section>
 
-      {/* TikTok Shop section */}
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Store className="h-5 w-5 text-muted-foreground" aria-hidden />
-          <h2 className="text-lg font-semibold">TikTok Shop</h2>
-          <Badge variant="outline">Partner API</Badge>
-          {tiktokShop != null ? (
-            <Badge variant={tiktokDemoMode ? "secondary" : "default"}>
-              {tiktokDemoMode ? "Mock Data" : "Live shop"}
-            </Badge>
+        <TabsContent value="whatnot" className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Synced orders</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">{orderRows.length}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Recent Whatnot orders available to seller tools.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Customers</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">{uniqueWhatnotCustomers}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Distinct buyers in the current sync snapshot.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revenue</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">${totalWhatnotSales.toFixed(2)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Subtotal value across visible Whatnot rows.</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {orderRows.length === 0 ? (
+            <EmptyState
+              icon={PackageSearch}
+              title="No Whatnot orders synced yet"
+              description="Orders sync when this tab opens. Keep the Whatnot extension connected to your seller session."
+            />
+          ) : (
+            <Card className="border-border/60 shadow-sm">
+              <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="text-lg">Whatnot order stream</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">The latest extension-synced orders, laid out for fast scanning and detail drill-in.</p>
+                </div>
+                <Badge variant="secondary" className="w-fit bg-amber-100 text-amber-900 hover:bg-amber-100">
+                  Extension powered
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">Order</th>
+                        <th className="px-4 py-3 font-medium">Placed</th>
+                        <th className="px-4 py-3 font-medium">Buyer</th>
+                        <th className="px-4 py-3 font-medium">Items</th>
+                        <th className="px-4 py-3 font-medium">Channel</th>
+                        <th className="px-4 py-3 font-medium">Value</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Earnings</th>
+                        <th className="px-4 py-3 text-right font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orderRows.map((order) => (
+                        <tr key={order.id} className="border-t border-border/60 align-top transition-colors hover:bg-muted/30">
+                          <td className="px-4 py-4">
+                            <div className="space-y-1">
+                              <div className="font-medium text-foreground">{order.title}</div>
+                              <div className="text-xs text-muted-foreground">{order.id}</div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-muted-foreground">{formatDate(order.createdAt)}</td>
+                          <td className="px-4 py-4">{order.customer}</td>
+                          <td className="px-4 py-4">{order.quantity}</td>
+                          <td className="px-4 py-4">{order.salesChannel}</td>
+                          <td className="px-4 py-4 font-medium">{toCurrency(order.subtotalAmount, order.subtotalCurrency)}</td>
+                          <td className="px-4 py-4">
+                            <StatusBadge variant={whatnotStatusVariant(order.prettyStatus)}>{order.prettyStatus}</StatusBadge>
+                          </td>
+                          <td className="px-4 py-4">{order.earningStatus}</td>
+                          <td className="px-4 py-4 text-right">
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedOrder(order)}>
+                              View detail
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="tiktok" className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Query matches</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokShop != null ? tiktokShop.totalCount : "-"}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Total count returned by the active Partner API search.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Active queue</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokAwaitingCount}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Orders awaiting shipment or fulfillment on this page.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-sm">
+              <CardContent className="p-5">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Buyers</p>
+                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokBuyerCount}</p>
+                <p className="mt-2 text-sm text-muted-foreground">Distinct buyers represented in the visible result page.</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* {tiktokDemoMode && !tiktokErrorMessage ? (
+            <Alert className="border-amber-300/60 bg-amber-50/80 text-amber-950">
+              <Info className="h-4 w-4" />
+              <AlertTitle>You are viewing TikTok Shop mock data</AlertTitle>
+              <AlertDescription>
+                {tiktokShop?.note ?? "Connect your seller credentials to replace this tab with production data."} {tiktokConnectHint(tiktokShop?.reason ?? null)}
+              </AlertDescription>
+            </Alert>
+          ) : null} */}
+
+          {!tiktokDemoMode && tiktokShopLiveConnected && !tiktokErrorMessage && tiktokRows.length === 0 ? (
+            <EmptyState
+              icon={Store}
+              title="No TikTok Shop orders on this page"
+              description="This view is live and ready, but the current Partner API query did not return any rows."
+            />
           ) : null}
-        </div>
 
-        {/* {tiktokDemoMode && !tiktokErrorMessage ? (
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertTitle>You are viewing TikTok Shop mock data</AlertTitle>
-            <AlertDescription>
-              <p>
-                Rows below mirror the Partner API <code className="text-xs">orders/search</code> response shape (based on
-                official samples). Metrics like <strong>matches</strong> use a realistic total_count; only a few demo
-                lines are serialized for readability.
-              </p>
-              <p className="mt-2">
-                {tiktokShop?.note ?? "Connect your seller credentials to replace this tab with production data."}{" "}
-                {tiktokConnectHint(tiktokShop?.reason ?? null)}
-              </p>
-            </AlertDescription>
-          </Alert>
-        ) : null} */}
-
-        {!tiktokDemoMode && tiktokShopLiveConnected && !tiktokErrorMessage && tiktokRows.length === 0 ? (
-          <EmptyState
-            icon={Store}
-            title="No TikTok Shop orders on this page"
-            description="This page pulls the newest orders from TikTok Partner API. Adjust filters or pagination when you extend the seller tools."
-          />
-        ) : null}
-
-        {!tiktokErrorMessage && tiktokShop != null && tiktokRows.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>{tiktokDemoMode ? "Demo TikTok Shop orders" : "Recent TikTok Shop orders"}</CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Order ID</th>
-                    <th className="px-3 py-2 font-medium">Created</th>
-                    <th className="px-3 py-2 font-medium">Buyer</th>
-                    <th className="px-3 py-2 font-medium">Items</th>
-                    <th className="px-3 py-2 font-medium">Summary</th>
-                    <th className="px-3 py-2 font-medium">Total</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Fulfillment</th>
-                    <th className="px-3 py-2 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tiktokRows.map((order) => (
-                    <tr key={order.id} className="border-b last:border-b-0">
-                      <td className="px-3 py-3 font-mono text-xs">{order.id}</td>
-                      <td className="px-3 py-3">{order.createdAtLabel}</td>
-                      <td className="px-3 py-3">{order.buyer}</td>
-                      <td className="px-3 py-3">{order.lineCount}</td>
-                      <td className="max-w-[200px] truncate px-3 py-3" title={order.itemSummary}>
-                        {order.itemSummary}
-                      </td>
-                      <td className="px-3 py-3">{order.totalLabel}</td>
-                      <td className="px-3 py-3">
-                        <StatusBadge variant="info">{order.status}</StatusBadge>
-                      </td>
-                      <td className="px-3 py-3 text-xs">{order.fulfillment}</td>
-                      <td className="px-3 py-3">
-                        <Button variant="outline" size="sm" onClick={() => setSelectedTikTokOrder(order)}>
-                          View detail
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        ) : null}
-      </section>
+          {!tiktokErrorMessage && tiktokShop != null && tiktokRows.length > 0 ? (
+            <Card className="border-border/60 shadow-sm">
+              <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="text-lg">{tiktokDemoMode ? "Demo TikTok Shop order queue" : "TikTok Shop order queue"}</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">A cleaner operational view over Partner API order search responses, with live detail available per row.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">Partner API</Badge>
+                  <Badge variant={tiktokDemoMode ? "secondary" : "default"}>
+                    {tiktokDemoMode ? "Mock Data" : "Live shop"}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">Order ID</th>
+                        <th className="px-4 py-3 font-medium">Created</th>
+                        <th className="px-4 py-3 font-medium">Buyer</th>
+                        <th className="px-4 py-3 font-medium">Items</th>
+                        <th className="px-4 py-3 font-medium">Summary</th>
+                        <th className="px-4 py-3 font-medium">Total</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Fulfillment</th>
+                        <th className="px-4 py-3 text-right font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tiktokRows.map((order) => (
+                        <tr key={order.id} className="border-t border-border/60 align-top transition-colors hover:bg-muted/30">
+                          <td className="px-4 py-4 font-mono text-xs text-foreground">{order.id}</td>
+                          <td className="px-4 py-4 text-muted-foreground">{order.createdAtLabel}</td>
+                          <td className="px-4 py-4">{order.buyer}</td>
+                          <td className="px-4 py-4">{order.lineCount}</td>
+                          <td className="max-w-[240px] truncate px-4 py-4" title={order.itemSummary}>{order.itemSummary}</td>
+                          <td className="px-4 py-4 font-medium">{order.totalLabel}</td>
+                          <td className="px-4 py-4">
+                            <StatusBadge variant={tiktokStatusVariant(order.status)}>{order.status}</StatusBadge>
+                          </td>
+                          <td className="px-4 py-4 text-xs uppercase tracking-wide text-muted-foreground">{order.fulfillment}</td>
+                          <td className="px-4 py-4 text-right">
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedTikTokOrder(order)}>
+                              View detail
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
         <DialogContent>

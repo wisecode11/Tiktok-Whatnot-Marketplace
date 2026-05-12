@@ -4,6 +4,12 @@ const {
   createTiktokGlobalProduct,
   getTiktokGlobalProduct,
   getTiktokShopOrderDetail,
+  getTiktokShopOrderDetail,
+  getTiktokFinanceStatements,
+  getTiktokFinancePayments,
+  getTiktokFinanceWithdrawals,
+  getTiktokFinanceStatementTransactions,
+  getTiktokFinanceUnsettledOrders,
 } = require("../services/tiktokShopService");
 
 const {
@@ -513,6 +519,18 @@ async function searchTikTokGlobalProductsData(req, res) {
     const result = await searchTiktokGlobalProducts({
       clerkUserId: req.auth.userId,
       body,
+async function getTikTokFinanceStatementsData(req, res) {
+  try {
+    const query = req.query && typeof req.query === "object" ? req.query : {};
+    const result = await getTiktokFinanceStatements({
+      clerkUserId: req.auth.userId,
+      statementTimeGe: query.statementTimeGe || query.statement_time_ge,
+      statementTimeLt: query.statementTimeLt || query.statement_time_lt,
+      paymentStatus: query.paymentStatus || query.payment_status,
+      pageSize: query.pageSize || query.page_size,
+      pageToken: query.pageToken || query.page_token,
+      sortOrder: query.sortOrder || query.sort_order,
+      sortField: query.sortField || query.sort_field,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -526,6 +544,17 @@ async function createTikTokGlobalProductsData(req, res) {
     const result = await createTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       body,
+async function getTikTokFinancePaymentsData(req, res) {
+  try {
+    const query = req.query && typeof req.query === "object" ? req.query : {};
+    const result = await getTiktokFinancePayments({
+      clerkUserId: req.auth.userId,
+      createTimeGe: query.createTimeGe || query.create_time_ge,
+      createTimeLt: query.createTimeLt || query.create_time_lt,
+      pageSize: query.pageSize || query.page_size,
+      pageToken: query.pageToken || query.page_token,
+      sortOrder: query.sortOrder || query.sort_order,
+      sortField: query.sortField || query.sort_field,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -543,6 +572,51 @@ async function getTikTokGlobalProductData(req, res) {
     const result = await getTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       productId: decodeURIComponent(rawId.trim()),
+async function getTikTokFinanceWithdrawalsData(req, res) {
+  try {
+    const query = req.query && typeof req.query === "object" ? req.query : {};
+    const result = await getTiktokFinanceWithdrawals({
+      clerkUserId: req.auth.userId,
+      createTimeGe: query.createTimeGe || query.create_time_ge,
+      createTimeLt: query.createTimeLt || query.create_time_lt,
+      types: query.types,
+      pageSize: query.pageSize || query.page_size,
+      pageToken: query.pageToken || query.page_token,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getTikTokFinanceStatementTransactionsData(req, res) {
+  try {
+    const query = req.query && typeof req.query === "object" ? req.query : {};
+    const result = await getTiktokFinanceStatementTransactions({
+      clerkUserId: req.auth.userId,
+      statementId: req.params && req.params.statementId ? req.params.statementId : "",
+      pageSize: query.pageSize || query.page_size,
+      pageToken: query.pageToken || query.page_token,
+      sortOrder: query.sortOrder || query.sort_order,
+      sortField: query.sortField || query.sort_field,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function getTikTokFinanceUnsettledOrdersData(req, res) {
+  try {
+    const query = req.query && typeof req.query === "object" ? req.query : {};
+    const result = await getTiktokFinanceUnsettledOrders({
+      clerkUserId: req.auth.userId,
+      pageSize: query.pageSize || query.page_size,
+      pageToken: query.pageToken || query.page_token,
+      sortOrder: query.sortOrder || query.sort_order,
+      sortField: query.sortField || query.sort_field,
+      searchTimeGe: query.searchTimeGe || query.search_time_ge,
+      searchTimeLt: query.searchTimeLt || query.search_time_lt,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -640,6 +714,11 @@ module.exports = {
   createTikTokGlobalProductsData,
   getTikTokGlobalProductData,
   getTikTokShopOrderDetailData,
+  getTikTokFinanceStatementsData,
+  getTikTokFinancePaymentsData,
+  getTikTokFinanceWithdrawalsData,
+  getTikTokFinanceStatementTransactionsData,
+  getTikTokFinanceUnsettledOrdersData,
   getWhatnotOrders: listWhatnotOrders,
   syncWhatnotOrders,
   listConnections,
