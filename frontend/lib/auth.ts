@@ -528,6 +528,82 @@ export interface TikTokShopOrderDetailResponse {
   requestId?: string | null
 }
 
+/** TikTok-shaped body from `POST /product/202309/global_products/search` (Partner API). */
+export interface TikTokGlobalProductSearchSkuPrice {
+  currency?: string
+  tax_exclusive_price?: string
+  sale_price?: string
+}
+
+export interface TikTokGlobalProductSearchSkuInventoryRow {
+  warehouse_id?: string
+  quantity?: number
+  backorder_quantity?: number
+  handling_time?: number
+}
+
+export interface TikTokGlobalProductSearchSku {
+  id?: string
+  seller_sku?: string
+  price?: TikTokGlobalProductSearchSkuPrice
+  inventory?: TikTokGlobalProductSearchSkuInventoryRow[]
+  list_price?: { amount?: string; currency?: string }
+  external_list_prices?: Array<{ source?: string; amount?: string; currency?: string }>
+  pre_sale?: Record<string, unknown>
+  status_info?: Record<string, unknown>
+  fees?: Array<{ type?: string; amount?: string; additional_attribute?: string }>
+}
+
+export interface TikTokGlobalProduct {
+  id?: string
+  title?: string
+  status?: string
+  skus?: TikTokGlobalProductSearchSku[]
+  sales_regions?: string[]
+  create_time?: number
+  update_time?: number
+  product_sync_fail_reasons?: string[]
+  is_not_for_sale?: boolean
+  recommended_categories?: Array<{ id?: string; local_name?: string }>
+  listing_quality_tier?: string
+  integrated_platform_statuses?: Array<{ platform?: string; status?: string }>
+  audit?: { status?: string; pre_approved_reasons?: string[] }
+  product_families?: Array<{ id?: string; products?: Array<{ id?: string }> }>
+  has_draft?: boolean
+  scheduled_sale?: {
+    is_enabled_scheduled_sale?: boolean
+    schedule_sale_time?: number
+  }
+}
+
+export interface TikTokGlobalProductSearchResponse {
+  code: number
+  message: string
+  request_id: string
+  data: {
+    total_count: number
+    products: TikTokGlobalProduct[]
+    next_page_token?: string | null
+  }
+}
+
+/** TikTok Partner `GET /product/202309/products/{product_id}` envelope. */
+export interface TikTokGlobalProductGetResponse {
+  code: number
+  message: string
+  request_id?: string
+  data?: Record<string, unknown> | null
+}
+
+export interface TikTokGlobalProductsCreateResponse {
+  code: number
+  message: string
+  request_id?: string
+  data: {
+    product_id?: string
+    skus?: Array<Record<string, unknown>>
+    warnings?: Array<{ message?: string }>
+  }
 export interface TikTokFinanceStatementItem {
   id: string
   statement_time: number
@@ -1191,6 +1267,53 @@ export async function searchTikTokShopOrders(
     method: "POST",
     body: (payload || {}) as Record<string, unknown>,
   })
+}
+
+/**
+ * Proxies TikTok Shop Partner `POST /product/202309/global_products/search`.
+ * `page_size` / `page_token` are stripped server-side for the TikTok query string; other keys stay in the JSON body.
+ */
+export async function searchTikTokGlobalProducts(
+  token: string,
+  body?: Record<string, unknown>,
+) {
+  return request<TikTokGlobalProductSearchResponse>(
+    "/api/integrations/tiktok/shop/product/202309/global_products/search",
+    {
+      token,
+      method: "POST",
+      body: body || {},
+    },
+  )
+}
+
+/**
+ * Proxies TikTok Shop Partner `POST /product/202309/products` (create product).
+ * Sends a Partner-shaped payload built on the client/server.
+ */
+export async function createTikTokGlobalProduct(
+  token: string,
+  body: Record<string, unknown>,
+) {
+  return request<TikTokGlobalProductsCreateResponse>("/api/integrations/tiktok/shop/product/202309/products", {
+    token,
+    method: "POST",
+    body,
+  })
+}
+
+/**
+ * Proxies TikTok Shop Partner `GET /product/202309/products/{product_id}`.
+ */
+export async function getTikTokGlobalProduct(token: string, productId: string) {
+  const id = typeof productId === "string" ? productId.trim() : ""
+  if (!id) {
+    throw new Error("productId is required.")
+  }
+  return request<TikTokGlobalProductGetResponse>(
+    `/api/integrations/tiktok/shop/product/202309/products/${encodeURIComponent(id)}`,
+    { token },
+  )
 }
 
 export async function getTikTokShopOrderDetail(token: string, orderId: string) {
