@@ -15,6 +15,11 @@ const {
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
   getTikTokShopOrderDetailData,
+  getTikTokFinanceStatementsData,
+  getTikTokFinancePaymentsData,
+  getTikTokFinanceWithdrawalsData,
+  getTikTokFinanceStatementTransactionsData,
+  getTikTokFinanceUnsettledOrdersData,
   getWhatnotOrders,
   syncWhatnotOrders,
   listConnections,
@@ -66,6 +71,15 @@ router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.post("/tiktok/shop/orders/search", authenticateRequest, searchTikTokShopOrdersData);
 router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
+router.get("/tiktok/shop/finance/statements", authenticateRequest, getTikTokFinanceStatementsData);
+router.get("/tiktok/shop/finance/payments", authenticateRequest, getTikTokFinancePaymentsData);
+router.get("/tiktok/shop/finance/withdrawals", authenticateRequest, getTikTokFinanceWithdrawalsData);
+router.get(
+  "/tiktok/shop/finance/statements/:statementId/transactions",
+  authenticateRequest,
+  getTikTokFinanceStatementTransactionsData,
+);
+router.get("/tiktok/shop/finance/orders/unsettled", authenticateRequest, getTikTokFinanceUnsettledOrdersData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);

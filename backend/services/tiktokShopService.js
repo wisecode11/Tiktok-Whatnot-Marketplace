@@ -11,6 +11,96 @@ const TIKTOK_SHOP_API_BASE = (process.env.TIKTOK_SHOP_API_BASE || "https://open-
 const ORDER_SEARCH_PATH = "/order/202309/orders/search";
 /** Order detail by id (query `ids`) — same API group as Partner examples. */
 const ORDER_GET_PATH = "/order/202309/orders";
+const FINANCE_STATEMENTS_PATH = "/finance/202309/statements";
+const FINANCE_PAYMENTS_PATH = "/finance/202309/payments";
+const FINANCE_WITHDRAWALS_PATH = "/finance/202309/withdrawals";
+const FINANCE_UNSETTLED_ORDERS_PATH = "/finance/202507/orders/unsettled";
+
+const MOCK_FINANCE_STATEMENT = {
+  id: "7238804564097517339",
+  statement_time: 1685548800,
+  settlement_amount: "100",
+  currency: "GBP",
+  revenue_amount: "200",
+  fee_amount: "-30",
+  adjustment_amount: "-70",
+  payment_status: "PAID",
+  payment_id: "3459275187040258849",
+  net_sales_amount: "-70",
+  shipping_cost_amount: "-70",
+  payment_time: 1685548800,
+};
+
+const MOCK_FINANCE_PAYMENT = {
+  create_time: 1636105796,
+  id: "3458767051733897992",
+  status: "PAID",
+  amount: {
+    value: "100",
+    currency: "GBP",
+  },
+  settlement_amount: {
+    value: "130",
+    currency: "GBP",
+  },
+  reserve_amount: {
+    value: "-30",
+    currency: "GBP",
+  },
+  payment_amount_before_exchange: {
+    value: "100",
+    currency: "GBP",
+  },
+  exchange_rate: "1.000000",
+  paid_time: 1685548800,
+  bank_account: "***********1234",
+};
+
+const MOCK_FINANCE_WITHDRAWAL = {
+  id: "EFASDFSAFDA23432DFAFDSA",
+  type: "WITHDRAW",
+  amount: "100",
+  currency: "IDR",
+  status: "PROCESSING",
+  create_time: 1623812664,
+};
+
+const MOCK_FINANCE_STATEMENT_TRANSACTION = {
+  id: "1636700041413599290",
+  type: "ORDER",
+  order_id: "576463220456522968",
+  order_create_time: 1685548800,
+  adjustment_id: "7238804564097517332",
+  adjustment_order_id: "576463220456522968",
+  adjustment_amount: "170",
+  settlement_amount: "130",
+  revenue_amount: "200",
+  shipping_cost_amount: "-70",
+  fee_tax_amount: "-30",
+  reserve_id: "56789910",
+  reserve_amount: "100",
+  reserve_status: "Collected",
+  estimated_release_time: 1685548800,
+};
+
+const MOCK_FINANCE_UNSETTLED_ORDER = {
+  type: "ORDER",
+  id: "1636700041413599290",
+  status: "UNSETTLED",
+  currency: "USD",
+  estimated_settlement: 1685548800,
+  unsettled_reason: "waiting for delivery",
+  order_create_time: 1685548800,
+  order_delivery_time: 1685548800,
+  order_id: "576463220456522968",
+  adjustment_id: "7238804564097517332",
+  adjustment_order_id: "576463220456522968",
+  est_adjustment_amount: "170",
+  est_settlement_amount: "130",
+  est_revenue_amount: "200",
+  est_shipping_cost_amount: "-70",
+  est_fee_tax_amount: "-30",
+};
 
 /** Request body filter keys allowed for Order Search (Partner API 202309). */
 const FILTER_KEYS = new Set([
@@ -244,6 +334,402 @@ function envelopeSearch(mockData, shopConnected, isMockData, reason) {
   };
 }
 
+function normalizePageSize(value, fallback = 20) {
+  const parsed = Number(value);
+  return String(Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 1), 100));
+}
+
+function normalizePageToken(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeEpoch(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.floor(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? String(Math.floor(parsed)) : null;
+  }
+  return null;
+}
+
+function normalizeSortOrder(value, fallback = "DESC") {
+  return value === "ASC" || value === "DESC" ? value : fallback;
+}
+
+function buildFinanceStatementTransactionsPath(statementId) {
+  return `/finance/202501/statements/${encodeURIComponent(statementId)}/statement_transactions`;
+}
+
+function envelopeFinanceBase({ shopConnected, isMockData, reason, requestId, note }) {
+  return {
+    configured: shopConnected,
+    shopConnected,
+    isMockData,
+    reason,
+    note: note || (isMockData ? "Demo TikTok Shop finance payload — connect seller credentials to load production data." : null),
+    requestId: requestId || null,
+  };
+}
+
+async function getTiktokFinanceStatements({
+  clerkUserId,
+  statementTimeGe,
+  statementTimeLt,
+  paymentStatus,
+  pageSize = 20,
+  pageToken,
+  sortOrder = "DESC",
+  sortField = "statement_time",
+} = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      ...envelopeFinanceBase({
+        shopConnected: false,
+        isMockData: true,
+        reason: creds.reason,
+        requestId: "202203070749000101890810281E8C70B7",
+      }),
+      nextPageToken: null,
+      statements: [MOCK_FINANCE_STATEMENT],
+    };
+  }
+
+  const query = {
+    page_size: normalizePageSize(pageSize, 20),
+    sort_order: normalizeSortOrder(sortOrder, "DESC"),
+    sort_field: typeof sortField === "string" && sortField.trim() ? sortField.trim() : "statement_time",
+  };
+
+  const token = normalizePageToken(pageToken);
+  const ge = normalizeEpoch(statementTimeGe);
+  const lt = normalizeEpoch(statementTimeLt);
+  if (token) {
+    query.page_token = token;
+  }
+  if (ge) {
+    query.statement_time_ge = ge;
+  }
+  if (lt) {
+    query.statement_time_lt = lt;
+  }
+  if (typeof paymentStatus === "string" && paymentStatus.trim()) {
+    query.payment_status = paymentStatus.trim().toUpperCase();
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path: FINANCE_STATEMENTS_PATH,
+    extraQuery: query,
+  });
+
+  return {
+    ...envelopeFinanceBase({
+      shopConnected: true,
+      isMockData: false,
+      reason: null,
+      requestId: request_id,
+    }),
+    nextPageToken: parsed.data && parsed.data.next_page_token ? parsed.data.next_page_token : null,
+    statements: parsed.data && Array.isArray(parsed.data.statements) ? parsed.data.statements : [],
+  };
+}
+
+async function getTiktokFinancePayments({
+  clerkUserId,
+  createTimeGe,
+  createTimeLt,
+  pageSize = 20,
+  pageToken,
+  sortOrder = "DESC",
+  sortField = "create_time",
+} = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      ...envelopeFinanceBase({
+        shopConnected: false,
+        isMockData: true,
+        reason: creds.reason,
+        requestId: "202203070749000101890810281E8C70B7",
+      }),
+      nextPageToken: null,
+      payments: [MOCK_FINANCE_PAYMENT],
+    };
+  }
+
+  const query = {
+    page_size: normalizePageSize(pageSize, 20),
+    sort_order: normalizeSortOrder(sortOrder, "DESC"),
+    sort_field: typeof sortField === "string" && sortField.trim() ? sortField.trim() : "create_time",
+  };
+
+  const token = normalizePageToken(pageToken);
+  const ge = normalizeEpoch(createTimeGe);
+  const lt = normalizeEpoch(createTimeLt);
+  if (token) {
+    query.page_token = token;
+  }
+  if (ge) {
+    query.create_time_ge = ge;
+  }
+  if (lt) {
+    query.create_time_lt = lt;
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path: FINANCE_PAYMENTS_PATH,
+    extraQuery: query,
+  });
+
+  return {
+    ...envelopeFinanceBase({
+      shopConnected: true,
+      isMockData: false,
+      reason: null,
+      requestId: request_id,
+    }),
+    nextPageToken: parsed.data && parsed.data.next_page_token ? parsed.data.next_page_token : null,
+    payments: parsed.data && Array.isArray(parsed.data.payments) ? parsed.data.payments : [],
+  };
+}
+
+async function getTiktokFinanceWithdrawals({
+  clerkUserId,
+  createTimeGe,
+  createTimeLt,
+  types,
+  pageSize = 20,
+  pageToken,
+} = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      ...envelopeFinanceBase({
+        shopConnected: false,
+        isMockData: true,
+        reason: creds.reason,
+        requestId: "202203070749000101890810281E8C70B7",
+      }),
+      nextPageToken: null,
+      totalCount: 1,
+      withdrawals: [MOCK_FINANCE_WITHDRAWAL],
+    };
+  }
+
+  const query = {
+    page_size: normalizePageSize(pageSize, 20),
+  };
+
+  const token = normalizePageToken(pageToken);
+  const ge = normalizeEpoch(createTimeGe);
+  const lt = normalizeEpoch(createTimeLt);
+  if (token) {
+    query.page_token = token;
+  }
+  if (ge) {
+    query.create_time_ge = ge;
+  }
+  if (lt) {
+    query.create_time_lt = lt;
+  }
+
+  const normalizedTypes = Array.isArray(types)
+    ? types.map((t) => String(t || "").trim()).filter(Boolean)
+    : typeof types === "string" && types.trim()
+      ? types.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
+  if (normalizedTypes.length) {
+    query.types = normalizedTypes.join(",");
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path: FINANCE_WITHDRAWALS_PATH,
+    extraQuery: query,
+  });
+
+  const totalRaw = parsed.data && parsed.data.total_count;
+
+  return {
+    ...envelopeFinanceBase({
+      shopConnected: true,
+      isMockData: false,
+      reason: null,
+      requestId: request_id,
+    }),
+    nextPageToken: parsed.data && parsed.data.next_page_token ? parsed.data.next_page_token : null,
+    totalCount: typeof totalRaw === "number" ? totalRaw : Number(totalRaw) || 0,
+    withdrawals: parsed.data && Array.isArray(parsed.data.withdrawals) ? parsed.data.withdrawals : [],
+  };
+}
+
+async function getTiktokFinanceStatementTransactions({
+  clerkUserId,
+  statementId,
+  pageSize = 20,
+  pageToken,
+  sortOrder = "DESC",
+  sortField = "order_create_time",
+} = {}) {
+  const normalizedStatementId = typeof statementId === "string" ? statementId.trim() : "";
+  if (!normalizedStatementId) {
+    throw createHttpError(400, "statementId is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      ...envelopeFinanceBase({
+        shopConnected: false,
+        isMockData: true,
+        reason: creds.reason,
+        requestId: "202203070749000101890810281E8C70B7",
+      }),
+      nextPageToken: null,
+      id: normalizedStatementId,
+      createTime: 1685548800,
+      status: "SETTLED",
+      currency: "GBP",
+      payableAmount: "150",
+      totalReserveAmount: "20",
+      totalSettlementAmount: "130",
+      totalSettlementBreakdown: {
+        total_revenue_amount: "100",
+        total_shipping_cost_amount: "120",
+        total_fee_tax_amount: "20",
+        total_adjustment_amount: "0",
+      },
+      totalCount: 1,
+      transactions: [MOCK_FINANCE_STATEMENT_TRANSACTION],
+    };
+  }
+
+  const query = {
+    page_size: normalizePageSize(pageSize, 20),
+    sort_order: normalizeSortOrder(sortOrder, "DESC"),
+    sort_field: typeof sortField === "string" && sortField.trim() ? sortField.trim() : "order_create_time",
+  };
+
+  const token = normalizePageToken(pageToken);
+  if (token) {
+    query.page_token = token;
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path: buildFinanceStatementTransactionsPath(normalizedStatementId),
+    extraQuery: query,
+  });
+
+  const data = parsed.data && typeof parsed.data === "object" ? parsed.data : {};
+  const totalRaw = data.total_count;
+
+  return {
+    ...envelopeFinanceBase({
+      shopConnected: true,
+      isMockData: false,
+      reason: null,
+      requestId: request_id,
+    }),
+    nextPageToken: data.next_page_token || null,
+    id: data.id || normalizedStatementId,
+    createTime: typeof data.create_time === "number" ? data.create_time : null,
+    status: data.status || null,
+    currency: data.currency || null,
+    payableAmount: data.payable_amount || null,
+    totalReserveAmount: data.total_reserve_amount || null,
+    totalSettlementAmount: data.total_settlement_amount || null,
+    totalSettlementBreakdown:
+      data.total_settlement_breakdown && typeof data.total_settlement_breakdown === "object"
+        ? data.total_settlement_breakdown
+        : null,
+    totalCount: typeof totalRaw === "number" ? totalRaw : Number(totalRaw) || 0,
+    transactions: Array.isArray(data.transactions) ? data.transactions : [],
+  };
+}
+
+async function getTiktokFinanceUnsettledOrders({
+  clerkUserId,
+  pageSize = 20,
+  pageToken,
+  sortOrder = "ASC",
+  sortField = "order_create_time",
+  searchTimeGe,
+  searchTimeLt,
+} = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      ...envelopeFinanceBase({
+        shopConnected: false,
+        isMockData: true,
+        reason: creds.reason,
+        requestId: "202203070749000101890810281E8C70B7",
+      }),
+      nextPageToken: null,
+      totalCount: 1,
+      sumEstSettlementAmount: "130",
+      sumEstRevenueAmount: "200",
+      sumEstAdjustmentAmount: "170",
+      sumEstFeeAmount: "-30",
+      transactions: [MOCK_FINANCE_UNSETTLED_ORDER],
+    };
+  }
+
+  const query = {
+    page_size: normalizePageSize(pageSize, 20),
+    sort_order: normalizeSortOrder(sortOrder, "ASC"),
+    sort_field: typeof sortField === "string" && sortField.trim() ? sortField.trim() : "order_create_time",
+  };
+
+  const token = normalizePageToken(pageToken);
+  const ge = normalizeEpoch(searchTimeGe);
+  const lt = normalizeEpoch(searchTimeLt);
+  if (token) {
+    query.page_token = token;
+  }
+  if (ge) {
+    query.search_time_ge = ge;
+  }
+  if (lt) {
+    query.search_time_lt = lt;
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path: FINANCE_UNSETTLED_ORDERS_PATH,
+    extraQuery: query,
+  });
+
+  const data = parsed.data && typeof parsed.data === "object" ? parsed.data : {};
+  const totalRaw = data.total_count;
+
+  return {
+    ...envelopeFinanceBase({
+      shopConnected: true,
+      isMockData: false,
+      reason: null,
+      requestId: request_id,
+    }),
+    nextPageToken: data.next_page_token || null,
+    totalCount: typeof totalRaw === "number" ? totalRaw : Number(totalRaw) || 0,
+    sumEstSettlementAmount: data.sum_est_settlement_amount || "0",
+    sumEstRevenueAmount: data.sum_est_revenue_amount || "0",
+    sumEstAdjustmentAmount: data.sum_est_adjustment_amount || "0",
+    sumEstFeeAmount: data.sum_est_fee_amount || "0",
+    transactions: Array.isArray(data.transactions) ? data.transactions : [],
+  };
+}
+
 async function searchTiktokShopOrders({
   clerkUserId,
   filters = {},
@@ -391,5 +877,10 @@ async function getTiktokShopOrderDetail({ clerkUserId, orderId }) {
 module.exports = {
   searchTiktokShopOrders,
   getTiktokShopOrderDetail,
+  getTiktokFinanceStatements,
+  getTiktokFinancePayments,
+  getTiktokFinanceWithdrawals,
+  getTiktokFinanceStatementTransactions,
+  getTiktokFinanceUnsettledOrders,
   resolveShopCredentials,
 };

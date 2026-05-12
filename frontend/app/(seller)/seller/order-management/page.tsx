@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { ExternalLink, Printer, RefreshCw } from "lucide-react"
+import { Activity, Boxes, ExternalLink, PackageSearch, Printer, RefreshCw, Store, Truck, Wallet } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -13,18 +15,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AuthApiError,
   fetchWhatnotMyLiveStats,
   fetchWhatnotShipmentsTable,
+  getTikTokShopOrderDetail,
   getWhatnotShipmentsLivestreamsCurrentLiveId,
+  searchTikTokShopOrders,
   syncWhatnotOrders,
+  type TikTokShopOrdersSearchResponse,
   type WhatnotMyLiveStatistic,
   type WhatnotShipmentTableRow,
   waitForSessionToken,
@@ -579,8 +583,202 @@ function formatValueFromShipment(shipment: ShipmentNode) {
   return formatMoney({ amount: cents, currency: cur })
 }
 
+function formatUnixSeconds(seconds: unknown): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) {
+    return "—"
+  }
+  const date = new Date(seconds * 1000)
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString()
+}
+
+function displayText(value: unknown): string {
+  if (value == null || value === "") {
+    return "—"
+  }
+  if (typeof value === "string") {
+    return value.trim() || "—"
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value)
+  }
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No"
+  }
+  return "—"
+}
+
+type TikTokManagementRow = {
+  id: string
+  status: string
+  buyer: string
+  createdAtLabel: string
+  lineCount: number
+  totalLabel: string
+  fulfillment: string
+  shippingType: string
+  itemSummary: string
+  raw: Record<string, unknown>
+}
+
+function mapTikTokManagementRow(order: Record<string, unknown>): TikTokManagementRow {
+  const id = typeof order.id === "string" && order.id.trim() ? order.id : "—"
+  const status = typeof order.status === "string" ? order.status : "unknown"
+  const buyerNickname = typeof order.buyer_nickname === "string" ? order.buyer_nickname : ""
+  const userId = typeof order.user_id === "string" ? order.user_id : ""
+  const buyer = buyerNickname.trim() || userId || "N/A"
+  const lineItems = Array.isArray(order.line_items) ? order.line_items : []
+  const firstLine = lineItems[0] && typeof lineItems[0] === "object" ? (lineItems[0] as Record<string, unknown>) : {}
+  const payment = order.payment && typeof order.payment === "object" ? (order.payment as Record<string, unknown>) : {}
+  const totalRaw = payment.total_amount
+  const totalNum = typeof totalRaw === "string" || typeof totalRaw === "number" ? Number(totalRaw) : NaN
+  const currency = typeof payment.currency === "string" && payment.currency.trim() ? payment.currency.trim() : "USD"
+
+  return {
+    id,
+    status,
+    buyer,
+    createdAtLabel: formatUnixSeconds(order.create_time),
+    lineCount: lineItems.length || 0,
+    totalLabel: Number.isFinite(totalNum) ? new Intl.NumberFormat(undefined, { style: "currency", currency }).format(totalNum) : "—",
+    fulfillment:
+      typeof order.fulfillment_type === "string" ? order.fulfillment_type.replace(/_/g, " ") : "—",
+    shippingType: typeof order.shipping_type === "string" ? order.shipping_type : "—",
+    itemSummary:
+      (typeof firstLine.product_name === "string" && firstLine.product_name.trim()) ||
+      (typeof firstLine.sku_name === "string" && firstLine.sku_name.trim()) ||
+      (lineItems.length > 1 ? `${lineItems.length} items` : "—"),
+    raw: order,
+  }
+}
+
+function tiktokStatusVariant(status: string) {
+  const normalized = status.trim().toLowerCase()
+  if (normalized.includes("deliver") || normalized.includes("complete")) {
+    return "success" as const
+  }
+  if (normalized.includes("cancel") || normalized.includes("return")) {
+    return "danger" as const
+  }
+  if (normalized.includes("await") || normalized.includes("fulfill") || normalized.includes("ship")) {
+    return "warning" as const
+  }
+  return "info" as const
+}
+
+function whatnotShipmentVariant(status: string | undefined) {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : ""
+  if (normalized.includes("deliver")) {
+    return "success" as const
+  }
+  if (normalized.includes("cancel") || normalized.includes("return")) {
+    return "danger" as const
+  }
+  if (normalized.includes("ship") || normalized.includes("label") || normalized.includes("process")) {
+    return "warning" as const
+  }
+  return "default" as const
+}
+
+function ManagementMetricCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  hint: string
+  icon: typeof Activity
+}) {
+  return (
+    <Card className="border-border/60 bg-card/85 shadow-sm">
+      <CardContent className="flex items-start justify-between gap-4 p-5">
+        <div className="space-y-2">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold tracking-tight">{value}</p>
+          <p className="text-sm text-muted-foreground">{hint}</p>
+        </div>
+        <div className="rounded-2xl border border-border/60 bg-background/90 p-2.5 text-muted-foreground">
+          <Icon className="h-4 w-4" />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 border-b border-border/60 py-2 last:border-b-0 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium break-words">{value}</span>
+    </div>
+  )
+}
+
+function TikTokOrderManagementDetailBody({ order }: { order: Record<string, unknown> }) {
+  const lineItems = Array.isArray(order.line_items) ? order.line_items : []
+  const payment = order.payment && typeof order.payment === "object" ? (order.payment as Record<string, unknown>) : null
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="rounded-xl border border-border/70 bg-card p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Order overview</p>
+            <p className="mt-1 text-lg font-semibold">{displayText(order.id)}</p>
+          </div>
+          <StatusBadge variant={tiktokStatusVariant(displayText(order.status))}>{displayText(order.status)}</StatusBadge>
+        </div>
+        <DetailRow label="Buyer" value={displayText(order.buyer_nickname) || displayText(order.user_id)} />
+        <DetailRow label="Created" value={formatUnixSeconds(order.create_time)} />
+        <DetailRow label="Updated" value={formatUnixSeconds(order.update_time)} />
+        <DetailRow label="Fulfillment" value={displayText(order.fulfillment_type).replace(/_/g, " ")} />
+        <DetailRow label="Shipping type" value={displayText(order.shipping_type)} />
+        <DetailRow label="Tracking" value={displayText(order.tracking_number)} />
+      </div>
+
+      {payment ? (
+        <div className="rounded-xl border border-border/70 bg-card p-4">
+          <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">Payment</p>
+          <DetailRow label="Currency" value={displayText(payment.currency)} />
+          <DetailRow label="Total" value={displayText(payment.total_amount)} />
+          <DetailRow label="Subtotal" value={displayText(payment.sub_total)} />
+          <DetailRow label="Shipping fee" value={displayText(payment.shipping_fee)} />
+        </div>
+      ) : null}
+
+      {lineItems.length > 0 ? (
+        <div className="rounded-xl border border-border/70 bg-card p-4">
+          <p className="mb-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">Line items</p>
+          <div className="space-y-3">
+            {lineItems.map((item, index) => {
+              if (!item || typeof item !== "object") {
+                return null
+              }
+              const row = item as Record<string, unknown>
+              return (
+                <div key={`${displayText(row.id)}-${index}`} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                  <p className="font-medium">{displayText(row.product_name)}</p>
+                  <p className="text-xs text-muted-foreground">{displayText(row.sku_name)}</p>
+                  <div className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+                    <span>Seller SKU: {displayText(row.seller_sku)}</span>
+                    <span>Quantity: {displayText(row.quantity)}</span>
+                    <span>Sale price: {displayText(row.sale_price)}</span>
+                    <span>Package status: {displayText(row.package_status)}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export default function SellerOrderManagementPage() {
   const { getToken, isLoaded } = useAuth()
+  const [activePlatform, setActivePlatform] = useState<"whatnot" | "tiktok">("whatnot")
   const [liveId, setLiveId] = useState("")
   const [statistic, setStatistic] = useState<WhatnotMyLiveStatistic | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -593,6 +791,13 @@ export default function SellerOrderManagementPage() {
   const [isShipmentsLoading, setIsShipmentsLoading] = useState(false)
   const [isShipmentsRefreshing, setIsShipmentsRefreshing] = useState(false)
   const [selectedShipment, setSelectedShipment] = useState<ShipmentNode | null>(null)
+  const [tiktokShop, setTiktokShop] = useState<TikTokShopOrdersSearchResponse | null>(null)
+  const [isTikTokLoading, setIsTikTokLoading] = useState(false)
+  const [isTikTokRefreshing, setIsTikTokRefreshing] = useState(false)
+  const [tiktokErrorMessage, setTiktokErrorMessage] = useState<string | null>(null)
+  const [selectedTikTokOrder, setSelectedTikTokOrder] = useState<Record<string, unknown> | null>(null)
+  const [selectedTikTokOrderDetail, setSelectedTikTokOrderDetail] = useState<Record<string, unknown> | null>(null)
+  const [isTikTokDetailLoading, setIsTikTokDetailLoading] = useState(false)
   /** After auto Live ID from GetShipmentsLivestreams, hide the ID field unless the seller chooses to edit. */
   const [liveIdEditorOpen, setLiveIdEditorOpen] = useState(true)
 
@@ -716,6 +921,44 @@ export default function SellerOrderManagementPage() {
     [getToken, isLoaded, liveId, statistic],
   )
 
+  const loadTikTokOrders = useCallback(
+    async (isManualRefresh: boolean) => {
+      if (!isLoaded) {
+        return
+      }
+
+      if (isManualRefresh) {
+        setIsTikTokRefreshing(true)
+      } else {
+        setIsTikTokLoading(true)
+      }
+
+      try {
+        setTiktokErrorMessage(null)
+        const token = await waitForSessionToken(getToken)
+        const result = await searchTikTokShopOrders(token, {
+          pageSize: 50,
+          sortOrder: "DESC",
+          sortField: "create_time",
+        })
+        setTiktokShop(result)
+      } catch (error) {
+        const message =
+          error instanceof AuthApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "Unable to load TikTok Shop operations."
+        setTiktokErrorMessage(message)
+        setTiktokShop(null)
+      } finally {
+        setIsTikTokLoading(false)
+        setIsTikTokRefreshing(false)
+      }
+    },
+    [getToken, isLoaded],
+  )
+
   useEffect(() => {
     if (!isLoaded) {
       return
@@ -773,6 +1016,20 @@ export default function SellerOrderManagementPage() {
     return () => window.clearInterval(intervalId)
   }, [isLoaded, liveId, loadStats, loadShipments])
 
+  useEffect(() => {
+    if (!isLoaded) {
+      return
+    }
+
+    void loadTikTokOrders(false)
+
+    const intervalId = window.setInterval(() => {
+      void loadTikTokOrders(true)
+    }, 15000)
+
+    return () => window.clearInterval(intervalId)
+  }, [isLoaded, loadTikTokOrders])
+
   const cards = useMemo(() => {
     if (!statistic) {
       return []
@@ -807,6 +1064,78 @@ export default function SellerOrderManagementPage() {
     ]
   }, [statistic])
 
+  const tiktokRows = useMemo(() => (tiktokShop?.orders ?? []).map(mapTikTokManagementRow), [tiktokShop])
+
+  const tiktokPageTotal = useMemo(() => {
+    let sum = 0
+    let currency = ""
+    for (const row of tiktokRows) {
+      const payment =
+        row.raw.payment && typeof row.raw.payment === "object"
+          ? (row.raw.payment as Record<string, unknown>)
+          : {}
+      const totalRaw = payment.total_amount
+      const nextCurrency = typeof payment.currency === "string" ? payment.currency.trim() : ""
+      const parsed = typeof totalRaw === "string" || typeof totalRaw === "number" ? Number(totalRaw) : NaN
+      if (!Number.isFinite(parsed)) {
+        continue
+      }
+      if (!currency) {
+        currency = nextCurrency || "USD"
+      }
+      if (nextCurrency && currency && nextCurrency !== currency) {
+        return { amount: null as number | null, currency: "" }
+      }
+      sum += parsed
+    }
+    return { amount: tiktokRows.length ? sum : null, currency: currency || "USD" }
+  }, [tiktokRows])
+
+  const tiktokQueueCount = useMemo(() => {
+    return tiktokRows.filter((row) => /await|fulfill|ship/i.test(row.status)).length
+  }, [tiktokRows])
+
+  const tiktokBuyerCount = useMemo(() => {
+    return new Set(tiktokRows.map((row) => row.buyer).filter((value) => value && value !== "N/A")).size
+  }, [tiktokRows])
+
+  const tiktokDemoMode = Boolean(tiktokShop?.isMockData)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTikTokDetail() {
+      if (!selectedTikTokOrder || !tiktokShop || tiktokShop.isMockData) {
+        setSelectedTikTokOrderDetail(null)
+        setIsTikTokDetailLoading(false)
+        return
+      }
+
+      try {
+        setIsTikTokDetailLoading(true)
+        const token = await waitForSessionToken(getToken)
+        const detail = await getTikTokShopOrderDetail(token, displayText(selectedTikTokOrder.id))
+        if (!cancelled) {
+          setSelectedTikTokOrderDetail(detail.order && typeof detail.order === "object" ? detail.order as Record<string, unknown> : null)
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedTikTokOrderDetail(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsTikTokDetailLoading(false)
+        }
+      }
+    }
+
+    void loadTikTokDetail()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, selectedTikTokOrder, tiktokShop])
+
   if (!isLoaded) {
     return null
   }
@@ -815,21 +1144,25 @@ export default function SellerOrderManagementPage() {
     <div className="space-y-6">
       <PageHeader
         title="Order Management"
-        description="Live stats (MyLiveStats) and shipment rows (GetShipment) via the Whatnot extension — same auth as Orders and Inventory."
+        // description="Operational management for marketplace orders. Switch platforms to work shipments, monitor live sales, or review TikTok Shop order queues."
       >
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             className="gap-2"
-            disabled={isRefreshing || !liveId.trim()}
-            onClick={() =>
-              void loadStats(true).then((out) =>
-                void loadShipments(false, out?.statistic?.manifestUrls),
-              )
-            }
+            disabled={activePlatform === "whatnot" ? isRefreshing || !liveId.trim() : isTikTokRefreshing}
+            onClick={() => {
+              if (activePlatform === "whatnot") {
+                void loadStats(true).then((out) =>
+                  void loadShipments(false, out?.statistic?.manifestUrls),
+                )
+                return
+              }
+              void loadTikTokOrders(true)
+            }}
           >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-            Refresh stats
+            <RefreshCw className={`h-4 w-4 ${(activePlatform === "whatnot" ? isRefreshing : isTikTokRefreshing) ? "animate-spin" : ""}`} />
+            {activePlatform === "whatnot" ? "Refresh stats" : "Refresh TikTok"}
           </Button>
           <Button
             variant="outline"
@@ -843,194 +1176,254 @@ export default function SellerOrderManagementPage() {
         </div>
       </PageHeader>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Live show</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          {!liveIdEditorOpen && liveId.trim() ? (
-            <div className="flex min-h-[40px] flex-1 flex-col justify-center gap-2 sm:flex-row sm:items-center sm:justify-between">
-              {/* <p className="text-sm text-muted-foreground">
-                Using your latest Whatnot show for stats and shipments. Use{" "}
-                <span className="font-medium text-foreground">Refresh stats</span> above to update.
-              </p> */}
-              {/* <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setLiveIdEditorOpen(true)}>
-                Edit Live ID
-              </Button> */}
-            </div>
-          ) : (
-            <>
-              <div className="flex-1 space-y-2">
-                {/* <Label htmlFor="live-id">Live ID</Label>
-                <Input
-                  id="live-id"
-                  value={liveId}
-                  onChange={(e) => setLiveId(e.target.value)}
-                  placeholder="e.g. 25c67958-03ea-406f-8283-de564f323a80"
-                  className="font-mono text-sm"
-                /> */}
-                <p className="text-xs text-muted-foreground">
-                  When the extension is connected, this is filled automatically from GetShipmentsLivestreams and the
-                  field is hidden. Otherwise paste the ID from Whatnot. Used for MyLiveStats and matching synced orders
-                  for shipments.
-                </p>
+      
+
+
+      <Tabs value={activePlatform} onValueChange={(value) => setActivePlatform(value as "whatnot" | "tiktok")} className="space-y-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight">Platform workspaces</h3>
+            <p className="text-sm text-muted-foreground">Switch tabs to show the management data for the selected marketplace only.</p>
+          </div>
+          <TabsList className="grid w-full grid-cols-2 rounded-2xl bg-muted/70 p-1 lg:w-[22rem]">
+            <TabsTrigger value="whatnot" className="rounded-xl">
+              <PackageSearch className="h-4 w-4" />
+              Whatnot
+            </TabsTrigger>
+            <TabsTrigger value="tiktok" className="rounded-xl">
+              <Store className="h-4 w-4" />
+              TikTok Shop
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="whatnot" className="space-y-5">
+          <Card className="border-border/60 shadow-sm">
+            <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-lg">Whatnot live show context</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">This section powers shipment operations using extension-fed live stats and shipment payloads.</p>
               </div>
-              <Button
-                disabled={isLoading || !liveId.trim()}
-                onClick={() =>
-                  void loadStats(false).then((out) =>
-                    void loadShipments(false, out?.statistic?.manifestUrls),
-                  )
-                }
-                className="shrink-0"
-              >
-                {isLoading ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner className="h-4 w-4" />
-                    Loading…
-                  </span>
-                ) : (
-                  "Load stats"
-                )}
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
+              <Badge variant="secondary" className="w-fit bg-sky-100 text-sky-900 hover:bg-sky-100">Extension workflow</Badge>
+            </CardHeader>
+            <CardContent className="space-y-4 p-5">
+              {!liveIdEditorOpen && liveId.trim() ? (
+                <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Resolved live id</p>
+                  <p className="mt-2 font-mono text-sm text-foreground">{liveId}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Filled automatically from the Whatnot extension and reused for stats and shipment matching.</p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-4 text-sm text-muted-foreground">
+                  When the extension is connected, the Live ID is resolved automatically. If it is unavailable, you can re-enable the manual input flow later without changing this dashboard layout.
+                </div>
+              )}
 
-      {errorMessage ? (
-        <Card className="border-destructive/30 bg-destructive/10">
-          <CardContent className="p-4 text-sm text-destructive">{errorMessage}</CardContent>
-        </Card>
-      ) : null}
+              {errorMessage ? (
+                <Card className="border-destructive/30 bg-destructive/10">
+                  <CardContent className="p-4 text-sm text-destructive">{errorMessage}</CardContent>
+                </Card>
+              ) : null}
 
-      {isLoading && !statistic ? (
-        <div className="flex min-h-[20vh] items-center justify-center text-sm text-muted-foreground">
-          <Spinner className="mr-2 h-4 w-4" />
-          Loading Whatnot live stats…
-        </div>
-      ) : null}
+              {isLoading && !statistic ? (
+                <div className="flex min-h-[16vh] items-center justify-center text-sm text-muted-foreground">
+                  <Spinner className="mr-2 h-4 w-4" />
+                  Loading Whatnot live stats…
+                </div>
+              ) : null}
 
-      {cards.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-          {cards.map((card) => (
-            <Card key={card.label} className="flex h-full min-h-0 flex-col border-border/60 shadow-none">
-              <CardHeader className="shrink-0 space-y-0 pb-2 pt-4">
-                <CardTitle className="flex min-h-[3rem] items-start text-xs leading-snug font-medium uppercase tracking-wide text-muted-foreground">
-                  <span>{card.label}</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="mt-auto shrink-0 pb-4 pt-0">
-                <p className="text-xl leading-none font-semibold tabular-nums">{card.value}</p>
-              </CardContent>
+              {cards.length > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {cards.map((card) => (
+                    <Card key={card.label} className="border-border/60 shadow-none">
+                      <CardContent className="p-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">{card.label}</p>
+                        <p className="mt-3 text-2xl font-semibold tracking-tight">{card.value}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/60 shadow-sm">
+            <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-lg">Whatnot shipments</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">Packaging, labels, and tracking information aligned to the current live show.</p>
+              </div>
+              <Badge variant="outline">Shipment table</Badge>
+            </CardHeader>
+            <CardContent className="space-y-4 p-5">
+              <p className="text-sm text-muted-foreground">
+                Shipments load after stats and use manifest links from MyLiveStats when available. Use refresh shipments to pull a new operational snapshot.
+              </p>
+
+              {isShipmentsLoading && shipmentRows.length === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner className="h-4 w-4" />
+                  Loading shipments…
+                </div>
+              ) : null}
+
+              {shipmentsError ? <p className="text-sm text-destructive">{shipmentsError}</p> : null}
+              {shipmentsHint ? <p className="text-sm text-muted-foreground">{shipmentsHint}</p> : null}
+
+              {shipmentRows.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableHead className="px-4 py-3">Recipient</TableHead>
+                        <TableHead className="px-4 py-3">Order date</TableHead>
+                        <TableHead className="px-4 py-3">Items</TableHead>
+                        <TableHead className="px-4 py-3">Value</TableHead>
+                        <TableHead className="px-4 py-3">Weight</TableHead>
+                        <TableHead className="px-4 py-3">Dimensions</TableHead>
+                        <TableHead className="px-4 py-3">Status</TableHead>
+                        <TableHead className="px-4 py-3">Tracking</TableHead>
+                        <TableHead className="px-4 py-3 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {shipmentRows.map((row) => {
+                        if (row.error || !row.shipment) {
+                          return (
+                            <TableRow key={row.shipmentId}>
+                              <TableCell colSpan={9} className="px-4 py-3 text-sm text-destructive">
+                                {row.shipmentId}: {row.error || "No data"}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        }
+
+                        const shipment = row.shipment as ShipmentNode
+                        const username = shipment.buyer && typeof shipment.buyer.username === "string" ? shipment.buyer.username : "—"
+                        const trackingUrl = typeof shipment.trackingUrl === "string" ? shipment.trackingUrl : ""
+                        const code = typeof shipment.trackingCode === "string" ? shipment.trackingCode : ""
+                        const shortCode = code.length > 12 ? `${code.slice(0, 5)}…${code.slice(-4)}` : code
+
+                        return (
+                          <TableRow key={row.shipmentId}>
+                            <TableCell className="px-4 py-4 font-medium">{username}</TableCell>
+                            <TableCell className="px-4 py-4">{formatShipmentTableDate(firstOrderItemCreatedAt(shipment))}</TableCell>
+                            <TableCell className="px-4 py-4">{typeof shipment.totalItemQuantity === "number" ? shipment.totalItemQuantity : "—"}</TableCell>
+                            <TableCell className="px-4 py-4">{formatValueFromShipment(shipment)}</TableCell>
+                            <TableCell className="px-4 py-4">{formatWeight(shipment)}</TableCell>
+                            <TableCell className="px-4 py-4">{formatDimensions(shipment)}</TableCell>
+                            <TableCell className="px-4 py-4">
+                              <StatusBadge variant={whatnotShipmentVariant(shipment.status)}>{humanizeStatus(shipment.status)}</StatusBadge>
+                            </TableCell>
+                            <TableCell className="px-4 py-4">
+                              <div className="flex flex-col gap-0.5 text-sm">
+                                <span className="text-muted-foreground">{humanizeMethod(shipment.method)}</span>
+                                {trackingUrl && code ? (
+                                  <a href={trackingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                                    {shortCode}
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                ) : (
+                                  <span>{code || "—"}</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="px-4 py-4 text-right">
+                              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedShipment(shipment)}>
+                                Details
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : null}
+
+              {!isLoading && !errorMessage && liveId.trim() && !statistic ? (
+                <p className="text-sm text-muted-foreground">No statistic returned for this liveId.</p>
+              ) : null}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="tiktok" className="space-y-5">
+        
+
+          {tiktokErrorMessage ? (
+            <Card className="border-destructive/30 bg-destructive/10">
+              <CardContent className="p-4 text-sm text-destructive">{tiktokErrorMessage}</CardContent>
             </Card>
-          ))}
-        </div>
-      ) : null}
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Shipments</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-xs text-muted-foreground">
-            Shipments load automatically after stats (including manifest links from MyLiveStats when available) and
-            from synced Orders for this live. Use <span className="font-medium text-foreground">Refresh shipments</span>{" "}
-            above if you need to re-sync without refreshing stats.
-          </p>
-          {isShipmentsLoading && shipmentRows.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner className="h-4 w-4" />
-              Loading shipments…
-            </div>
           ) : null}
 
-          {shipmentsError ? (
-            <p className="text-sm text-destructive">{shipmentsError}</p>
-          ) : null}
-          {shipmentsHint ? <p className="text-sm text-muted-foreground">{shipmentsHint}</p> : null}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className="border-border/60 shadow-sm"><CardContent className="p-5"><p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Matches</p><p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokShop ? tiktokShop.totalCount : "—"}</p><p className="mt-2 text-sm text-muted-foreground">Partner API search results in the active queue.</p></CardContent></Card>
+            <Card className="border-border/60 shadow-sm"><CardContent className="p-5"><p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Fulfillment queue</p><p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokQueueCount}</p><p className="mt-2 text-sm text-muted-foreground">Orders still moving through shipment workflow.</p></CardContent></Card>
+            <Card className="border-border/60 shadow-sm"><CardContent className="p-5"><p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Buyers</p><p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokBuyerCount}</p><p className="mt-2 text-sm text-muted-foreground">Distinct buyers in the visible TikTok queue.</p></CardContent></Card>
+          </div>
 
-          {shipmentRows.length > 0 ? (
-            <div className="overflow-x-auto rounded-xl border border-border/60">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Recipient</TableHead>
-                    <TableHead>Order date</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Weight</TableHead>
-                    <TableHead>Dimensions</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Tracking</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {shipmentRows.map((row) => {
-                    if (row.error || !row.shipment) {
-                      return (
-                        <TableRow key={row.shipmentId}>
-                          <TableCell colSpan={9} className="text-sm text-destructive">
-                            {row.shipmentId}: {row.error || "No data"}
+          <Card className="border-border/60 shadow-sm">
+            <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-lg">TikTok Shop queue</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">A platform-specific operational table for Partner API orders, separated from the Whatnot shipment flow.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">Partner API</Badge>
+                <Badge variant={tiktokDemoMode ? "secondary" : "default"}>{tiktokDemoMode ? "Mock Data" : "Live shop"}</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-5">
+              {isTikTokLoading && tiktokRows.length === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner className="h-4 w-4" />
+                  Loading TikTok order queue…
+                </div>
+              ) : null}
+
+              {tiktokRows.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-border/60">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableHead className="px-4 py-3">Order ID</TableHead>
+                        <TableHead className="px-4 py-3">Created</TableHead>
+                        <TableHead className="px-4 py-3">Buyer</TableHead>
+                        <TableHead className="px-4 py-3">Items</TableHead>
+                        <TableHead className="px-4 py-3">Summary</TableHead>
+                        <TableHead className="px-4 py-3">Total</TableHead>
+                        <TableHead className="px-4 py-3">Status</TableHead>
+                        <TableHead className="px-4 py-3">Shipping type</TableHead>
+                        <TableHead className="px-4 py-3 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tiktokRows.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="px-4 py-4 font-mono text-xs">{row.id}</TableCell>
+                          <TableCell className="px-4 py-4">{row.createdAtLabel}</TableCell>
+                          <TableCell className="px-4 py-4 font-medium">{row.buyer}</TableCell>
+                          <TableCell className="px-4 py-4">{row.lineCount}</TableCell>
+                          <TableCell className="max-w-[240px] truncate px-4 py-4" title={row.itemSummary}>{row.itemSummary}</TableCell>
+                          <TableCell className="px-4 py-4">{row.totalLabel}</TableCell>
+                          <TableCell className="px-4 py-4"><StatusBadge variant={tiktokStatusVariant(row.status)}>{row.status}</StatusBadge></TableCell>
+                          <TableCell className="px-4 py-4 text-xs uppercase tracking-wide text-muted-foreground">{row.shippingType}</TableCell>
+                          <TableCell className="px-4 py-4 text-right">
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedTikTokOrder(row.raw)}>
+                              Details
+                            </Button>
                           </TableCell>
                         </TableRow>
-                      )
-                    }
-                    const s = row.shipment as ShipmentNode
-                    const username =
-                      s.buyer && typeof s.buyer.username === "string" ? s.buyer.username : "—"
-                    const trackingUrl = typeof s.trackingUrl === "string" ? s.trackingUrl : ""
-                    const code = typeof s.trackingCode === "string" ? s.trackingCode : ""
-                    const shortCode = code.length > 12 ? `${code.slice(0, 5)}…${code.slice(-4)}` : code
-
-                    return (
-                      <TableRow key={row.shipmentId}>
-                        <TableCell className="font-medium">{username}</TableCell>
-                        <TableCell>{formatShipmentTableDate(firstOrderItemCreatedAt(s))}</TableCell>
-                        <TableCell>
-                          {typeof s.totalItemQuantity === "number" ? s.totalItemQuantity : "—"}
-                        </TableCell>
-                        <TableCell>{formatValueFromShipment(s)}</TableCell>
-                        <TableCell>{formatWeight(s)}</TableCell>
-                        <TableCell>{formatDimensions(s)}</TableCell>
-                        <TableCell className="capitalize">{humanizeStatus(s.status)}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-0.5 text-sm">
-                            <span className="text-muted-foreground">{humanizeMethod(s.method)}</span>
-                            {trackingUrl && code ? (
-                              <a
-                                href={trackingUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-primary hover:underline"
-                              >
-                                {shortCode}
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            ) : (
-                              <span>{code || "—"}</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="outline" size="sm" onClick={() => setSelectedShipment(s)}>
-                            Details
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {!isLoading && !errorMessage && liveId.trim() && !statistic ? (
-        <p className="text-sm text-muted-foreground">No statistic returned for this liveId.</p>
-      ) : null}
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={selectedShipment !== null} onOpenChange={(open) => !open && setSelectedShipment(null)}>
         <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden border-border/80 p-0 sm:max-w-[520px]">
@@ -1041,6 +1434,37 @@ export default function SellerOrderManagementPage() {
             <div className="min-h-0 flex-1 px-6 pb-6 pt-5">
               <ShipmentDetailsPanel shipment={selectedShipment} />
             </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={selectedTikTokOrder !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedTikTokOrder(null)
+            setSelectedTikTokOrderDetail(null)
+            setIsTikTokDetailLoading(false)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              <span>TikTok Shop order {displayText(selectedTikTokOrder?.id)}</span>
+              {tiktokDemoMode ? <Badge variant="secondary">Demo sample</Badge> : null}
+            </DialogTitle>
+          </DialogHeader>
+
+          {isTikTokDetailLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" />
+              Loading full order payload…
+            </div>
+          ) : null}
+
+          {selectedTikTokOrder ? (
+            <TikTokOrderManagementDetailBody order={(selectedTikTokOrderDetail ?? selectedTikTokOrder) as Record<string, unknown>} />
           ) : null}
         </DialogContent>
       </Dialog>

@@ -528,6 +528,163 @@ export interface TikTokShopOrderDetailResponse {
   requestId?: string | null
 }
 
+export interface TikTokFinanceStatementItem {
+  id: string
+  statement_time: number
+  settlement_amount: string
+  currency: string
+  revenue_amount?: string
+  fee_amount?: string
+  adjustment_amount?: string
+  payment_status?: string
+  payment_id?: string
+  net_sales_amount?: string
+  shipping_cost_amount?: string
+  payment_time?: number
+}
+
+export interface TikTokFinanceStatementsResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  nextPageToken: string | null
+  statements: TikTokFinanceStatementItem[]
+  requestId?: string | null
+}
+
+export interface TikTokFinanceAmount {
+  value?: string
+  currency?: string
+}
+
+export interface TikTokFinancePaymentItem {
+  create_time?: number
+  id: string
+  status?: string
+  amount?: TikTokFinanceAmount
+  settlement_amount?: TikTokFinanceAmount
+  reserve_amount?: TikTokFinanceAmount
+  payment_amount_before_exchange?: TikTokFinanceAmount
+  exchange_rate?: string
+  paid_time?: number
+  bank_account?: string
+}
+
+export interface TikTokFinancePaymentsResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  nextPageToken: string | null
+  payments: TikTokFinancePaymentItem[]
+  requestId?: string | null
+}
+
+export interface TikTokFinanceWithdrawalItem {
+  id: string
+  type?: string
+  amount?: string
+  currency?: string
+  status?: string
+  create_time?: number
+}
+
+export interface TikTokFinanceWithdrawalsResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  nextPageToken: string | null
+  totalCount: number
+  withdrawals: TikTokFinanceWithdrawalItem[]
+  requestId?: string | null
+}
+
+export interface TikTokFinanceStatementTransactionItem {
+  id: string
+  type?: string
+  order_id?: string
+  order_create_time?: number
+  adjustment_id?: string
+  adjustment_order_id?: string
+  adjustment_amount?: string
+  settlement_amount?: string
+  revenue_amount?: string
+  revenue_breakdown?: Record<string, unknown>
+  shipping_cost_amount?: string
+  shipping_cost_breakdown?: Record<string, unknown>
+  fee_tax_amount?: string
+  fee_tax_breakdown?: Record<string, unknown>
+  supplementary_component?: Record<string, unknown>
+  reserve_id?: string
+  reserve_amount?: string
+  associated_order_id?: string
+  reserve_status?: string
+  estimated_release_time?: number | string
+}
+
+export interface TikTokFinanceStatementTransactionsResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  nextPageToken: string | null
+  id: string
+  createTime?: number | null
+  status?: string | null
+  currency?: string | null
+  payableAmount?: string | null
+  totalReserveAmount?: string | null
+  totalSettlementAmount?: string | null
+  totalSettlementBreakdown?: Record<string, unknown> | null
+  totalCount: number
+  transactions: TikTokFinanceStatementTransactionItem[]
+  requestId?: string | null
+}
+
+export interface TikTokFinanceUnsettledOrderItem {
+  type?: string
+  id: string
+  status?: string
+  currency?: string
+  estimated_settlement?: number | string
+  unsettled_reason?: string
+  order_create_time?: number
+  order_delivery_time?: number
+  order_id?: string
+  adjustment_id?: string
+  adjustment_order_id?: string
+  est_adjustment_amount?: string
+  est_settlement_amount?: string
+  est_revenue_amount?: string
+  revenue_breakdown?: Record<string, unknown>
+  est_shipping_cost_amount?: string
+  shipping_cost_breakdown?: Record<string, unknown>
+  est_fee_tax_amount?: string
+  fee_tax_breakdown?: Record<string, unknown>
+}
+
+export interface TikTokFinanceUnsettledOrdersResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  nextPageToken: string | null
+  totalCount: number
+  sumEstSettlementAmount: string
+  sumEstRevenueAmount: string
+  sumEstAdjustmentAmount: string
+  sumEstFeeAmount: string
+  transactions: TikTokFinanceUnsettledOrderItem[]
+  requestId?: string | null
+}
+
 export interface WhatnotMoneySnapshot {
   amount?: number
   currency?: string
@@ -1045,6 +1202,193 @@ export async function getTikTokShopOrderDetail(token: string, orderId: string) {
     `/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}`,
     { token },
   )
+}
+
+export async function getTikTokFinanceStatements(
+  token: string,
+  params?: {
+    statementTimeGe?: number
+    statementTimeLt?: number
+    paymentStatus?: string
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  const search = new URLSearchParams()
+  if (typeof params?.statementTimeGe === "number") {
+    search.set("statementTimeGe", String(params.statementTimeGe))
+  }
+  if (typeof params?.statementTimeLt === "number") {
+    search.set("statementTimeLt", String(params.statementTimeLt))
+  }
+  if (typeof params?.paymentStatus === "string" && params.paymentStatus.trim()) {
+    search.set("paymentStatus", params.paymentStatus.trim())
+  }
+  if (typeof params?.pageSize === "number") {
+    search.set("pageSize", String(params.pageSize))
+  }
+  if (typeof params?.pageToken === "string" && params.pageToken.trim()) {
+    search.set("pageToken", params.pageToken.trim())
+  }
+  if (params?.sortOrder === "ASC" || params?.sortOrder === "DESC") {
+    search.set("sortOrder", params.sortOrder)
+  }
+  if (typeof params?.sortField === "string" && params.sortField.trim()) {
+    search.set("sortField", params.sortField.trim())
+  }
+
+  const query = search.toString()
+  const path = query
+    ? `/api/integrations/tiktok/shop/finance/statements?${query}`
+    : "/api/integrations/tiktok/shop/finance/statements"
+  return request<TikTokFinanceStatementsResponse>(path, { token })
+}
+
+export async function getTikTokFinancePayments(
+  token: string,
+  params?: {
+    createTimeGe?: number
+    createTimeLt?: number
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  const search = new URLSearchParams()
+  if (typeof params?.createTimeGe === "number") {
+    search.set("createTimeGe", String(params.createTimeGe))
+  }
+  if (typeof params?.createTimeLt === "number") {
+    search.set("createTimeLt", String(params.createTimeLt))
+  }
+  if (typeof params?.pageSize === "number") {
+    search.set("pageSize", String(params.pageSize))
+  }
+  if (typeof params?.pageToken === "string" && params.pageToken.trim()) {
+    search.set("pageToken", params.pageToken.trim())
+  }
+  if (params?.sortOrder === "ASC" || params?.sortOrder === "DESC") {
+    search.set("sortOrder", params.sortOrder)
+  }
+  if (typeof params?.sortField === "string" && params.sortField.trim()) {
+    search.set("sortField", params.sortField.trim())
+  }
+
+  const query = search.toString()
+  const path = query
+    ? `/api/integrations/tiktok/shop/finance/payments?${query}`
+    : "/api/integrations/tiktok/shop/finance/payments"
+  return request<TikTokFinancePaymentsResponse>(path, { token })
+}
+
+export async function getTikTokFinanceWithdrawals(
+  token: string,
+  params?: {
+    createTimeGe?: number
+    createTimeLt?: number
+    types?: string[]
+    pageSize?: number
+    pageToken?: string
+  },
+) {
+  const search = new URLSearchParams()
+  if (typeof params?.createTimeGe === "number") {
+    search.set("createTimeGe", String(params.createTimeGe))
+  }
+  if (typeof params?.createTimeLt === "number") {
+    search.set("createTimeLt", String(params.createTimeLt))
+  }
+  if (Array.isArray(params?.types) && params.types.length > 0) {
+    search.set("types", params.types.join(","))
+  }
+  if (typeof params?.pageSize === "number") {
+    search.set("pageSize", String(params.pageSize))
+  }
+  if (typeof params?.pageToken === "string" && params.pageToken.trim()) {
+    search.set("pageToken", params.pageToken.trim())
+  }
+
+  const query = search.toString()
+  const path = query
+    ? `/api/integrations/tiktok/shop/finance/withdrawals?${query}`
+    : "/api/integrations/tiktok/shop/finance/withdrawals"
+  return request<TikTokFinanceWithdrawalsResponse>(path, { token })
+}
+
+export async function getTikTokFinanceStatementTransactions(
+  token: string,
+  statementId: string,
+  params?: {
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  const id = typeof statementId === "string" ? statementId.trim() : ""
+  if (!id) {
+    throw new Error("statementId is required.")
+  }
+
+  const search = new URLSearchParams()
+  if (typeof params?.pageSize === "number") {
+    search.set("pageSize", String(params.pageSize))
+  }
+  if (typeof params?.pageToken === "string" && params.pageToken.trim()) {
+    search.set("pageToken", params.pageToken.trim())
+  }
+  if (params?.sortOrder === "ASC" || params?.sortOrder === "DESC") {
+    search.set("sortOrder", params.sortOrder)
+  }
+  if (typeof params?.sortField === "string" && params.sortField.trim()) {
+    search.set("sortField", params.sortField.trim())
+  }
+
+  const query = search.toString()
+  const basePath = `/api/integrations/tiktok/shop/finance/statements/${encodeURIComponent(id)}/transactions`
+  const path = query ? `${basePath}?${query}` : basePath
+  return request<TikTokFinanceStatementTransactionsResponse>(path, { token })
+}
+
+export async function getTikTokFinanceUnsettledOrders(
+  token: string,
+  params?: {
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+    searchTimeGe?: number
+    searchTimeLt?: number
+  },
+) {
+  const search = new URLSearchParams()
+  if (typeof params?.pageSize === "number") {
+    search.set("pageSize", String(params.pageSize))
+  }
+  if (typeof params?.pageToken === "string" && params.pageToken.trim()) {
+    search.set("pageToken", params.pageToken.trim())
+  }
+  if (params?.sortOrder === "ASC" || params?.sortOrder === "DESC") {
+    search.set("sortOrder", params.sortOrder)
+  }
+  if (typeof params?.sortField === "string" && params.sortField.trim()) {
+    search.set("sortField", params.sortField.trim())
+  }
+  if (typeof params?.searchTimeGe === "number") {
+    search.set("searchTimeGe", String(params.searchTimeGe))
+  }
+  if (typeof params?.searchTimeLt === "number") {
+    search.set("searchTimeLt", String(params.searchTimeLt))
+  }
+
+  const query = search.toString()
+  const path = query
+    ? `/api/integrations/tiktok/shop/finance/orders/unsettled?${query}`
+    : "/api/integrations/tiktok/shop/finance/orders/unsettled"
+  return request<TikTokFinanceUnsettledOrdersResponse>(path, { token })
 }
 
 export async function fetchWhatnotMyLiveStats(token: string, liveId: string) {
