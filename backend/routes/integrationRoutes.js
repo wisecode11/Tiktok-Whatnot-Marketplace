@@ -14,6 +14,9 @@ const {
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
+  searchTikTokGlobalProductsData,
+  createTikTokGlobalProductsData,
+  getTikTokGlobalProductData,
   getTikTokShopOrderDetailData,
   getWhatnotOrders,
   syncWhatnotOrders,
@@ -65,6 +68,21 @@ router.get("/tiktok/creator-info", authenticateRequest, getTikTokCreatorInfoData
 router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.post("/tiktok/shop/orders/search", authenticateRequest, searchTikTokShopOrdersData);
+router.post(
+  "/tiktok/shop/product/202309/global_products/search",
+  authenticateRequest,
+  searchTikTokGlobalProductsData,
+);
+router.post(
+  "/tiktok/shop/product/202309/products",
+  authenticateRequest,
+  createTikTokGlobalProductsData,
+);
+router.get(
+  "/tiktok/shop/product/202309/products/:productId",
+  authenticateRequest,
+  getTikTokGlobalProductData,
+);
 router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
 router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInventorySnapshotData);
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);

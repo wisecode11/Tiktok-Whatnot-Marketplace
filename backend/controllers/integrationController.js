@@ -1,4 +1,10 @@
-const { searchTiktokShopOrders, getTiktokShopOrderDetail } = require("../services/tiktokShopService");
+const {
+  searchTiktokShopOrders,
+  searchTiktokGlobalProducts,
+  createTiktokGlobalProduct,
+  getTiktokGlobalProduct,
+  getTiktokShopOrderDetail,
+} = require("../services/tiktokShopService");
 
 const {
   checkStripeAccountStatus,
@@ -500,6 +506,50 @@ async function getTikTokShopOrderDetailData(req, res) {
   }
 }
 
+/** Proxies TikTok Shop `POST /product/202309/global_products/search` (mock envelope until shop is connected). */
+async function searchTikTokGlobalProductsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await searchTiktokGlobalProducts({
+      clerkUserId: req.auth.userId,
+      body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function createTikTokGlobalProductsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await createTiktokGlobalProduct({
+      clerkUserId: req.auth.userId,
+      body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/** Proxies TikTok Shop `GET /product/202309/products/{product_id}` (mock until shop is connected). */
+async function getTikTokGlobalProductData(req, res) {
+  try {
+    const rawId =
+      typeof req.params.productId === "string"
+        ? req.params.productId
+        : String(req.params.productId ?? "");
+    const result = await getTiktokGlobalProduct({
+      clerkUserId: req.auth.userId,
+      productId: decodeURIComponent(rawId.trim()),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function updateWhatnotBio(req, res) {
   try {
     const result = await updateWhatnotBioFromPlatform({
@@ -586,6 +636,9 @@ module.exports = {
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
+  searchTikTokGlobalProductsData,
+  createTikTokGlobalProductsData,
+  getTikTokGlobalProductData,
   getTikTokShopOrderDetailData,
   getWhatnotOrders: listWhatnotOrders,
   syncWhatnotOrders,
