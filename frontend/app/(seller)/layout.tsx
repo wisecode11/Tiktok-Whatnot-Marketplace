@@ -26,6 +26,7 @@ import {
   ClipboardList,
   CircleDollarSign,
   Building2,
+  Truck,
 } from "lucide-react"
 
 const sellerNavigation = [
@@ -43,6 +44,7 @@ const sellerNavigation = [
       { title: "Order Management", href: "/seller/order-management", icon: ClipboardList, requiresSubscription: true },
       { title: "Finance Management", href: "/seller/finance-management", icon: CircleDollarSign },
       { title: "Chat", href: "/seller/chat", icon: MessageSquare, requiresSubscription: true },
+      { title: "Fulfillment", href: "/seller/fulfillment", icon: Truck, requiresSubscription: true },
     ],
   },
   {

@@ -528,6 +528,42 @@ export interface TikTokShopOrderDetailResponse {
   requestId?: string | null
 }
 
+export interface TikTokShopPackageSku {
+  id?: string
+  name?: string
+  image_url?: string
+  quantity?: number
+}
+
+export interface TikTokShopPackageOrder {
+  id?: string
+  skus?: TikTokShopPackageSku[]
+}
+
+export interface TikTokShopPackage {
+  id?: string
+  orders?: TikTokShopPackageOrder[]
+  create_time?: number
+  update_time?: number
+  status?: string
+  tracking_number?: string
+  shipping_provider_name?: string
+  shipping_provider_id?: string
+  order_line_item_ids?: string[]
+}
+
+export interface TikTokShopPackagesSearchResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  totalCount: number
+  nextPageToken: string | null
+  packages: TikTokShopPackage[]
+  requestId?: string | null
+}
+
 /** TikTok-shaped body from `POST /product/202309/global_products/search` (Partner API). */
 export interface TikTokGlobalProductSearchSkuPrice {
   currency?: string
@@ -1269,6 +1305,29 @@ export async function searchTikTokShopOrders(
   })
 }
 
+export async function searchTikTokShopPackages(
+  token: string,
+  payload?: {
+    filters?: {
+      create_time_ge?: number
+      create_time_lt?: number
+      update_time_ge?: number
+      update_time_lt?: number
+      package_status?: "PROCESSING" | "FULFILLING" | "COMPLETED" | "CANCELLED" | string
+    }
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  return request<TikTokShopPackagesSearchResponse>("/api/integrations/tiktok/shop/packages/search", {
+    token,
+    method: "POST",
+    body: (payload || {}) as Record<string, unknown>,
+  })
+}
+
 /**
  * Proxies TikTok Shop Partner `POST /product/202309/global_products/search`.
  * `page_size` / `page_token` are stripped server-side for the TikTok query string; other keys stay in the JSON body.
@@ -1324,6 +1383,123 @@ export async function getTikTokShopOrderDetail(token: string, orderId: string) {
   return request<TikTokShopOrderDetailResponse>(
     `/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}`,
     { token },
+  )
+}
+
+export interface CreatePackagePayload {
+  ship_type: string
+  order_id?: string
+  order_line_item?: Array<{ order_line_id: string; sub_item_id?: string }>
+  order_list_ids?: string[]
+  dimension?: { length: string; width: string; height: string; unit: string }
+  shipping_service_id?: string
+  weight?: { value: string; unit: string }
+}
+
+export interface CreatePackageResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  requestBody: Record<string, unknown>
+  package_id: string | null
+  dimension: { length: string; width: string; height: string; unit: string } | null
+  weight: { value: string; unit: string } | null
+  shipping_service_info: {
+    id: string
+    name: string
+    price: string
+    currency: string
+    earliest_delivery_days: number
+    latest_delivery_days: number
+    shipping_provider_id?: string
+    shipping_provider_name?: string
+  } | null
+  create_time: number
+}
+
+export interface SplitOrderPayload {
+  splittable_groups: Array<{
+    id: string
+    order_line_item_ids: string[]
+  }>
+  splittable_groups_v2: Array<{
+    id: string
+    order_line_list: Array<{
+      order_line_id: string
+      sub_item_id: string
+    }>
+  }>
+}
+
+export interface SplitOrderResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  orderId: string
+  requestBody: SplitOrderPayload
+  packages: Array<{
+    splittable_group_id: string
+    id: string
+  }>
+  requestId?: string | null
+}
+
+export async function createTikTokShopPackage(token: string, payload: CreatePackagePayload) {
+  return request<CreatePackageResponse>("/api/integrations/tiktok/shop/packages", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function splitTikTokShopOrder(token: string, orderId: string, payload: SplitOrderPayload) {
+  const id = typeof orderId === "string" ? orderId.trim() : ""
+  if (!id) {
+    throw new Error("orderId is required.")
+  }
+  return request<SplitOrderResponse>(`/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}/split`, {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export interface ShipPackagePayload {
+  handover_method?: "PICKUP" | "DROP_OFF" | string
+  pickup_slot?: {
+    start_time: number
+    end_time: number
+  }
+  self_shipment?: {
+    tracking_number: string
+    shipping_provider_id: string
+  }
+}
+
+export interface ShipPackageResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  packageId: string
+  requestBody: Record<string, unknown>
+  code: number
+  message: string
+  data: Record<string, unknown>
+  requestId?: string | null
+}
+
+export async function shipTikTokPackage(token: string, packageId: string, payload: ShipPackagePayload) {
+  const id = typeof packageId === "string" ? packageId.trim() : ""
+  if (!id) {
+    throw new Error("packageId is required.")
+  }
+  return request<ShipPackageResponse>(
+    `/api/integrations/tiktok/shop/packages/${encodeURIComponent(id)}/ship`,
+    {
+      token,
+      method: "POST",
+      body: payload as unknown as Record<string, unknown>,
+    }
   )
 }
 
