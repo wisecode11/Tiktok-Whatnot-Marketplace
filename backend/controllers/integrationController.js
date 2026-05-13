@@ -3,6 +3,10 @@ const {
   searchTiktokShopPackages,
   splitTiktokShopOrder,
   shipTiktokPackage,
+  searchTiktokGlobalProducts,
+  createTiktokGlobalProduct,
+  getTiktokGlobalProduct,
+  getTiktokShopOrderDetail,
   getTiktokShopOrderDetail,
   createTiktokPackage,
   getTiktokFinanceStatements,
@@ -587,6 +591,13 @@ async function shipTikTokPackageData(req, res) {
   }
 }
 
+/** Proxies TikTok Shop `POST /product/202309/global_products/search` (mock envelope until shop is connected). */
+async function searchTikTokGlobalProductsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await searchTiktokGlobalProducts({
+      clerkUserId: req.auth.userId,
+      body,
 async function getTikTokFinanceStatementsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -606,6 +617,12 @@ async function getTikTokFinanceStatementsData(req, res) {
   }
 }
 
+async function createTikTokGlobalProductsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await createTiktokGlobalProduct({
+      clerkUserId: req.auth.userId,
+      body,
 async function getTikTokFinancePaymentsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -624,6 +641,16 @@ async function getTikTokFinancePaymentsData(req, res) {
   }
 }
 
+/** Proxies TikTok Shop `GET /product/202309/products/{product_id}` (mock until shop is connected). */
+async function getTikTokGlobalProductData(req, res) {
+  try {
+    const rawId =
+      typeof req.params.productId === "string"
+        ? req.params.productId
+        : String(req.params.productId ?? "");
+    const result = await getTiktokGlobalProduct({
+      clerkUserId: req.auth.userId,
+      productId: decodeURIComponent(rawId.trim()),
 async function getTikTokFinanceWithdrawalsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -763,6 +790,9 @@ module.exports = {
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
   searchTikTokShopPackagesData,
+  searchTikTokGlobalProductsData,
+  createTikTokGlobalProductsData,
+  getTikTokGlobalProductData,
   getTikTokShopOrderDetailData,
   createTikTokShopPackageData,
   splitTikTokShopOrderData,

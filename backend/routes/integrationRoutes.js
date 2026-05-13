@@ -15,6 +15,9 @@ const {
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
   searchTikTokShopPackagesData,
+  searchTikTokGlobalProductsData,
+  createTikTokGlobalProductsData,
+  getTikTokGlobalProductData,
   getTikTokShopOrderDetailData,
   createTikTokShopPackageData,
   splitTikTokShopOrderData,
@@ -78,6 +81,21 @@ router.post("/tiktok/shop/packages/search", authenticateRequest, searchTikTokSho
 router.post("/tiktok/shop/packages", authenticateRequest, createTikTokShopPackageData);
 router.post("/tiktok/shop/orders/:orderId/split", authenticateRequest, splitTikTokShopOrderData);
 router.post("/tiktok/shop/packages/:packageId/ship", authenticateRequest, shipTikTokPackageData);
+router.post(
+  "/tiktok/shop/product/202309/global_products/search",
+  authenticateRequest,
+  searchTikTokGlobalProductsData,
+);
+router.post(
+  "/tiktok/shop/product/202309/products",
+  authenticateRequest,
+  createTikTokGlobalProductsData,
+);
+router.get(
+  "/tiktok/shop/product/202309/products/:productId",
+  authenticateRequest,
+  getTikTokGlobalProductData,
+);
 router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
 router.get("/tiktok/shop/finance/statements", authenticateRequest, getTikTokFinanceStatementsData);
 router.get("/tiktok/shop/finance/payments", authenticateRequest, getTikTokFinancePaymentsData);

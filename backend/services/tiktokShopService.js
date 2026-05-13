@@ -3,18 +3,25 @@ const crypto = require("crypto");
 const ConnectedAccount = require("../models/ConnectedAccount");
 const User = require("../models/Users");
 const { buildMockOrdersSearch, findMockOrderById } = require("../data/tiktokShopOrderMocks");
+const { buildMockGlobalProductsSearch } = require("../data/tiktokGlobalProductsSearchMock");
+const { buildMockGlobalProductsCreateResponse } = require("../data/tiktokGlobalProductsCreateMock");
+const { buildMockGlobalProductGetResponse } = require("../data/tiktokGlobalProductGetMock");
 
 const TIKTOK_SHOP_API_BASE = (process.env.TIKTOK_SHOP_API_BASE || "https://open-api.tiktokglobalshop.com").replace(
   /\/$/,
   "",
 );
 const ORDER_SEARCH_PATH = "/order/202309/orders/search";
+/** Global product search (Partner API 202309) — same path the live Open Platform uses. */
+const GLOBAL_PRODUCT_SEARCH_PATH = "/product/202309/global_products/search";
 /** Order detail by id (query `ids`) — same API group as Partner examples. */
 const ORDER_GET_PATH = "/order/202309/orders";
 const PACKAGE_SEARCH_PATH = "/fulfillment/202309/packages/search";
 const SPLIT_ORDER_PATH_PREFIX = "/fulfillment/202309/orders";
 /** Create fulfillment package — Partner API 202512. */
 const CREATE_PACKAGE_PATH = "/fulfillment/202512/packages";
+/** Create product (Partner API 202309). */
+const GLOBAL_PRODUCT_CREATE_PATH = "/product/202309/products";
 const FINANCE_STATEMENTS_PATH = "/finance/202309/statements";
 const FINANCE_PAYMENTS_PATH = "/finance/202309/payments";
 const FINANCE_WITHDRAWALS_PATH = "/finance/202309/withdrawals";
@@ -1018,6 +1025,210 @@ async function searchTiktokShopPackages({
   );
 }
 
+function stripGlobalProductPagination(body) {
+  if (!body || typeof body !== "object") {
+    return {};
+  }
+  const out = { ...body };
+  delete out.page_size;
+  delete out.page_token;
+  return out;
+}
+
+/**
+ * Proxies `POST /product/202309/global_products/search`.
+ * When shop credentials are missing, returns a TikTok-shaped mock envelope (same keys as production).
+ */
+async function searchTiktokGlobalProducts({ clerkUserId, body = {} } = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+  const raw = body && typeof body === "object" ? body : {};
+  const pageSizeRaw = raw.page_size != null ? Number(raw.page_size) : 100;
+  const safeSize = Math.min(Math.max(Number.isFinite(pageSizeRaw) ? pageSizeRaw : 100, 1), 100);
+  const pageToken = typeof raw.page_token === "string" ? raw.page_token.trim() : "";
+  const filterBody = stripGlobalProductPagination(raw);
+
+  if (!creds.shopConnected) {
+    return buildMockGlobalProductsSearch({
+      pageSize: safeSize,
+      pageToken,
+      filters: filterBody,
+    });
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const bodyString = JSON.stringify(filterBody);
+
+  const queryForSign = {
+    app_key: creds.appKey,
+    shop_cipher: creds.shopCipher,
+    timestamp: String(timestamp),
+    page_size: String(safeSize),
+  };
+
+  if (pageToken) {
+    queryForSign.page_token = pageToken;
+  }
+
+  const sign = signTiktokShopRequest(creds.appSecret, GLOBAL_PRODUCT_SEARCH_PATH, queryForSign, bodyString);
+  const querySigned = { ...queryForSign, sign };
+
+  const url = new URL(`${TIKTOK_SHOP_API_BASE}${GLOBAL_PRODUCT_SEARCH_PATH}`);
+  for (const [k, v] of Object.entries(querySigned)) {
+    if (v != null && String(v) !== "") {
+      url.searchParams.set(k, String(v));
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tts-access-token": creds.accessToken,
+    },
+    body: bodyString,
+  });
+
+  const text = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw createHttpError(502, "TikTok Shop returned a non-JSON response.", {
+      preview: text.slice(0, 500),
+    });
+  }
+
+  if (!response.ok) {
+    throw createHttpError(
+      response.status,
+      payload.message || `TikTok Shop request failed (HTTP ${response.status}).`,
+      payload,
+    );
+  }
+
+  if (payload.code !== 0) {
+    throw createHttpError(502, payload.message || "TikTok Shop API returned an error.", payload);
+  }
+
+  return payload;
+}
+
+function stripUndefinedDeep(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => stripUndefinedDeep(v))
+      .filter((v) => v !== undefined)
+  }
+  if (value && typeof value === "object") {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) {
+      if (v === undefined) continue
+      const next = stripUndefinedDeep(v)
+      if (next !== undefined) out[k] = next
+    }
+    return out
+  }
+  return value
+}
+
+/**
+ * Proxies TikTok Shop Partner `POST /product/202309/products`.
+ * When shop credentials are missing, returns a TikTok-shaped mock response.
+ */
+async function createTiktokGlobalProduct({ clerkUserId, body = {} } = {}) {
+  const creds = await resolveShopCredentials(clerkUserId)
+
+  if (!creds.shopConnected) {
+    return buildMockGlobalProductsCreateResponse(body)
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const cleanBody = stripUndefinedDeep(body && typeof body === "object" ? body : {})
+  const bodyString = JSON.stringify(cleanBody)
+
+  const queryForSign = {
+    app_key: creds.appKey,
+    shop_cipher: creds.shopCipher,
+    timestamp: String(timestamp),
+  }
+
+  const sign = signTiktokShopRequest(creds.appSecret, GLOBAL_PRODUCT_CREATE_PATH, queryForSign, bodyString)
+  const querySigned = { ...queryForSign, sign }
+
+  const url = new URL(`${TIKTOK_SHOP_API_BASE}${GLOBAL_PRODUCT_CREATE_PATH}`)
+  for (const [k, v] of Object.entries(querySigned)) {
+    if (v != null && String(v) !== "") {
+      url.searchParams.set(k, String(v))
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tts-access-token": creds.accessToken,
+    },
+    body: bodyString,
+  })
+
+  const text = await response.text()
+  let payload
+
+  try {
+    payload = JSON.parse(text)
+  } catch {
+    throw createHttpError(502, "TikTok Shop returned a non-JSON response.", {
+      preview: text.slice(0, 500),
+    })
+  }
+
+  if (!response.ok) {
+    throw createHttpError(
+      response.status,
+      payload.message || `TikTok Shop request failed (HTTP ${response.status}).`,
+      payload,
+    )
+  }
+
+  if (payload.code !== 0) {
+    throw createHttpError(502, payload.message || "TikTok Shop API returned an error.", payload)
+  }
+
+  return payload
+}
+
+/**
+ * Proxies TikTok Shop Partner `GET /product/202309/products/{product_id}`.
+ * Mock envelope when shop credentials are not connected.
+ */
+async function getTiktokGlobalProduct({ clerkUserId, productId } = {}) {
+  const id = typeof productId === "string" ? productId.trim() : String(productId ?? "").trim();
+  if (!id) {
+    throw createHttpError(400, "product_id is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return buildMockGlobalProductGetResponse(id);
+  }
+
+  const path = `${GLOBAL_PRODUCT_CREATE_PATH}/${encodeURIComponent(id)}`;
+  const { payload } = await tiktokPartnerFetch(creds, {
+    method: "GET",
+    path,
+    extraQuery: {
+      return_under_review_version: "true",
+      return_draft_version: "true",
+      locale: "en",
+    },
+    bodyObject: undefined,
+  });
+
+  return payload;
+}
+
 async function getTiktokShopOrderDetail({ clerkUserId, orderId }) {
   const id = typeof orderId === "string" ? orderId.trim() : "";
   if (!id) {
@@ -1283,6 +1494,9 @@ module.exports = {
   searchTiktokShopPackages,
   splitTiktokShopOrder,
   shipTiktokPackage,
+  searchTiktokGlobalProducts,
+  createTiktokGlobalProduct,
+  getTiktokGlobalProduct,
   getTiktokShopOrderDetail,
   createTiktokPackage,
   getTiktokFinanceStatements,
