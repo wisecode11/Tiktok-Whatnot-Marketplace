@@ -1,6 +1,10 @@
 const {
   searchTiktokShopOrders,
+  searchTiktokShopPackages,
+  splitTiktokShopOrder,
+  shipTiktokPackage,
   getTiktokShopOrderDetail,
+  createTiktokPackage,
   getTiktokFinanceStatements,
   getTiktokFinancePayments,
   getTiktokFinanceWithdrawals,
@@ -492,6 +496,23 @@ async function searchTikTokShopOrdersData(req, res) {
   }
 }
 
+async function searchTikTokShopPackagesData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await searchTiktokShopPackages({
+      clerkUserId: req.auth.userId,
+      filters: body.filters,
+      pageSize: body.pageSize != null ? Number(body.pageSize) : undefined,
+      pageToken: typeof body.pageToken === "string" ? body.pageToken : undefined,
+      sortOrder: body.sortOrder === "ASC" || body.sortOrder === "DESC" ? body.sortOrder : undefined,
+      sortField: typeof body.sortField === "string" ? body.sortField : undefined,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokShopOrderDetailData(req, res) {
   try {
     const rawId =
@@ -501,6 +522,64 @@ async function getTikTokShopOrderDetailData(req, res) {
     const result = await getTiktokShopOrderDetail({
       clerkUserId: req.auth.userId,
       orderId: decodeURIComponent(rawId.trim()),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function createTikTokShopPackageData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await createTiktokPackage({
+      clerkUserId: req.auth.userId,
+      shipType: body.ship_type,
+      orderId: body.order_id,
+      orderLineItems: Array.isArray(body.order_line_item) ? body.order_line_item : [],
+      orderListIds: Array.isArray(body.order_list_ids) ? body.order_list_ids : [],
+      dimension: body.dimension,
+      shippingServiceId: body.shipping_service_id,
+      weight: body.weight,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function splitTikTokShopOrderData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const rawId =
+      typeof req.params.orderId === "string"
+        ? req.params.orderId
+        : String(req.params.orderId ?? "");
+    const result = await splitTiktokShopOrder({
+      clerkUserId: req.auth.userId,
+      orderId: decodeURIComponent(rawId.trim()),
+      splittableGroups: Array.isArray(body.splittable_groups) ? body.splittable_groups : [],
+      splittableGroupsV2: Array.isArray(body.splittable_groups_v2) ? body.splittable_groups_v2 : [],
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function shipTikTokPackageData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const rawId =
+      typeof req.params.packageId === "string"
+        ? req.params.packageId
+        : String(req.params.packageId ?? "");
+    const result = await shipTiktokPackage({
+      clerkUserId: req.auth.userId,
+      packageId: decodeURIComponent(rawId.trim()),
+      handoverMethod: body.handover_method,
+      pickupSlot: body.pickup_slot,
+      selfShipment: body.self_shipment,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -683,7 +762,11 @@ module.exports = {
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
+  searchTikTokShopPackagesData,
   getTikTokShopOrderDetailData,
+  createTikTokShopPackageData,
+  splitTikTokShopOrderData,
+  shipTikTokPackageData,
   getTikTokFinanceStatementsData,
   getTikTokFinancePaymentsData,
   getTikTokFinanceWithdrawalsData,

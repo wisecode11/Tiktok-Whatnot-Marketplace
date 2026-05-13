@@ -14,7 +14,11 @@ const {
   getTikTokProfileData,
   getTikTokVideoAnalyticsData,
   searchTikTokShopOrdersData,
+  searchTikTokShopPackagesData,
   getTikTokShopOrderDetailData,
+  createTikTokShopPackageData,
+  splitTikTokShopOrderData,
+  shipTikTokPackageData,
   getTikTokFinanceStatementsData,
   getTikTokFinancePaymentsData,
   getTikTokFinanceWithdrawalsData,
@@ -70,6 +74,10 @@ router.get("/tiktok/creator-info", authenticateRequest, getTikTokCreatorInfoData
 router.get("/tiktok/profile", authenticateRequest, getTikTokProfileData);
 router.get("/tiktok/video-analytics", authenticateRequest, getTikTokVideoAnalyticsData);
 router.post("/tiktok/shop/orders/search", authenticateRequest, searchTikTokShopOrdersData);
+router.post("/tiktok/shop/packages/search", authenticateRequest, searchTikTokShopPackagesData);
+router.post("/tiktok/shop/packages", authenticateRequest, createTikTokShopPackageData);
+router.post("/tiktok/shop/orders/:orderId/split", authenticateRequest, splitTikTokShopOrderData);
+router.post("/tiktok/shop/packages/:packageId/ship", authenticateRequest, shipTikTokPackageData);
 router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
 router.get("/tiktok/shop/finance/statements", authenticateRequest, getTikTokFinanceStatementsData);
 router.get("/tiktok/shop/finance/payments", authenticateRequest, getTikTokFinancePaymentsData);
