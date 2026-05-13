@@ -640,6 +640,8 @@ export interface TikTokGlobalProductsCreateResponse {
     skus?: Array<Record<string, unknown>>
     warnings?: Array<{ message?: string }>
   }
+}
+
 export interface TikTokFinanceStatementItem {
   id: string
   statement_time: number

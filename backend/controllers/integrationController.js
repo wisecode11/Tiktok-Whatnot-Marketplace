@@ -7,7 +7,6 @@ const {
   createTiktokGlobalProduct,
   getTiktokGlobalProduct,
   getTiktokShopOrderDetail,
-  getTiktokShopOrderDetail,
   createTiktokPackage,
   getTiktokFinanceStatements,
   getTiktokFinancePayments,
@@ -598,6 +597,13 @@ async function searchTikTokGlobalProductsData(req, res) {
     const result = await searchTiktokGlobalProducts({
       clerkUserId: req.auth.userId,
       body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinanceStatementsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -623,6 +629,13 @@ async function createTikTokGlobalProductsData(req, res) {
     const result = await createTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinancePaymentsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -651,6 +664,13 @@ async function getTikTokGlobalProductData(req, res) {
     const result = await getTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       productId: decodeURIComponent(rawId.trim()),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinanceWithdrawalsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};

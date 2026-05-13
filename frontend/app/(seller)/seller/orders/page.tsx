@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAuth } from "@clerk/nextjs"
 import { Activity, Info, PackageSearch, RefreshCw, ShoppingBag, Store, Truck, Wallet } from "lucide-react"
 
+import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -12,7 +13,6 @@ import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -555,6 +555,7 @@ export default function SellerOrdersPage() {
   const [tiktokLiveDetailRaw, setTiktokLiveDetailRaw] = useState<Record<string, unknown> | null>(null)
   const [tiktokLiveDetailLoading, setTiktokLiveDetailLoading] = useState(false)
   const [tiktokLiveDetailError, setTiktokLiveDetailError] = useState<string | null>(null)
+  const [activePlatform, setActivePlatform] = useState<MarketplacePlatform>("whatnot")
 
   const loadOrders = async (isManualRefresh = false) => {
     if (!isLoaded) {
@@ -801,25 +802,24 @@ export default function SellerOrdersPage() {
         </div>
       )}
 
-      <Tabs defaultValue="whatnot" className="space-y-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="space-y-5">
+        <div className="space-y-3">
           <div>
             <h3 className="text-lg font-semibold tracking-tight">Platform order streams</h3>
-            <p className="text-sm text-muted-foreground">Use the tabs to switch between Whatnot and TikTok data without changing pages.</p>
+            <p className="text-sm text-muted-foreground">Use the same marketplace switch from inventory management to move between Whatnot and TikTok orders.</p>
           </div>
-          <TabsList className="grid w-full grid-cols-2 rounded-2xl bg-muted/70 p-1 lg:w-[22rem]">
-            <TabsTrigger value="whatnot" className="rounded-xl">
-              <PackageSearch className="h-4 w-4" />
-              Whatnot
-            </TabsTrigger>
-            <TabsTrigger value="tiktok" className="rounded-xl">
-              <Store className="h-4 w-4" />
-              TikTok Shop
-            </TabsTrigger>
-          </TabsList>
+          <MarketplacePlatformSwitch
+            value={activePlatform}
+            onValueChange={setActivePlatform}
+            ariaLabel="Order platform"
+            whatnotLabel="Whatnot Orders"
+            tiktokLabel="TikTok Orders"
+            idPrefix="orders-platform"
+          />
         </div>
 
-        <TabsContent value="whatnot" className="space-y-5">
+        {activePlatform === "whatnot" ? (
+          <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-3">
             <Card className="border-border/60 bg-card/80 shadow-sm">
               <CardContent className="p-5">
@@ -908,9 +908,11 @@ export default function SellerOrdersPage() {
               </CardContent>
             </Card>
           )}
-        </TabsContent>
+          </div>
+        ) : null}
 
-        <TabsContent value="tiktok" className="space-y-5">
+        {activePlatform === "tiktok" ? (
+          <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-3">
             <Card className="border-border/60 bg-card/80 shadow-sm">
               <CardContent className="p-5">
@@ -1009,8 +1011,9 @@ export default function SellerOrdersPage() {
               </CardContent>
             </Card>
           ) : null}
-        </TabsContent>
-      </Tabs>
+          </div>
+        ) : null}
+      </div>
 
       <Dialog open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
         <DialogContent>
