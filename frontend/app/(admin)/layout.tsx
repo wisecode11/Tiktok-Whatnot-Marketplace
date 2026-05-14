@@ -17,30 +17,39 @@ import {
   CreditCard,
   Flag,
   Bell,
+  Star,
 } from "lucide-react"
 
 const navigation = [
   {
     items: [
       { title: "Overview", href: "/admin", icon: LayoutDashboard },
-      { title: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+      // { title: "Analytics", href: "/admin/analytics", icon: BarChart3 },
     ],
   },
+  // {
+  //   label: "Management",
+  //   items: [
+  //     { title: "Streamers", href: "/admin/streamers", icon: Video, badge: 245 },
+  //     { title: "Moderators", href: "/admin/moderators", icon: Users, badge: 89 },
+  //     { title: "Products", href: "/admin/products", icon: Package },
+  //     { title: "Transactions", href: "/admin/transactions", icon: CreditCard },
+  //   ],
+  // },
+  // {
+  //   label: "Moderation",
+  //   items: [
+  //     { title: "Reports", href: "/admin/reports", icon: Flag, badge: 12 },
+  //     { title: "Verifications", href: "/admin/verifications", icon: ShieldCheck, badge: 5 },
+  //     { title: "Announcements", href: "/admin/announcements", icon: Bell },
+  //   ],
+  // },
   {
-    label: "Management",
+    // label: "Community Management",
     items: [
-      { title: "Streamers", href: "/admin/streamers", icon: Video, badge: 245 },
-      { title: "Moderators", href: "/admin/moderators", icon: Users, badge: 89 },
-      { title: "Products", href: "/admin/products", icon: Package },
-      { title: "Transactions", href: "/admin/transactions", icon: CreditCard },
-    ],
-  },
-  {
-    label: "Moderation",
-    items: [
-      { title: "Reports", href: "/admin/reports", icon: Flag, badge: 12 },
-      { title: "Verifications", href: "/admin/verifications", icon: ShieldCheck, badge: 5 },
-      { title: "Announcements", href: "/admin/announcements", icon: Bell },
+      { title: "Feedback Monitoring", href: "/admin/feedback-monitoring", icon: Star },
+      { title: "User Profile Management", href: "/admin/user-profile-management", icon: Users },
+      { title: "Subscription Management", href: "/admin/subscription-management", icon: CreditCard },
     ],
   },
 ]
