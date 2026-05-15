@@ -17,6 +17,10 @@ const ORDER_SEARCH_PATH = "/order/202309/orders/search";
 const GLOBAL_PRODUCT_SEARCH_PATH = "/product/202309/global_products/search";
 /** Order detail by id (query `ids`) — same API group as Partner examples. */
 const ORDER_GET_PATH = "/order/202309/orders";
+const PACKAGE_SEARCH_PATH = "/fulfillment/202309/packages/search";
+const SPLIT_ORDER_PATH_PREFIX = "/fulfillment/202309/orders";
+/** Create fulfillment package — Partner API 202512. */
+const CREATE_PACKAGE_PATH = "/fulfillment/202512/packages";
 /** Create product (Partner API 202309). */
 const GLOBAL_PRODUCT_CREATE_PATH = "/product/202309/products";
 /** Update product (Partner API 202509). */
@@ -112,6 +116,37 @@ const MOCK_FINANCE_UNSETTLED_ORDER = {
   est_fee_tax_amount: "-30",
 };
 
+const MOCK_PACKAGE_SEARCH = {
+  next_page_token: "6AsPQsUMvH3RkchNUPPh22NROHkE0D8pmq/N5M1kHYcZmtRyv9aVrNv65W7Q6tFA",
+  total_count: 221,
+  packages: [
+    {
+      id: "577828281214600000",
+      orders: [
+        {
+          id: "577828281214600000",
+          skus: [
+            {
+              id: "577828281214883345",
+              name: "white,128g",
+              image_url: "https://p19-oec-sg.ibyteimg.com/tos-maliva-i-o3syd03w52-us/12345670",
+              quantity: 5,
+            },
+          ],
+        },
+      ],
+      create_time: 1635338186,
+      update_time: 1635338186,
+      status: "PROCESSING",
+      tracking_number: "6617675021119438849",
+      shipping_provider_name: "TT Virtual express",
+      shipping_provider_id: "6617675021119438849",
+      order_line_item_ids: ["1729382476852921560"],
+    },
+  ],
+  request_id: "202203070749000101890810281E8C70B7",
+};
+
 /** Request body filter keys allowed for Order Search (Partner API 202309). */
 const FILTER_KEYS = new Set([
   "order_status",
@@ -123,6 +158,14 @@ const FILTER_KEYS = new Set([
   "buyer_user_id",
   "is_buyer_request_cancel",
   "warehouse_ids",
+]);
+
+const PACKAGE_FILTER_KEYS = new Set([
+  "create_time_ge",
+  "create_time_lt",
+  "update_time_ge",
+  "update_time_lt",
+  "package_status",
 ]);
 
 function createHttpError(status, message, details) {
@@ -344,6 +387,53 @@ function envelopeSearch(mockData, shopConnected, isMockData, reason) {
   };
 }
 
+function pickPackageFilters(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+  const out = {};
+  for (const key of PACKAGE_FILTER_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(raw, key)) {
+      continue;
+    }
+    const v = raw[key];
+    if (key === "package_status") {
+      if (typeof v === "string" && v.trim()) {
+        out[key] = v.trim().toUpperCase();
+      }
+      continue;
+    }
+    if (typeof v === "number" && Number.isFinite(v)) {
+      out[key] = Math.floor(v);
+      continue;
+    }
+    if (typeof v === "string" && v.trim()) {
+      const parsed = Number(v.trim());
+      if (Number.isFinite(parsed)) {
+        out[key] = Math.floor(parsed);
+      }
+    }
+  }
+  return out;
+}
+
+function envelopePackageSearch(payload, shopConnected, isMockData, reason) {
+  const totalRaw = payload.total_count;
+  return {
+    configured: shopConnected,
+    shopConnected,
+    isMockData,
+    reason,
+    note: isMockData
+      ? "Demo TikTok Shop package payload — connect seller credentials to load production data."
+      : null,
+    totalCount: typeof totalRaw === "number" ? totalRaw : Number(totalRaw) || 0,
+    nextPageToken: payload.next_page_token || null,
+    packages: Array.isArray(payload.packages) ? payload.packages : [],
+    requestId: payload.request_id || null,
+  };
+}
+
 function normalizePageSize(value, fallback = 20) {
   const parsed = Number(value);
   return String(Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 1), 100));
@@ -370,6 +460,10 @@ function normalizeSortOrder(value, fallback = "DESC") {
 
 function buildFinanceStatementTransactionsPath(statementId) {
   return `/finance/202501/statements/${encodeURIComponent(statementId)}/statement_transactions`;
+}
+
+function buildSplitOrderPath(orderId) {
+  return `${SPLIT_ORDER_PATH_PREFIX}/${encodeURIComponent(orderId)}/split`;
 }
 
 function envelopeFinanceBase({ shopConnected, isMockData, reason, requestId, note }) {
@@ -750,11 +844,21 @@ async function searchTiktokShopOrders({
 } = {}) {
   const creds = await resolveShopCredentials(clerkUserId);
 
+  console.log("[TikTok Shop Service] Resolved credentials:", {
+    shopConnected: creds.shopConnected,
+    hasAppKey: Boolean(creds.appKey),
+    hasAppSecret: Boolean(creds.appSecret),
+    hasShopCipher: Boolean(creds.shopCipher),
+    hasAccessToken: Boolean(creds.accessToken),
+    reason: creds.reason,
+  });
+
   const bodyFilters = pickFilters(filters);
   const trimmedToken = typeof pageToken === "string" ? pageToken.trim() : "";
 
   if (!creds.shopConnected) {
     const mockData = buildMockOrdersSearch(bodyFilters, pageSize, trimmedToken || undefined);
+    console.log("[TikTok Shop Service] Using mock data (credentials not available)");
     return envelopeSearch(mockData, false, true, creds.reason);
   }
 
@@ -788,6 +892,12 @@ async function searchTiktokShopOrders({
     }
   }
 
+  console.log("[TikTok Shop Service] Making request to TikTok API:", {
+    url: url.toString().replace(/sign=[^&]*/g, "sign=***"),
+    method: "POST",
+    bodyFilters,
+  });
+
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: {
@@ -803,12 +913,31 @@ async function searchTiktokShopOrders({
   try {
     payload = JSON.parse(text);
   } catch {
+    console.error("[TikTok Shop Service] Failed to parse API response:", {
+      status: response.status,
+      preview: text.slice(0, 500),
+    });
     throw createHttpError(502, "TikTok Shop returned a non-JSON response.", {
       preview: text.slice(0, 500),
     });
   }
 
+  console.log("[TikTok Shop Service] API Response received:", {
+    status: response.status,
+    code: payload.code,
+    message: payload.message,
+    requestId: payload.request_id,
+    dataKeys: payload.data ? Object.keys(payload.data) : [],
+    ordersCount: Array.isArray(payload.data?.orders) ? payload.data.orders.length : 0,
+  });
+
+  console.log("[TikTok Shop Service] Full API Response:", JSON.stringify(payload, null, 2));
+
   if (!response.ok) {
+    console.error("[TikTok Shop Service] API request failed:", {
+      status: response.status,
+      message: payload.message,
+    });
     throw createHttpError(
       response.status,
       payload.message || `TikTok Shop request failed (HTTP ${response.status}).`,
@@ -817,18 +946,80 @@ async function searchTiktokShopOrders({
   }
 
   if (payload.code !== 0) {
+    console.error("[TikTok Shop Service] API returned error code:", {
+      code: payload.code,
+      message: payload.message,
+    });
     throw createHttpError(502, payload.message || "TikTok Shop API returned an error.", payload);
   }
 
   const data = payload.data && typeof payload.data === "object" ? payload.data : {};
   const totalRaw = data.total_count;
 
-  return envelopeSearch(
+  const result = envelopeSearch(
     {
       total_count:
         typeof totalRaw === "number" ? totalRaw : Number(totalRaw) || data.orders?.length || 0,
       next_page_token: data.next_page_token || null,
       orders: Array.isArray(data.orders) ? data.orders : [],
+      request_id: payload.request_id || null,
+    },
+    true,
+    false,
+    null,
+  );
+
+  console.log("[TikTok Shop Service] Search completed successfully:", {
+    totalCount: result.total_count,
+    ordersReturned: result.orders.length,
+    shopConnected: result.shopConnected,
+  });
+
+  return result;
+}
+
+async function searchTiktokShopPackages({
+  clerkUserId,
+  filters = {},
+  pageSize = 20,
+  pageToken,
+  sortOrder = "DESC",
+  sortField = "create_time",
+} = {}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+  const bodyFilters = pickPackageFilters(filters);
+  const size = Number(pageSize);
+  const safeSize = Math.min(Math.max(Number.isFinite(size) ? size : 20, 1), 50);
+  const trimmedToken = typeof pageToken === "string" ? pageToken.trim() : "";
+
+  if (!creds.shopConnected) {
+    return envelopePackageSearch(MOCK_PACKAGE_SEARCH, false, true, creds.reason);
+  }
+
+  const extraQuery = {
+    page_size: String(safeSize),
+    sort_order: sortOrder === "ASC" ? "ASC" : "DESC",
+    sort_field: typeof sortField === "string" && sortField.trim() ? sortField.trim() : "create_time",
+  };
+
+  if (trimmedToken) {
+    extraQuery.page_token = trimmedToken;
+  }
+
+  const { payload } = await tiktokPartnerFetch(creds, {
+    method: "POST",
+    path: PACKAGE_SEARCH_PATH,
+    extraQuery,
+    bodyObject: bodyFilters,
+  });
+
+  const data = payload.data && typeof payload.data === "object" ? payload.data : {};
+
+  return envelopePackageSearch(
+    {
+      total_count: data.total_count,
+      next_page_token: data.next_page_token,
+      packages: Array.isArray(data.packages) ? data.packages : [],
       request_id: payload.request_id || null,
     },
     true,
@@ -1155,14 +1346,231 @@ async function getTiktokShopOrderDetail({ clerkUserId, orderId }) {
   };
 }
 
+/**
+ * Create a fulfillment package via TikTok Shop Partner API (202512).
+ * Falls back to mock data when credentials are not configured.
+ */
+async function createTiktokPackage({
+  clerkUserId,
+  shipType,
+  orderId,
+  orderLineItems = [],
+  orderListIds = [],
+  dimension,
+  shippingServiceId,
+  weight,
+}) {
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  console.log("[TikTok Shop Service] createTiktokPackage - credentials:", {
+    shopConnected: creds.shopConnected,
+    reason: creds.reason,
+  });
+
+  const bodyObject = {
+    ship_type: String(shipType || "1"),
+  };
+
+  if (orderId) {
+    bodyObject.order_id = String(orderId);
+  }
+
+  if (Array.isArray(orderLineItems) && orderLineItems.length > 0) {
+    bodyObject.order_line_item = orderLineItems;
+  }
+
+  if (Array.isArray(orderListIds) && orderListIds.length > 0) {
+    bodyObject.order_list_ids = orderListIds;
+  }
+
+  if (dimension && typeof dimension === "object") {
+    bodyObject.dimension = {
+      length: String(dimension.length || "0"),
+      width: String(dimension.width || "0"),
+      height: String(dimension.height || "0"),
+      unit: String(dimension.unit || "CM"),
+    };
+  }
+
+  if (shippingServiceId) {
+    bodyObject.shipping_service_id = String(shippingServiceId);
+  }
+
+  if (weight && typeof weight === "object") {
+    bodyObject.weight = {
+      value: String(weight.value || "0"),
+      unit: String(weight.unit || "GRAM"),
+    };
+  }
+
+  console.log("[TikTok Shop Service] createTiktokPackage - request body:", JSON.stringify(bodyObject, null, 2));
+
+  // Return mock data if credentials not configured
+  if (!creds.shopConnected) {
+    const mockPackageId = `PKG-MOCK-${Date.now()}`;
+    const mockResponse = {
+      shopConnected: false,
+      isMockData: true,
+      reason: creds.reason,
+      requestBody: bodyObject,
+      package_id: mockPackageId,
+      dimension: bodyObject.dimension || { length: "1.2", width: "0.2", height: "0.03", unit: "CM" },
+      weight: bodyObject.weight || { value: "1.2", unit: "GRAM" },
+      shipping_service_info: {
+        id: shippingServiceId || "288233559123860015",
+        name: "Standard Shipping",
+        price: "10",
+        currency: "USD",
+        earliest_delivery_days: 3,
+        latest_delivery_days: 7,
+        shipping_provider_id: "2882322591238",
+        shipping_provider_name: "TT Virtual Express",
+      },
+      create_time: Math.floor(Date.now() / 1000),
+    };
+
+    console.log("[TikTok Shop Service] createTiktokPackage - mock response:", JSON.stringify(mockResponse, null, 2));
+    return mockResponse;
+  }
+
+  const { parsed, request_id } = await tiktokPartnerFetch(creds, {
+    method: "POST",
+    path: CREATE_PACKAGE_PATH,
+    bodyObject,
+  });
+
+  console.log("[TikTok Shop Service] createTiktokPackage - API response:", JSON.stringify(parsed, null, 2));
+
+  const data = parsed && typeof parsed === "object" ? parsed : {};
+
+  return {
+    shopConnected: true,
+    isMockData: false,
+    reason: null,
+    requestBody: bodyObject,
+    requestId: request_id,
+    package_id: data.package_id || null,
+    dimension: data.dimension || bodyObject.dimension || null,
+    weight: data.weight || bodyObject.weight || null,
+    shipping_service_info: data.shipping_service_info || null,
+    create_time: data.create_time || Math.floor(Date.now() / 1000),
+  };
+}
+
+async function splitTiktokShopOrder({
+  clerkUserId,
+  orderId,
+  splittableGroups = [],
+  splittableGroupsV2 = [],
+}) {
+  const id = typeof orderId === "string" ? orderId.trim() : "";
+  if (!id) {
+    throw createHttpError(400, "orderId is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  const bodyObject = {
+    splittable_groups: Array.isArray(splittableGroups) ? splittableGroups : [],
+    splittable_groups_v2: Array.isArray(splittableGroupsV2) ? splittableGroupsV2 : [],
+  };
+
+  if (!creds.shopConnected) {
+    const firstGroup = bodyObject.splittable_groups[0] || bodyObject.splittable_groups_v2[0] || {};
+    return {
+      shopConnected: false,
+      isMockData: true,
+      reason: creds.reason,
+      orderId: id,
+      requestBody: bodyObject,
+      packages: [
+        {
+          splittable_group_id: firstGroup.id || "123",
+          id: `223362377512830${String(Date.now()).slice(-3)}`,
+        },
+      ],
+      requestId: "202203070749000101890810281E8C70B7",
+    };
+  }
+
+  const { payload, request_id } = await tiktokPartnerFetch(creds, {
+    method: "POST",
+    path: buildSplitOrderPath(id),
+    bodyObject,
+  });
+
+  const data = payload.data && typeof payload.data === "object" ? payload.data : {};
+
+  return {
+    shopConnected: true,
+    isMockData: false,
+    reason: null,
+    orderId: id,
+    requestBody: bodyObject,
+    packages: Array.isArray(data.packages) ? data.packages : [],
+    requestId: request_id,
+  };
+}
+
+async function shipTiktokPackage({ clerkUserId, packageId, handoverMethod, pickupSlot, selfShipment }) {
+  const id = typeof packageId === "string" ? packageId.trim() : "";
+  if (!id) {
+    throw createHttpError(400, "packageId is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+  const path = `/fulfillment/202309/packages/${encodeURIComponent(id)}/ship`;
+
+  const bodyObject = {};
+  if (handoverMethod) bodyObject.handover_method = handoverMethod;
+  if (pickupSlot && typeof pickupSlot === "object") bodyObject.pickup_slot = pickupSlot;
+  if (selfShipment && typeof selfShipment === "object") bodyObject.self_shipment = selfShipment;
+
+  if (!creds.shopConnected) {
+    return {
+      shopConnected: false,
+      isMockData: true,
+      reason: creds.reason,
+      packageId: id,
+      requestBody: bodyObject,
+      code: 0,
+      message: "Success",
+      data: {},
+      requestId: "202203070749000101890810281E8C70B7",
+    };
+  }
+
+  const { payload, request_id } = await tiktokPartnerFetch(creds, {
+    method: "POST",
+    path,
+    bodyObject,
+  });
+
+  return {
+    shopConnected: true,
+    isMockData: false,
+    reason: null,
+    packageId: id,
+    requestBody: bodyObject,
+    code: payload.code,
+    message: payload.message,
+    data: payload.data || {},
+    requestId: request_id,
+  };
+}
+
 module.exports = {
   searchTiktokShopOrders,
+  searchTiktokShopPackages,
+  splitTiktokShopOrder,
+  shipTiktokPackage,
   searchTiktokGlobalProducts,
   createTiktokGlobalProduct,
   getTiktokGlobalProduct,
   updateTiktokGlobalProduct202509,
   deleteTiktokGlobalProducts,
   getTiktokShopOrderDetail,
+  createTiktokPackage,
   getTiktokFinanceStatements,
   getTiktokFinancePayments,
   getTiktokFinanceWithdrawals,

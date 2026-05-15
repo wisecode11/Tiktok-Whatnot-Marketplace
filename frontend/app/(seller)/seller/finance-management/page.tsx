@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react"
 
+import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -432,22 +433,20 @@ export default function FinanceManagementPage() {
         </Button>
       </div>
 
-      <Tabs
+      <MarketplacePlatformSwitch
         value={activePlatform}
-        onValueChange={(value) => {
+        onValueChange={(value: MarketplacePlatform) => {
           setActivePlatform(value as FinancePlatform)
           if (value === "tiktok") {
             setActiveTikTokSection("statements")
           }
           setPage(0)
         }}
-        className="space-y-0"
-      >
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="whatnot">Whatnot</TabsTrigger>
-          <TabsTrigger value="tiktok">TikTok</TabsTrigger>
-        </TabsList>
-      </Tabs>
+        ariaLabel="Finance platform"
+        whatnotLabel="Whatnot Finance"
+        tiktokLabel="TikTok Finance"
+        idPrefix="finance-platform"
+      />
 
       {activePlatform === "whatnot" && balanceError ? <p className="text-sm text-destructive">{balanceError}</p> : null}
       {activePlatform === "tiktok" && tiktokError ? <p className="text-sm text-destructive">{tiktokError}</p> : null}

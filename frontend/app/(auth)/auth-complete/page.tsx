@@ -9,6 +9,7 @@ import { AlertCircle, Loader2 } from "lucide-react"
 import {
   AuthApiError,
   buildPath,
+  getAccountStatusErrorCopy,
   getClerkErrorMessage,
   getDashboardPath,
   loginWithRole,
@@ -27,6 +28,8 @@ function AuthCompleteContent() {
   const { signOut } = useClerk()
   const { user } = useUser()
   const [errorMessage, setErrorMessage] = useState("")
+  const [errorTitle, setErrorTitle] = useState("Authentication could not be completed")
+  const [hasAccountStatusError, setHasAccountStatusError] = useState(false)
   const [alternateRedirect, setAlternateRedirect] = useState<string | null>(null)
   const hasStartedRef = useRef(false)
 
@@ -78,6 +81,17 @@ function AuthCompleteContent() {
         }
       }
 
+      const accountStatusError = getAccountStatusErrorCopy(error)
+
+      if (accountStatusError) {
+        setHasAccountStatusError(true)
+        setErrorTitle(accountStatusError.title)
+        setErrorMessage(accountStatusError.message)
+        return
+      }
+
+      setHasAccountStatusError(false)
+      setErrorTitle("Authentication could not be completed")
       setErrorMessage(getClerkErrorMessage(error))
     })
   }, [flow, getToken, isLoaded, isSignedIn, metadataRole, requestedRole, router])
@@ -92,6 +106,12 @@ function AuthCompleteContent() {
 
   const fallbackPortal = requestedRole ? getDashboardPath(requestedRole as AppRole) : "/login"
   const signOutRedirectUrl = buildPath(flow === "signup" ? "/signup" : "/login", { role: requestedRole })
+  const primaryActionHref = hasAccountStatusError
+    ? signOutRedirectUrl
+    : (alternateRedirect || fallbackPortal)
+  const primaryActionLabel = hasAccountStatusError
+    ? "Back to sign in"
+    : (alternateRedirect ? "Open the correct dashboard" : "Go back")
 
   if (!errorMessage) {
     return (
@@ -112,17 +132,17 @@ function AuthCompleteContent() {
           <AlertCircle className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Authentication could not be completed</h1>
+          <h1 className="text-xl font-semibold text-foreground">{errorTitle}</h1>
           <p className="mt-2 text-sm text-muted-foreground">{errorMessage}</p>
         </div>
       </div>
 
       <div className="mt-6 flex flex-col gap-3 text-sm">
         <Link
-          href={alternateRedirect || fallbackPortal}
+          href={primaryActionHref}
           className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-95"
         >
-          {alternateRedirect ? "Open the correct dashboard" : "Go back"}
+          {primaryActionLabel}
         </Link>
 
         <button

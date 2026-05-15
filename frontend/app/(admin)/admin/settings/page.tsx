@@ -1,13 +1,28 @@
 "use client"
 
+import { useCallback, useEffect, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
+
 import { BRAND_NAME, SUPPORT_EMAIL } from "@/lib/brand"
+import {
+  disconnectPlatform,
+  getAdminPlatformSettings,
+  getStripeStatus,
+  startPlatformConnection,
+  updateAdminPlatformFeePercent,
+  waitForSessionToken,
+  type AdminPlatformSettingsResponse,
+  type StripeStatusResponse,
+} from "@/lib/auth"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field"
 import { PageHeader } from "@/components/page-header"
+import { StatusBadge } from "@/components/ui/status-badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useToast } from "@/hooks/use-toast"
 import {
   Select,
   SelectContent,
@@ -17,14 +32,260 @@ import {
 } from "@/components/ui/select"
 import {
   Bell,
+  CheckCircle2,
   CreditCard,
+  ExternalLink,
   Globe,
+  Loader2,
   Lock,
   Save,
   Settings,
   Shield,
   Zap,
 } from "lucide-react"
+
+function AdminPaymentsSection() {
+  const { getToken, isLoaded } = useAuth()
+  const { toast } = useToast()
+  const [settings, setSettings] = useState<AdminPlatformSettingsResponse | null>(null)
+  const [stripeStatus, setStripeStatus] = useState<StripeStatusResponse | null>(null)
+  const [feeInput, setFeeInput] = useState("15")
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSavingFee, setIsSavingFee] = useState(false)
+  const [isConnectingStripe, setIsConnectingStripe] = useState(false)
+  const [isDisconnectingStripe, setIsDisconnectingStripe] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const loadSettings = useCallback(async () => {
+    setErrorMessage(null)
+    try {
+      const token = await waitForSessionToken(getToken)
+      const [adminResult, stripeResult] = await Promise.all([
+        getAdminPlatformSettings(token),
+        getStripeStatus(token).catch(() => null),
+      ])
+      setSettings(adminResult)
+      setStripeStatus(stripeResult)
+      setFeeInput(String(adminResult.platformFeePercent ?? 15))
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load platform settings.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [getToken])
+
+  useEffect(() => {
+    if (!isLoaded) return
+    void loadSettings()
+  }, [isLoaded, loadSettings])
+
+  const adminStripeAccount = settings?.adminStripeAccount || null
+  const isStripeConnected = Boolean(
+    adminStripeAccount?.stripeAccountId && adminStripeAccount.chargesEnabled,
+  )
+  const isStripeOnboardingPending = Boolean(
+    adminStripeAccount?.stripeAccountId && !adminStripeAccount.chargesEnabled,
+  )
+
+  async function handleSaveFee() {
+    const parsed = Number(feeInput)
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+      toast({
+        title: "Invalid fee",
+        description: "Platform fee must be a number between 0 and 100.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingFee(true)
+    try {
+      const token = await waitForSessionToken(getToken)
+      const result = await updateAdminPlatformFeePercent(token, parsed)
+      setSettings(result)
+      setFeeInput(String(result.platformFeePercent ?? parsed))
+      toast({
+        title: "Platform fee updated",
+        description: `New fee: ${result.platformFeePercent}%`,
+      })
+    } catch (error) {
+      toast({
+        title: "Failed to update fee",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingFee(false)
+    }
+  }
+
+  async function handleConnectStripe() {
+    setIsConnectingStripe(true)
+    try {
+      const token = await waitForSessionToken(getToken)
+      const result = await startPlatformConnection(token, "stripe", "admin")
+      window.location.href = result.authorizationUrl
+    } catch (error) {
+      toast({
+        title: "Could not start Stripe onboarding",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+      setIsConnectingStripe(false)
+    }
+  }
+
+  async function handleDisconnectStripe() {
+    setIsDisconnectingStripe(true)
+    try {
+      const token = await waitForSessionToken(getToken)
+      await disconnectPlatform(token, "stripe")
+      toast({
+        title: "Stripe account disconnected",
+        description: "Platform fees can no longer be transferred until you reconnect.",
+      })
+      await loadSettings()
+    } catch (error) {
+      toast({
+        title: "Failed to disconnect",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDisconnectingStripe(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-border/50 bg-card/50">
+        <CardHeader>
+          <CardTitle>Platform Fee</CardTitle>
+          <CardDescription>
+            Percent retained by the platform from each moderator booking. The
+            remaining amount is paid out to the moderator.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel>Platform Fee (%)</FieldLabel>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.01}
+                      value={feeInput}
+                      onChange={(event) => setFeeInput(event.target.value)}
+                      className="bg-muted/50"
+                    />
+                  </Field>
+                </FieldGroup>
+                <div className="flex items-end">
+                  <p className="text-xs text-muted-foreground">
+                    Current fee: <span className="font-medium text-foreground">{settings?.platformFeePercent ?? 15}%</span>
+                    {" "}— moderator keeps {Math.max(0, 100 - (settings?.platformFeePercent ?? 15)).toFixed(2)}%.
+                  </p>
+                </div>
+              </div>
+              {errorMessage ? (
+                <p className="text-sm text-destructive">{errorMessage}</p>
+              ) : null}
+              <div className="flex justify-end">
+                <Button className="gap-2" onClick={() => void handleSaveFee()} disabled={isSavingFee}>
+                  {isSavingFee ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save Fee
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/50 bg-card/50">
+        <CardHeader>
+          <CardTitle>Platform Stripe Account</CardTitle>
+          <CardDescription>
+            Connect a Stripe Express account that receives the platform fee from
+            every moderator booking. Without a connected account, fees will stay
+            in the platform Stripe balance.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Zap className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium">Stripe Connect (Platform)</p>
+                  <p className="text-sm text-muted-foreground">
+                    {adminStripeAccount?.stripeAccountId
+                      ? `Account: ${adminStripeAccount.stripeAccountId}`
+                      : "No platform Stripe account connected yet."}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {isStripeConnected ? (
+                      <StatusBadge variant="success">
+                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Connected
+                      </StatusBadge>
+                    ) : isStripeOnboardingPending ? (
+                      <StatusBadge variant="warning">Onboarding incomplete</StatusBadge>
+                    ) : (
+                      <StatusBadge variant="warning">Not connected</StatusBadge>
+                    )}
+                    {stripeStatus && stripeStatus.requirements && stripeStatus.requirements.length > 0 ? (
+                      <span className="text-xs text-warning">
+                        Requirements due: {stripeStatus.requirements.join(", ")}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {isStripeConnected ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleDisconnectStripe()}
+                    disabled={isDisconnectingStripe}
+                  >
+                    {isDisconnectingStripe ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => void handleConnectStripe()}
+                    disabled={isConnectingStripe}
+                    className="gap-2"
+                  >
+                    {isConnectingStripe ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-4 w-4" />
+                    )}
+                    {isStripeOnboardingPending ? "Resume Onboarding" : "Connect Stripe"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
 
 export default function AdminSettingsPage() {
   return (
@@ -168,85 +429,7 @@ export default function AdminSettingsPage() {
         </TabsContent>
 
         <TabsContent value="payments" className="space-y-6">
-          <Card className="border-border/50 bg-card/50">
-            <CardHeader>
-              <CardTitle>Commission Settings</CardTitle>
-              <CardDescription>
-                Configure platform commission rates
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel>Streamer Commission (%)</FieldLabel>
-                    <Input
-                      type="number"
-                      defaultValue="10"
-                      className="bg-muted/50"
-                    />
-                  </Field>
-                </FieldGroup>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel>Moderator Commission (%)</FieldLabel>
-                    <Input
-                      type="number"
-                      defaultValue="5"
-                      className="bg-muted/50"
-                    />
-                  </Field>
-                </FieldGroup>
-              </div>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel>Minimum Payout Amount ($)</FieldLabel>
-                  <Input
-                    type="number"
-                    defaultValue="50"
-                    className="bg-muted/50"
-                  />
-                </Field>
-              </FieldGroup>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 bg-card/50">
-            <CardHeader>
-              <CardTitle>Payment Gateways</CardTitle>
-              <CardDescription>
-                Configure payment processing integrations
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {[
-                { name: "Stripe", status: "connected", icon: Zap },
-                { name: "PayPal", status: "not_connected", icon: Globe },
-              ].map((gateway) => (
-                <div
-                  key={gateway.name}
-                  className="flex items-center justify-between rounded-xl bg-muted/50 p-4"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <gateway.icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">{gateway.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {gateway.status === "connected" ? "Connected" : "Not connected"}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant={gateway.status === "connected" ? "outline" : "default"}
-                  >
-                    {gateway.status === "connected" ? "Configure" : "Connect"}
-                  </Button>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <AdminPaymentsSection />
         </TabsContent>
 
         <TabsContent value="security" className="space-y-6">

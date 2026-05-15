@@ -528,6 +528,42 @@ export interface TikTokShopOrderDetailResponse {
   requestId?: string | null
 }
 
+export interface TikTokShopPackageSku {
+  id?: string
+  name?: string
+  image_url?: string
+  quantity?: number
+}
+
+export interface TikTokShopPackageOrder {
+  id?: string
+  skus?: TikTokShopPackageSku[]
+}
+
+export interface TikTokShopPackage {
+  id?: string
+  orders?: TikTokShopPackageOrder[]
+  create_time?: number
+  update_time?: number
+  status?: string
+  tracking_number?: string
+  shipping_provider_name?: string
+  shipping_provider_id?: string
+  order_line_item_ids?: string[]
+}
+
+export interface TikTokShopPackagesSearchResponse {
+  configured: boolean
+  shopConnected: boolean
+  isMockData: boolean
+  reason?: string | null
+  note?: string | null
+  totalCount: number
+  nextPageToken: string | null
+  packages: TikTokShopPackage[]
+  requestId?: string | null
+}
+
 /** TikTok-shaped body from `POST /product/202309/global_products/search` (Partner API). */
 export interface TikTokGlobalProductSearchSkuPrice {
   currency?: string
@@ -945,16 +981,142 @@ export interface StaffOrderManagementSnapshotResponse {
   parentSellerClerkUserId: string
 }
 
+export interface AdminReviewItem {
+  _id: string
+  booking_id: string
+  streamer_user_id: string
+  moderator_user_id: string
+  rating: number
+  review_text: string
+  is_public: boolean
+  created_at: string
+  moderator?: {
+    first_name?: string
+    last_name?: string
+    email?: string
+  } | null
+  streamer?: {
+    first_name?: string
+    last_name?: string
+    email?: string
+  } | null
+}
+
+export interface AdminReviewListResponse {
+  data: AdminReviewItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    pages: number
+  }
+}
+
+export interface AdminReviewStatsResponse {
+  totalReviews: number
+  averageRating: number
+  ratingDistribution: Record<number, number>
+  totalModerators: number
+  totalStreamers: number
+}
+
+export interface AdminUserProfileItem {
+  _id: string
+  email: string
+  first_name: string
+  last_name: string
+  user_type: "seller" | "moderator" | "admin" | "staff"
+  status: "active" | "inactive" | "pending" | "blocked" | "deleted"
+  created_at: string
+  updated_at: string
+  profile?: {
+    is_published?: boolean
+    rating_from_streamers?: number
+  } | null
+}
+
+export interface AdminUserProfilesResponse {
+  data: AdminUserProfileItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    pages: number
+  }
+}
+
 export class AuthApiError extends Error {
   status: number
   details?: unknown
+  code?: string
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(message: string, status: number, details?: unknown, code?: string) {
     super(message)
     this.name = "AuthApiError"
     this.status = status
     this.details = details
+    this.code = code
   }
+}
+
+type AccountAccessStatus = "inactive" | "blocked" | "deleted"
+
+type AccountStatusErrorCopy = {
+  status: AccountAccessStatus
+  title: string
+  message: string
+}
+
+function getAuthErrorPayload(error: AuthApiError) {
+  if (!error.details || typeof error.details !== "object") {
+    return null
+  }
+
+  return error.details as Record<string, unknown>
+}
+
+export function getAccountStatusErrorCopy(error: unknown): AccountStatusErrorCopy | null {
+  if (!(error instanceof AuthApiError)) {
+    return null
+  }
+
+  const payload = getAuthErrorPayload(error)
+  const rawStatus = typeof payload?.accountStatus === "string" ? payload.accountStatus.toLowerCase() : null
+  const accountStatus = rawStatus === "pending" ? "inactive" : rawStatus
+
+  if (accountStatus === "blocked") {
+    return {
+      status: "blocked",
+      title: "Your account is blocked",
+      message: "This account has been blocked by an administrator. Please contact support if you need access restored.",
+    }
+  }
+
+  if (accountStatus === "deleted") {
+    return {
+      status: "deleted",
+      title: "Your account has been deleted",
+      message: "This account is no longer available. Please contact support if this was unexpected.",
+    }
+  }
+
+  if (accountStatus === "inactive" || error.code === "ACCOUNT_DEACTIVATED") {
+    return {
+      status: "inactive",
+      title: "Your account is inactive",
+      message: "This account has been deactivated by an administrator. Please contact support to reactivate it.",
+    }
+  }
+
+  return null
+}
+
+export function isUserBlocked(error: unknown): boolean {
+  return getAccountStatusErrorCopy(error)?.status === "blocked"
+}
+
+export function isUserDeleted(error: unknown): boolean {
+  return getAccountStatusErrorCopy(error)?.status === "deleted"
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
@@ -1026,6 +1188,12 @@ export function getSignupRedirectPath(role: AppRole) {
 }
 
 export function getClerkErrorMessage(error: unknown) {
+  const accountStatusError = getAccountStatusErrorCopy(error)
+
+  if (accountStatusError) {
+    return accountStatusError.message
+  }
+
   if (
     typeof error === "object" &&
     error !== null &&
@@ -1071,7 +1239,11 @@ async function request<T>(
     token,
     method = "GET",
     body,
-  }: { token: string; method?: "GET" | "POST" | "PUT" | "DELETE"; body?: Record<string, unknown> },
+  }: {
+    token: string
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+    body?: Record<string, unknown>
+  },
 ) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -1087,9 +1259,10 @@ async function request<T>(
 
   if (!response.ok) {
     throw new AuthApiError(
-      (payload && (payload.error as string)) || "Request failed.",
+      (payload && ((payload.message as string) || (payload.error as string))) || "Request failed.",
       response.status,
-      payload && payload.details,
+      payload,
+      payload && typeof payload.code === "string" ? payload.code : undefined,
     )
   }
 
@@ -1304,6 +1477,29 @@ export async function searchTikTokShopOrders(
   })
 }
 
+export async function searchTikTokShopPackages(
+  token: string,
+  payload?: {
+    filters?: {
+      create_time_ge?: number
+      create_time_lt?: number
+      update_time_ge?: number
+      update_time_lt?: number
+      package_status?: "PROCESSING" | "FULFILLING" | "COMPLETED" | "CANCELLED" | string
+    }
+    pageSize?: number
+    pageToken?: string
+    sortOrder?: "ASC" | "DESC"
+    sortField?: string
+  },
+) {
+  return request<TikTokShopPackagesSearchResponse>("/api/integrations/tiktok/shop/packages/search", {
+    token,
+    method: "POST",
+    body: (payload || {}) as Record<string, unknown>,
+  })
+}
+
 /**
  * Proxies TikTok Shop Partner `POST /product/202309/global_products/search`.
  * `page_size` / `page_token` are stripped server-side for the TikTok query string; other keys stay in the JSON body.
@@ -1396,6 +1592,123 @@ export async function getTikTokShopOrderDetail(token: string, orderId: string) {
   return request<TikTokShopOrderDetailResponse>(
     `/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}`,
     { token },
+  )
+}
+
+export interface CreatePackagePayload {
+  ship_type: string
+  order_id?: string
+  order_line_item?: Array<{ order_line_id: string; sub_item_id?: string }>
+  order_list_ids?: string[]
+  dimension?: { length: string; width: string; height: string; unit: string }
+  shipping_service_id?: string
+  weight?: { value: string; unit: string }
+}
+
+export interface CreatePackageResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  requestBody: Record<string, unknown>
+  package_id: string | null
+  dimension: { length: string; width: string; height: string; unit: string } | null
+  weight: { value: string; unit: string } | null
+  shipping_service_info: {
+    id: string
+    name: string
+    price: string
+    currency: string
+    earliest_delivery_days: number
+    latest_delivery_days: number
+    shipping_provider_id?: string
+    shipping_provider_name?: string
+  } | null
+  create_time: number
+}
+
+export interface SplitOrderPayload {
+  splittable_groups: Array<{
+    id: string
+    order_line_item_ids: string[]
+  }>
+  splittable_groups_v2: Array<{
+    id: string
+    order_line_list: Array<{
+      order_line_id: string
+      sub_item_id: string
+    }>
+  }>
+}
+
+export interface SplitOrderResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  orderId: string
+  requestBody: SplitOrderPayload
+  packages: Array<{
+    splittable_group_id: string
+    id: string
+  }>
+  requestId?: string | null
+}
+
+export async function createTikTokShopPackage(token: string, payload: CreatePackagePayload) {
+  return request<CreatePackageResponse>("/api/integrations/tiktok/shop/packages", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function splitTikTokShopOrder(token: string, orderId: string, payload: SplitOrderPayload) {
+  const id = typeof orderId === "string" ? orderId.trim() : ""
+  if (!id) {
+    throw new Error("orderId is required.")
+  }
+  return request<SplitOrderResponse>(`/api/integrations/tiktok/shop/orders/${encodeURIComponent(id)}/split`, {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export interface ShipPackagePayload {
+  handover_method?: "PICKUP" | "DROP_OFF" | string
+  pickup_slot?: {
+    start_time: number
+    end_time: number
+  }
+  self_shipment?: {
+    tracking_number: string
+    shipping_provider_id: string
+  }
+}
+
+export interface ShipPackageResponse {
+  shopConnected: boolean
+  isMockData: boolean
+  reason: string | null
+  packageId: string
+  requestBody: Record<string, unknown>
+  code: number
+  message: string
+  data: Record<string, unknown>
+  requestId?: string | null
+}
+
+export async function shipTikTokPackage(token: string, packageId: string, payload: ShipPackagePayload) {
+  const id = typeof packageId === "string" ? packageId.trim() : ""
+  if (!id) {
+    throw new Error("packageId is required.")
+  }
+  return request<ShipPackageResponse>(
+    `/api/integrations/tiktok/shop/packages/${encodeURIComponent(id)}/ship`,
+    {
+      token,
+      method: "POST",
+      body: payload as unknown as Record<string, unknown>,
+    }
   )
 }
 
@@ -1727,4 +2040,375 @@ export async function getStaffOrderManagementSnapshot(token: string, params?: { 
     limit: typeof params?.limit === "number" ? String(params.limit) : undefined,
   })
   return request<StaffOrderManagementSnapshotResponse>(path, { token })
+}
+
+export async function getAdminReviews(
+  token: string,
+  params?: { page?: number; limit?: number; ratingFilter?: string },
+) {
+  const path = buildPath("/api/admin/reviews", {
+    page: typeof params?.page === "number" ? String(params.page) : undefined,
+    limit: typeof params?.limit === "number" ? String(params.limit) : undefined,
+    ratingFilter: params?.ratingFilter,
+  })
+
+  return request<AdminReviewListResponse>(path, { token })
+}
+
+export async function getAdminReviewStats(token: string) {
+  return request<AdminReviewStatsResponse>("/api/admin/reviews/stats", { token })
+}
+
+export async function getAdminUsers(
+  token: string,
+  params?: { page?: number; limit?: number; userType?: string; status?: string },
+) {
+  const path = buildPath("/api/admin/users", {
+    page: typeof params?.page === "number" ? String(params.page) : undefined,
+    limit: typeof params?.limit === "number" ? String(params.limit) : undefined,
+    userType: params?.userType,
+    status: params?.status,
+  })
+
+  return request<AdminUserProfilesResponse>(path, { token })
+}
+
+export async function updateAdminUserStatus(token: string, userId: string, status: string) {
+  return request<{ message: string; user: AdminUserProfileItem }>(
+    `/api/admin/users/${encodeURIComponent(userId)}/status`,
+    {
+      token,
+      method: "PATCH",
+      body: { status },
+    },
+  )
+}
+
+export interface AdminModeratorReview {
+  _id: string
+  booking_id: string
+  streamer_user_id: string
+  moderator_user_id: string
+  rating: number
+  review_text: string
+  is_public: boolean
+  created_at: string
+  streamer?: {
+    first_name?: string
+    last_name?: string
+    email?: string
+  } | null
+}
+
+export interface AdminModeratorReviewsResponse {
+  reviews: AdminModeratorReview[]
+  stats: {
+    totalReviews: number
+    averageRating: number | string
+    ratingDistribution: Record<number, number>
+  }
+}
+
+export interface AdminUserProfileDetailResponse {
+  user: AdminUserProfileItem & {
+    active_workspace_id?: string | null
+    whatnot_seller_id?: string | null
+    stripe_customer_id?: string | null
+  }
+  profile: {
+    is_published?: boolean
+    rating_from_streamers?: number
+    [key: string]: unknown
+  } | null
+  recentReviews: Array<{
+    _id: string
+    rating: number
+    review_text?: string
+    is_public?: boolean
+    created_at: string
+  }>
+}
+
+export async function getAdminModeratorReviews(token: string, userId: string) {
+  return request<AdminModeratorReviewsResponse>(
+    `/api/admin/reviews/user/${encodeURIComponent(userId)}?type=moderator`,
+    { token },
+  )
+}
+
+export async function getAdminUserProfileById(token: string, userId: string) {
+  return request<AdminUserProfileDetailResponse>(
+    `/api/admin/users/${encodeURIComponent(userId)}`,
+    { token },
+  )
+}
+
+// ─── Admin Subscription Management ───────────────────────────────────────────
+
+export interface AdminSubscriptionPlan {
+  _id: string
+  name: string
+  description: string
+  price: number
+  currency: string
+  billing_interval: string
+  stripe_price_id: string | null
+  stripe_product_id: string | null
+  features_json: string[]
+  display_order: number
+  is_active: boolean
+  metadata_json?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AdminSubscriptionItem {
+  _id: string
+  workspace_id: string | null
+  plan_id: string | null
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
+  stripe_price_id: string | null
+  stripe_latest_invoice_id: string | null
+  latest_payment_status: string | null
+  status: string
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  cancelled_at: string | null
+  created_at: string
+  updated_at: string
+  workspace: {
+    _id: string
+    business_name: string
+    billing_email: string
+    status: string
+  } | null
+  owner: {
+    _id: string
+    first_name: string
+    last_name: string
+    email: string
+    user_type: string
+  } | null
+  plan: {
+    _id: string
+    name: string
+    price: number
+    currency: string
+    billing_interval: string
+  } | null
+}
+
+export interface AdminSubscriptionInvoice {
+  _id: string
+  workspace_subscription_id: string
+  stripe_invoice_id: string | null
+  stripe_subscription_id: string | null
+  stripe_payment_intent_id: string | null
+  amount_due_cents: number
+  amount_paid_cents: number
+  currency: string
+  status: string
+  hosted_invoice_url: string | null
+  invoice_pdf_url: string | null
+  created_at: string
+}
+
+export interface AdminSubscriptionPayment {
+  _id: string
+  workspace_subscription_id: string
+  stripe_payment_intent_id: string | null
+  stripe_invoice_id: string | null
+  stripe_charge_id: string | null
+  stripe_payment_method_id: string | null
+  amount_cents: number
+  currency: string
+  status: string
+  failure_reason: string | null
+  created_at: string
+}
+
+export interface AdminSubscriptionDetailResponse {
+  subscription: AdminSubscriptionItem
+  workspace: {
+    _id: string
+    business_name: string
+    billing_email: string
+    billing_name: string
+    stripe_customer_id: string | null
+    status: string
+  } | null
+  owner: {
+    _id: string
+    first_name: string
+    last_name: string
+    email: string
+    user_type: string
+    clerk_user_id: string
+  } | null
+  plan: AdminSubscriptionPlan | null
+  invoices: AdminSubscriptionInvoice[]
+  payments: AdminSubscriptionPayment[]
+  availablePlans: AdminSubscriptionPlan[]
+}
+
+export interface AdminSubscriptionListResponse {
+  data: AdminSubscriptionItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    pages: number
+  }
+}
+
+export interface AdminSubscriptionStatsResponse {
+  total: number
+  active: number
+  cancelled: number
+  trialing: number
+  estimatedMrr: number
+}
+
+export interface AdminSubscriptionPlansResponse {
+  plans: AdminSubscriptionPlan[]
+}
+
+export async function getAdminSubscriptionStats(token: string) {
+  return request<AdminSubscriptionStatsResponse>("/api/admin/subscriptions/stats", { token })
+}
+
+export async function getAdminSubscriptions(
+  token: string,
+  params?: { page?: number; limit?: number; status?: string },
+) {
+  const path = buildPath("/api/admin/subscriptions", {
+    page: typeof params?.page === "number" ? String(params.page) : undefined,
+    limit: typeof params?.limit === "number" ? String(params.limit) : undefined,
+    status: params?.status,
+  })
+  return request<AdminSubscriptionListResponse>(path, { token })
+}
+
+export async function getAdminSubscriptionById(token: string, subscriptionId: string) {
+  return request<AdminSubscriptionDetailResponse>(
+    `/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { token },
+  )
+}
+
+export async function changeAdminSubscriptionPlan(token: string, subscriptionId: string, planId: string) {
+  return request<{ subscription: AdminSubscriptionItem; plan: AdminSubscriptionPlan }>(
+    `/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}/plan`,
+    { token, method: "PATCH", body: { planId } },
+  )
+}
+
+export async function cancelAdminSubscription(token: string, subscriptionId: string) {
+  return request<{ subscription: AdminSubscriptionItem; message: string }>(
+    `/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`,
+    { token, method: "POST" },
+  )
+}
+
+export async function refundAdminSubscription(
+  token: string,
+  subscriptionId: string,
+  amountCents?: number,
+) {
+  return request<{ message: string; refundId: string; amount_cents: number; currency: string; status: string }>(
+    `/api/admin/subscriptions/${encodeURIComponent(subscriptionId)}/refund`,
+    {
+      token,
+      method: "POST",
+      body: amountCents !== undefined ? { amount_cents: amountCents } : {},
+    },
+  )
+}
+
+export async function getAdminSubscriptionPlans(token: string) {
+  return request<AdminSubscriptionPlansResponse>("/api/admin/subscriptions/plans", { token })
+}
+
+export async function createAdminSubscriptionPlan(
+  token: string,
+  payload: {
+    name: string
+    description?: string
+    price: number
+    currency?: string
+    billing_interval?: string
+    features?: string[]
+    display_order?: number
+    is_active?: boolean
+  },
+) {
+  return request<{ plan: AdminSubscriptionPlan }>("/api/admin/subscriptions/plans", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function updateAdminSubscriptionPlan(
+  token: string,
+  planId: string,
+  payload: Partial<{
+    name: string
+    description: string
+    price: number
+    currency: string
+    billing_interval: string
+    features: string[]
+    display_order: number
+    is_active: boolean
+  }>,
+) {
+  return request<{ plan: AdminSubscriptionPlan }>(
+    `/api/admin/subscriptions/plans/${encodeURIComponent(planId)}`,
+    {
+      token,
+      method: "PATCH",
+      body: payload as unknown as Record<string, unknown>,
+    },
+  )
+}
+
+export interface AdminPlatformSettingsResponse {
+  platformFeePercent: number
+  platformFeeBasisPoints: number
+  adminStripeAccount: {
+    stripeAccountId: string
+    chargesEnabled: boolean
+    payoutsEnabled: boolean
+    detailsSubmitted: boolean
+    onboardingStatus: string | null
+    connectedUserId: string | null
+  } | null
+}
+
+export interface PublicPlatformSettingsResponse {
+  platformFeePercent: number
+  platformFeeBasisPoints: number
+}
+
+export async function getAdminPlatformSettings(token: string) {
+  return request<AdminPlatformSettingsResponse>("/api/admin/platform-settings", {
+    token,
+  })
+}
+
+export async function updateAdminPlatformFeePercent(token: string, platformFeePercent: number) {
+  return request<AdminPlatformSettingsResponse>("/api/admin/platform-settings/fee", {
+    token,
+    method: "PATCH",
+    body: { platformFeePercent },
+  })
+}
+
+export async function getPublicPlatformSettings(token: string) {
+  return request<PublicPlatformSettingsResponse>("/api/booking-payments/platform-settings", {
+    token,
+  })
 }

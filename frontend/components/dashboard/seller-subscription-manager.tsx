@@ -270,7 +270,8 @@ export function SellerSubscriptionManager() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deletingPaymentMethodId, setDeletingPaymentMethodId] = useState<string | null>(null)
 
-  const subscriptionPlan = overview?.plans[0] || null
+  const sortedPlans = useMemo(() => overview?.plans || [], [overview?.plans])
+  const primaryPlan = sortedPlans[0] || null
   const currentPlanId = overview?.currentSubscription?.plan?.id || null
   const hasActiveSubscription = Boolean(
     overview?.currentSubscription?.plan?.id &&
@@ -278,8 +279,6 @@ export function SellerSubscriptionManager() {
         overview.currentSubscription.status,
       ),
   )
-
-  const sortedPlans = useMemo(() => overview?.plans || [], [overview?.plans])
 
   async function getAccessToken() {
     return waitForSessionToken(getToken)
@@ -527,7 +526,7 @@ export function SellerSubscriptionManager() {
 
   const currentSubscription = overview.currentSubscription
 
-  if (!subscriptionPlan) {
+  if (!primaryPlan) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -538,7 +537,8 @@ export function SellerSubscriptionManager() {
           <CardHeader>
             <CardTitle>No active subscription plan is configured</CardTitle>
             <CardDescription>
-              The `$300/month` seller plan was not found in Stripe sync results. Run the backend seed and sync again.
+              No seller billing plans are available. Add active plans in the admin Subscription tab (with Stripe
+              configured) or sync your Stripe product catalog.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -715,54 +715,66 @@ export function SellerSubscriptionManager() {
       </div>
 
       <div>
-        <h2 className="mb-4 text-lg font-semibold">Subscription plan</h2>
-        <Card className="relative overflow-hidden border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent">
-          {currentPlanId === subscriptionPlan.id && hasActiveSubscription ? (
-            <div className="absolute right-4 top-4">
-              <StatusBadge variant="info">Current</StatusBadge>
-            </div>
-          ) : null}
-          <CardHeader className="pb-4">
-            <div className="space-y-2">
-              <h3 className="text-2xl font-semibold">{subscriptionPlan.name}</h3>
-              <p className="text-sm text-muted-foreground">
-                {subscriptionPlan.description || "Single Stripe-managed seller subscription plan."}
-              </p>
-            </div>
-            <div className="mt-4 flex items-baseline gap-1">
-              <span className="text-5xl font-bold">
-                {formatMoney(subscriptionPlan.price, subscriptionPlan.currency)}
-              </span>
-              <span className="text-muted-foreground">/{subscriptionPlan.billingInterval}</span>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <ul className="space-y-3">
-              {subscriptionPlan.features.map((feature) => (
-                <li key={feature} className="flex items-start gap-2 text-sm">
-                  <Check className="mt-0.5 size-4 shrink-0 text-primary" />
-                  <span>{feature}</span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="rounded-xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
-              Clicking choose plan opens Stripe card entry. After card confirmation, Stripe creates the customer,
-              subscription, invoice, and payment transaction in real time.
-            </div>
-          </CardContent>
-          <CardFooter>
-            {currentPlanId === subscriptionPlan.id && hasActiveSubscription ? (
-              <Button className="w-full" variant="outline" disabled>
-                Current subscription
-              </Button>
-            ) : (
-              <Button className="w-full" onClick={() => openPlanDialog(subscriptionPlan)}>
-                Choose plan
-              </Button>
-            )}
-          </CardFooter>
-        </Card>
+        <h2 className="mb-4 text-lg font-semibold">Subscription plans</h2>
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {sortedPlans.map((plan) => (
+            <Card
+              key={plan.id}
+              className="relative flex h-full min-h-0 flex-col overflow-hidden border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent gap-0 py-0 shadow-sm"
+            >
+              {currentPlanId === plan.id && hasActiveSubscription ? (
+                <div className="absolute right-4 top-4 z-10">
+                  <StatusBadge variant="info">Current</StatusBadge>
+                </div>
+              ) : null}
+              <CardHeader className="shrink-0 space-y-0 border-0 px-6 pb-0 pt-6">
+                <div className="pr-14">
+                  <h3 className="line-clamp-2 min-h-[3.25rem] text-2xl font-semibold leading-tight tracking-tight">
+                    {plan.name}
+                  </h3>
+                </div>
+                <p className="mt-2 line-clamp-2 min-h-[2.75rem] text-sm leading-snug text-muted-foreground">
+                  {plan.description || "Stripe-managed seller subscription plan."}
+                </p>
+                <div className="mt-4 flex min-h-[3rem] items-baseline gap-1">
+                  <span className="text-4xl font-bold tabular-nums">
+                    {formatMoney(plan.price, plan.currency)}
+                  </span>
+                  <span className="text-muted-foreground">/{plan.billingInterval}</span>
+                </div>
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-0 px-6 pb-0 pt-5">
+                <ul className="flex min-h-[7.5rem] flex-1 list-none flex-col gap-3 overflow-y-auto pr-0.5">
+                  {plan.features.length ? (
+                    plan.features.map((feature) => (
+                      <li key={`${plan.id}-${feature}`} className="flex items-start gap-2 text-sm leading-snug">
+                        <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                        <span>{feature}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="text-sm text-muted-foreground">No features listed for this plan.</li>
+                  )}
+                </ul>
+                <div className="mt-5 shrink-0 rounded-xl border border-border/60 bg-background/70 p-4 text-sm leading-snug text-muted-foreground">
+                  Choose plan to bill this workspace in Stripe. You can use a saved card or add a new one when
+                  prompted.
+                </div>
+              </CardContent>
+              <CardFooter className="mt-auto shrink-0 border-0 px-6 pb-6 pt-5">
+                {currentPlanId === plan.id && hasActiveSubscription ? (
+                  <Button className="w-full min-h-10" variant="outline" disabled>
+                    Current subscription
+                  </Button>
+                ) : (
+                  <Button className="w-full min-h-10" onClick={() => openPlanDialog(plan)}>
+                    Choose plan
+                  </Button>
+                )}
+              </CardFooter>
+            </Card>
+          ))}
+        </div>
       </div>
 
       <Card className="border-border/60 bg-card/60">

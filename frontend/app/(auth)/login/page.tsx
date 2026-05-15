@@ -95,7 +95,10 @@ function LoginContent() {
   }, [user?.publicMetadata, user?.unsafeMetadata])
 
   const currentEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses[0]?.emailAddress || "this account"
-  const continueUrl = currentRole ? getDashboardPath(currentRole) : completionUrl
+  const continueUrl = buildPath("/auth-complete", {
+    flow: "login",
+    role: currentRole || selectedRole,
+  })
   const switchAccountRedirectUrl = buildPath("/login", { role: selectedRole || currentRole })
   const roleMismatch = Boolean(selectedRole && currentRole && selectedRole !== currentRole)
 

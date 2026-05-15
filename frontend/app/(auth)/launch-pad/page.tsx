@@ -8,7 +8,7 @@ import { LaunchPadContent } from "@/components/launch-pad/launch-pad-content"
 
 export default function LaunchPadPage() {
   return (
-    <RoleGate allowedRoles={["streamer", "moderator", "staff"]} unauthenticatedPath="/login">
+    <RoleGate allowedRoles={["streamer", "moderator", "staff", "admin"]} unauthenticatedPath="/login">
       <Suspense
         fallback={
           <div className="flex items-center justify-center">

@@ -35,6 +35,7 @@ async function upsertDefinition(definition, existingProducts, existingPrices) {
       metadata: {
         app_plan_key: definition.key,
         role: "seller",
+        seller_subscription: "true",
         features: definition.features,
       },
     });
@@ -43,9 +44,9 @@ async function upsertDefinition(definition, existingProducts, existingPrices) {
       name: definition.name,
       description: definition.description,
       metadata: {
-        ...(product.metadata || {}),
         app_plan_key: definition.key,
         role: "seller",
+        seller_subscription: "true",
         features: definition.features,
       },
     });
@@ -71,6 +72,7 @@ async function upsertDefinition(definition, existingProducts, existingPrices) {
       metadata: {
         app_plan_key: definition.key,
         role: "seller",
+        seller_subscription: "true",
         display_order: definition.order,
       },
     });

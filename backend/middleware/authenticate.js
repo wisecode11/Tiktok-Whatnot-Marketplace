@@ -1,4 +1,31 @@
 const { verifyToken } = require("@clerk/backend");
+const { User } = require("../models");
+
+const BOOTSTRAP_AUTH_ENDPOINTS = new Set([
+  "/api/auth/sync-user",
+  "/api/auth/login",
+  "/api/auth/me",
+]);
+
+function isBootstrapAuthRequest(req) {
+  const rawPath =
+    typeof req.originalUrl === "string"
+      ? req.originalUrl
+      : typeof req.url === "string"
+        ? req.url
+        : "";
+  const path = rawPath.split("?")[0];
+  return BOOTSTRAP_AUTH_ENDPOINTS.has(path);
+}
+
+function rejectUnauthorized(res, message, accountStatus) {
+  return res.status(401).json({
+    success: false,
+    message,
+    code: "ACCOUNT_DEACTIVATED",
+    accountStatus,
+  });
+}
 
 async function authenticateRequest(req, res, next) {
   const authHeader = req.headers.authorization || "";
@@ -19,10 +46,40 @@ async function authenticateRequest(req, res, next) {
       clockSkewInMs: 15000,
     });
 
+    const user = await User.findOne({ clerk_user_id: payload.sub });
+
+    if (!user) {
+      if (isBootstrapAuthRequest(req)) {
+        req.auth = {
+          userId: payload.sub,
+          sessionId: payload.sid,
+          claims: payload,
+          user: null,
+        };
+
+        return next();
+      }
+
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+        code: "ACCOUNT_UNAUTHORIZED",
+      });
+    }
+
+    if (["inactive", "pending", "blocked", "deleted"].includes(user.status)) {
+      return rejectUnauthorized(
+        res,
+        "Your account has been deactivated by admin",
+        user.status === "pending" ? "inactive" : user.status
+      );
+    }
+
     req.auth = {
       userId: payload.sub,
       sessionId: payload.sid,
       claims: payload,
+      user: user,
     };
 
     return next();

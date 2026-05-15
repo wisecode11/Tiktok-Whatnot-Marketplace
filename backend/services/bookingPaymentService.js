@@ -1,7 +1,10 @@
 // services/bookingPaymentService.js
 // Handles moderator booking payments via Stripe Connect.
-// Platform takes a 15% application fee; remaining 85% flows to the moderator's
-// connected Stripe Express account via transfer_data.destination.
+// The admin-configurable platform fee (default 15%) is held back as an
+// application_fee_amount on the destination charge; the remainder flows to the
+// moderator's connected Stripe Express account via transfer_data.destination.
+// After payment succeeds, the platform fee is transferred from the platform
+// balance to the admin's own connected Stripe Express account.
 
 const { createClerkClient } = require("@clerk/backend");
 const Stripe = require("stripe");
@@ -12,8 +15,13 @@ const ModeratorPayout = require("../models/ModeratorPayout");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
 const ModeratorProfile = require("../models/ModeratorProfile");
 const User = require("../models/Users");
+const {
+  getPlatformFeeBasisPoints,
+  getAdminStripeAccountId,
+  DEFAULT_PLATFORM_FEE_PERCENT,
+} = require("./platformSettingsService");
 
-const PLATFORM_FEE_PERCENT = 0.15; // 15%
+const FALLBACK_PLATFORM_FEE_BASIS_POINTS = Math.round(DEFAULT_PLATFORM_FEE_PERCENT * 100);
 const MIN_AMOUNT_CENTS = 100; // $1.00 minimum
 
 function createHttpError(status, message, details) {
@@ -150,14 +158,25 @@ async function getModeratorConnectAccount(moderatorUserId) {
   return account;
 }
 
+async function getActivePlatformFeeBasisPoints() {
+  try {
+    return await getPlatformFeeBasisPoints();
+  } catch (error) {
+    console.error("Falling back to default platform fee basis points – platform settings unavailable:", error);
+    return FALLBACK_PLATFORM_FEE_BASIS_POINTS;
+  }
+}
+
 /**
- * Calculate fee split.
- * Returns { platformFeeCents, moderatorPayoutCents }
+ * Calculate fee split using admin-configured basis points (integer-safe).
+ * Returns { platformFeeCents, moderatorPayoutCents, platformFeeFraction, platformFeeBasisPoints }
  */
-function calculateFees(grossAmountCents) {
-  const platformFeeCents = Math.round(grossAmountCents * PLATFORM_FEE_PERCENT);
+async function calculateFees(grossAmountCents) {
+  const platformFeeBasisPoints = await getActivePlatformFeeBasisPoints();
+  const platformFeeCents = Math.round((grossAmountCents * platformFeeBasisPoints) / 10000);
   const moderatorPayoutCents = grossAmountCents - platformFeeCents;
-  return { platformFeeCents, moderatorPayoutCents };
+  const platformFeeFraction = platformFeeBasisPoints / 10000;
+  return { platformFeeCents, moderatorPayoutCents, platformFeeFraction, platformFeeBasisPoints };
 }
 
 function normalizeOrderStatus(value) {
@@ -244,7 +263,7 @@ async function upsertBooking({
   scheduledStartAt,
   scheduledEndAt,
 }) {
-  const { platformFeeCents, moderatorPayoutCents } = calculateFees(amountCents);
+  const { platformFeeCents, moderatorPayoutCents } = await calculateFees(amountCents);
   const now = new Date();
 
   if (bookingId) {
@@ -334,7 +353,12 @@ async function createBookingPaymentIntent({
     slotEndAt: scheduledWindow.endAt,
   });
 
-  const { platformFeeCents, moderatorPayoutCents } = calculateFees(totalCents);
+  const {
+    platformFeeCents,
+    moderatorPayoutCents,
+    platformFeeFraction,
+    platformFeeBasisPoints,
+  } = await calculateFees(totalCents);
 
   // Create booking record first so we have its ID for metadata.
   const booking = await upsertBooking({
@@ -372,6 +396,8 @@ async function createBookingPaymentIntent({
       moderator_user_id: moderatorUserId,
       platform_fee_cents: String(platformFeeCents),
       moderator_payout_cents: String(moderatorPayoutCents),
+      platform_fee_percent: String(Math.round(platformFeeFraction * 10000) / 100),
+      platform_fee_basis_points: String(platformFeeBasisPoints),
       payment_purpose: "moderator_booking",
     },
     description: `Moderator booking – ${notes || "live session"}`,
@@ -394,6 +420,71 @@ async function createBookingPaymentIntent({
     moderatorPayoutCents,
     currency: "usd",
   };
+}
+
+/**
+ * Forward the platform fee (application_fee_amount that lands in the platform
+ * account) from the platform balance to the admin's connected Stripe Express
+ * account. Idempotent: subsequent calls are no-ops once `admin_fee_transfer_id`
+ * is set.
+ */
+async function forwardPlatformFeeToAdmin({ booking, paymentIntent }) {
+  if (!booking || booking.admin_fee_transfer_id) {
+    return null;
+  }
+
+  const feeCents = Number(booking.platform_fee_cents || 0);
+  if (!Number.isFinite(feeCents) || feeCents <= 0) {
+    booking.admin_fee_transfer_status = "skipped";
+    booking.updated_at = new Date();
+    await booking.save();
+    return null;
+  }
+
+  let adminStripeAccountId;
+  try {
+    adminStripeAccountId = await getAdminStripeAccountId();
+  } catch (error) {
+    console.error("Unable to look up admin Stripe account for fee transfer:", error);
+    adminStripeAccountId = null;
+  }
+
+  if (!adminStripeAccountId) {
+    booking.admin_fee_transfer_status = "skipped";
+    booking.updated_at = new Date();
+    await booking.save();
+    return null;
+  }
+
+  try {
+    const stripe = getStripeClient();
+    const transfer = await stripe.transfers.create({
+      amount: feeCents,
+      currency: paymentIntent.currency || "usd",
+      destination: adminStripeAccountId,
+      transfer_group: `booking_${booking._id}`,
+      description: `Platform fee – moderator booking ${booking._id}`,
+      metadata: {
+        booking_id: booking._id,
+        payment_intent_id: paymentIntent.id,
+        purpose: "platform_fee_admin_transfer",
+      },
+    });
+
+    booking.admin_fee_transfer_id = transfer.id;
+    booking.admin_fee_transfer_status = "transferred";
+    booking.admin_fee_destination_account = adminStripeAccountId;
+    booking.updated_at = new Date();
+    await booking.save();
+    return transfer;
+  } catch (error) {
+    console.error("Failed to transfer platform fee to admin connected account:", error);
+    booking.admin_fee_transfer_status = "failed";
+    booking.admin_fee_destination_account = adminStripeAccountId;
+    booking.updated_at = new Date();
+    await booking.save();
+    return null;
+  }
 }
 
 /**
@@ -425,9 +516,10 @@ async function handleBookingPaymentSucceeded(paymentIntent) {
 
   // Create payout ledger record.
   const existing = await ModeratorPayout.findOne({ stripe_payment_intent_id: paymentIntent.id });
+  const platformFeeBps = await getActivePlatformFeeBasisPoints();
   if (!existing) {
     const gross = booking.agreed_price_cents || paymentIntent.amount || 0;
-    const fee = booking.platform_fee_cents || Math.round(gross * PLATFORM_FEE_PERCENT);
+    const fee = booking.platform_fee_cents || Math.round((gross * platformFeeBps) / 10000);
     const net = booking.moderator_payout_cents || gross - fee;
 
     const payout = new ModeratorPayout({
@@ -446,6 +538,9 @@ async function handleBookingPaymentSucceeded(paymentIntent) {
 
     await payout.save();
   }
+
+  // Forward the platform fee to the admin's connected Stripe Express account.
+  await forwardPlatformFeeToAdmin({ booking, paymentIntent });
 
   // Create a one-time Stripe invoice record for this already-paid booking.
   if (booking.stripe_customer_id && !booking.stripe_invoice_id) {
@@ -560,8 +655,9 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
           stripe_payment_intent_id: booking.stripe_payment_intent_id 
         });
         if (!existingPayout) {
+          const platformFeeBps = await getActivePlatformFeeBasisPoints();
           const gross = booking.agreed_price_cents || 0;
-          const fee = booking.platform_fee_cents || Math.round(gross * PLATFORM_FEE_PERCENT);
+          const fee = booking.platform_fee_cents || Math.round((gross * platformFeeBps) / 10000);
           const net = booking.moderator_payout_cents || gross - fee;
           
           await ModeratorPayout.create({
@@ -578,6 +674,8 @@ async function getBookingPaymentStatus({ clerkUserId, bookingId }) {
             updated_at: new Date(),
           });
         }
+
+        await forwardPlatformFeeToAdmin({ booking, paymentIntent });
       }
     } catch (error) {
       console.warn("Fallback payment verification failed:", error.message);

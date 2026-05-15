@@ -6,15 +6,14 @@ import {
   ImagePlus,
   Link2,
   Loader2,
-  PackageSearch,
   Plus,
   Search,
-  ShoppingBag,
   SlidersHorizontal,
   Pencil,
   Trash2,
 } from "lucide-react"
 
+import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -1042,56 +1041,14 @@ export default function SellerInventoryManagementPage() {
         ) : null}
       </PageHeader>
 
-      <div
-        className="flex flex-wrap gap-1 rounded-xl border border-border/50 bg-muted/50 p-1"
-        role="tablist"
-        aria-label="Inventory source"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={inventoryPlatformTab === "whatnot"}
-          id="inventory-tab-whatnot"
-          className={cn(
-            "relative inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors sm:flex-none sm:justify-start sm:px-4",
-            inventoryPlatformTab === "whatnot"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-          )}
-          onClick={() => setInventoryPlatformTab("whatnot")}
-        >
-          <PackageSearch className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
-          Whatnot Inventory
-          {inventoryPlatformTab === "whatnot" ? (
-            <span
-              className="bg-primary absolute bottom-0 left-3 right-3 h-0.5 rounded-full sm:left-4 sm:right-4"
-              aria-hidden
-            />
-          ) : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={inventoryPlatformTab === "tiktok"}
-          id="inventory-tab-tiktok"
-          className={cn(
-            "relative inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors sm:flex-none sm:justify-start sm:px-4",
-            inventoryPlatformTab === "tiktok"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-          )}
-          onClick={() => setInventoryPlatformTab("tiktok")}
-        >
-          <ShoppingBag className="h-4 w-4 shrink-0" aria-hidden />
-          TikTok Inventory
-          {inventoryPlatformTab === "tiktok" ? (
-            <span
-              className="bg-primary absolute bottom-0 left-3 right-3 h-0.5 rounded-full sm:left-4 sm:right-4"
-              aria-hidden
-            />
-          ) : null}
-        </button>
-      </div>
+      <MarketplacePlatformSwitch
+        value={inventoryPlatformTab}
+        onValueChange={(value: MarketplacePlatform) => setInventoryPlatformTab(value as InventoryPlatformTab)}
+        ariaLabel="Inventory source"
+        whatnotLabel="Whatnot Inventory"
+        tiktokLabel="TikTok Inventory"
+        idPrefix="inventory-tab"
+      />
 
       {inventoryPlatformTab === "tiktok" ? (
         <>

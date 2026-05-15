@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { Activity, Boxes, ExternalLink, PackageSearch, Printer, RefreshCw, Store, Truck, Wallet } from "lucide-react"
+import { Activity, Boxes, ExternalLink, PackageSearch, Printer, RefreshCw, Truck, Wallet } from "lucide-react"
 
+import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -19,7 +20,6 @@ import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AuthApiError,
   fetchWhatnotMyLiveStats,
@@ -1176,28 +1176,24 @@ export default function SellerOrderManagementPage() {
         </div>
       </PageHeader>
 
-      
-
-
-      <Tabs value={activePlatform} onValueChange={(value) => setActivePlatform(value as "whatnot" | "tiktok")} className="space-y-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-5">
+        <div className="space-y-3">
           <div>
             <h3 className="text-lg font-semibold tracking-tight">Platform workspaces</h3>
-            <p className="text-sm text-muted-foreground">Switch tabs to show the management data for the selected marketplace only.</p>
+                  <p className="text-sm text-muted-foreground">Use the same marketplace switch from inventory management to focus this workspace on Whatnot or TikTok.</p>
           </div>
-          <TabsList className="grid w-full grid-cols-2 rounded-2xl bg-muted/70 p-1 lg:w-[22rem]">
-            <TabsTrigger value="whatnot" className="rounded-xl">
-              <PackageSearch className="h-4 w-4" />
-              Whatnot
-            </TabsTrigger>
-            <TabsTrigger value="tiktok" className="rounded-xl">
-              <Store className="h-4 w-4" />
-              TikTok Shop
-            </TabsTrigger>
-          </TabsList>
+                <MarketplacePlatformSwitch
+                  value={activePlatform}
+                  onValueChange={(value: MarketplacePlatform) => setActivePlatform(value as "whatnot" | "tiktok")}
+                  ariaLabel="Order management platform"
+                  whatnotLabel="Whatnot Management"
+                  tiktokLabel="TikTok Management"
+                  idPrefix="order-management-platform"
+                />
         </div>
 
-        <TabsContent value="whatnot" className="space-y-5">
+              {activePlatform === "whatnot" ? (
+                <div className="space-y-5">
           <Card className="border-border/60 shadow-sm">
             <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1346,9 +1342,11 @@ export default function SellerOrderManagementPage() {
               ) : null}
             </CardContent>
           </Card>
-        </TabsContent>
+          </div>
+        ) : null}
 
-        <TabsContent value="tiktok" className="space-y-5">
+        {activePlatform === "tiktok" ? (
+          <div className="space-y-5">
         
 
           {tiktokErrorMessage ? (
@@ -1422,8 +1420,9 @@ export default function SellerOrderManagementPage() {
               ) : null}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+          </div>
+        ) : null}
+      </div>
 
       <Dialog open={selectedShipment !== null} onOpenChange={(open) => !open && setSelectedShipment(null)}>
         <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden border-border/80 p-0 sm:max-w-[520px]">
