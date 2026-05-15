@@ -1147,7 +1147,7 @@ export function getDashboardPath(role: AppRole) {
 }
 
 export function getSignupRedirectPath(role: AppRole) {
-  if (role === "admin" || role === "staff") {
+  if (role === "staff") {
     return getDashboardPath(role)
   }
 
@@ -2083,6 +2083,7 @@ export interface AdminSubscriptionPlan {
   features_json: string[]
   display_order: number
   is_active: boolean
+  metadata_json?: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
@@ -2298,4 +2299,42 @@ export async function updateAdminSubscriptionPlan(
       body: payload as unknown as Record<string, unknown>,
     },
   )
+}
+
+export interface AdminPlatformSettingsResponse {
+  platformFeePercent: number
+  platformFeeBasisPoints: number
+  adminStripeAccount: {
+    stripeAccountId: string
+    chargesEnabled: boolean
+    payoutsEnabled: boolean
+    detailsSubmitted: boolean
+    onboardingStatus: string | null
+    connectedUserId: string | null
+  } | null
+}
+
+export interface PublicPlatformSettingsResponse {
+  platformFeePercent: number
+  platformFeeBasisPoints: number
+}
+
+export async function getAdminPlatformSettings(token: string) {
+  return request<AdminPlatformSettingsResponse>("/api/admin/platform-settings", {
+    token,
+  })
+}
+
+export async function updateAdminPlatformFeePercent(token: string, platformFeePercent: number) {
+  return request<AdminPlatformSettingsResponse>("/api/admin/platform-settings/fee", {
+    token,
+    method: "PATCH",
+    body: { platformFeePercent },
+  })
+}
+
+export async function getPublicPlatformSettings(token: string) {
+  return request<PublicPlatformSettingsResponse>("/api/booking-payments/platform-settings", {
+    token,
+  })
 }

@@ -18,6 +18,10 @@ const {
   refundSubscription,
   getSubscriptionStats,
 } = require("../controllers/adminSubscriptionController");
+const {
+  getAdminSettings,
+  updateAdminPlatformFee,
+} = require("../controllers/platformSettingsController");
 const { authenticateRequest } = require("../middleware/authenticate");
 
 const router = express.Router();
@@ -44,5 +48,9 @@ router.get("/subscriptions/:subscriptionId", authenticateRequest, getSubscriptio
 router.patch("/subscriptions/:subscriptionId/plan", authenticateRequest, changeSubscriptionPlan);
 router.post("/subscriptions/:subscriptionId/cancel", authenticateRequest, cancelSubscription);
 router.post("/subscriptions/:subscriptionId/refund", authenticateRequest, refundSubscription);
+
+// Platform settings (commission rate, Stripe Connect for the platform owner).
+router.get("/platform-settings", authenticateRequest, getAdminSettings);
+router.patch("/platform-settings/fee", authenticateRequest, updateAdminPlatformFee);
 
 module.exports = router;

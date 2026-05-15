@@ -70,7 +70,7 @@ function getLaunchPadPath(role) {
 }
 
 function getSignupRedirect(role) {
-  if (role === "admin" || role === "staff") {
+  if (role === "staff") {
     return getDashboardPath(role);
   }
 
@@ -426,7 +426,7 @@ async function getLoginRedirect(user) {
     return "/seller/select-organization";
   }
 
-  if (role !== "moderator") {
+  if (role !== "moderator" && role !== "admin") {
     return getDashboardPath(role);
   }
 
@@ -471,21 +471,21 @@ function serializeUser(user) {
 async function getCurrentUserRedirect(user) {
   const role = FRONTEND_ROLE_MAP[user.user_type];
 
-  if (role !== "streamer") {
+  if (role === "streamer") {
+    const organizations = await listSellerWorkspacesForUser(user._id);
+
+    if (organizations.length === 0) {
+      return "/seller/select-organization";
+    }
+
+    const hasActiveWorkspace =
+      user.active_workspace_id && organizations.some((workspace) => workspace._id === user.active_workspace_id);
+
+    if (!hasActiveWorkspace) {
+      return "/seller/select-organization";
+    }
+
     return getDashboardPath(role);
-  }
-
-  const organizations = await listSellerWorkspacesForUser(user._id);
-
-  if (organizations.length === 0) {
-    return "/seller/select-organization";
-  }
-
-  const hasActiveWorkspace =
-    user.active_workspace_id && organizations.some((workspace) => workspace._id === user.active_workspace_id);
-
-  if (!hasActiveWorkspace) {
-    return "/seller/select-organization";
   }
 
   return getDashboardPath(role);

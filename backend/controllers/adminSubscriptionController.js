@@ -7,6 +7,11 @@ const {
   SellerWorkspace,
   User,
 } = require("../models");
+const {
+  createStripeProductAndPrice,
+  updateStripeProduct,
+  replaceStripeRecurringPrice,
+} = require("../services/subscriptionPlanStripeAdminService");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -48,7 +53,8 @@ async function listPlans(req, res) {
 
 /**
  * POST /api/admin/subscriptions/plans
- * Create a new subscription plan (admin-managed, no Stripe product required).
+ * Creates a SubscriptionPlan and, when Stripe is configured and price > 0, a Stripe Product + recurring Price
+ * so sellers can subscribe to the same price in checkout.
  */
 async function createPlan(req, res) {
   try {
@@ -71,17 +77,42 @@ async function createPlan(req, res) {
     }
 
     const now = new Date();
+    const features_json = Array.isArray(features)
+      ? features.map((f) => String(f).trim()).filter(Boolean)
+      : [];
+
+    let stripe_product_id = null;
+    let stripe_price_id = null;
+    let metadata_json = null;
+
+    if (process.env.STRIPE_SECRET_KEY && price > 0) {
+      const stripeResult = await createStripeProductAndPrice({
+        name: name.trim(),
+        description: description || "",
+        amountDollars: price,
+        currency,
+        billingInterval: billing_interval,
+        features: features_json,
+        displayOrder: Number(display_order) || 0,
+        activatePrice: Boolean(is_active),
+      });
+      stripe_product_id = stripeResult.stripe_product_id;
+      stripe_price_id = stripeResult.stripe_price_id;
+      metadata_json = stripeResult.metadata_json;
+    }
+
     const plan = new SubscriptionPlan({
       name: name.trim(),
       description: description || "",
       price,
       currency,
       billing_interval,
-      features_json: Array.isArray(features)
-        ? features.map((f) => String(f).trim()).filter(Boolean)
-        : [],
+      features_json,
       display_order: Number(display_order) || 0,
       is_active: Boolean(is_active),
+      stripe_product_id,
+      stripe_price_id,
+      metadata_json,
       created_at: now,
       updated_at: now,
     });
@@ -95,7 +126,9 @@ async function createPlan(req, res) {
 
 /**
  * PATCH /api/admin/subscriptions/plans/:planId
- * Update a subscription plan's details.
+ * Updates plan fields; syncs name/description to Stripe Product when linked.
+ * If amount, currency, or billing interval changes, creates a new Stripe Price and archives the old one.
+ * If the plan had no Stripe linkage and Stripe is configured with a positive price, creates Product + Price.
  */
 async function updatePlan(req, res) {
   try {
@@ -117,6 +150,10 @@ async function updatePlan(req, res) {
       is_active,
     } = req.body || {};
 
+    const prevPrice = Number(plan.price);
+    const prevCurrency = String(plan.currency || "usd").toLowerCase();
+    const prevInterval = plan.billing_interval || "month";
+
     if (name !== undefined) plan.name = String(name).trim();
     if (description !== undefined) plan.description = description;
     if (price !== undefined) plan.price = Number(price);
@@ -128,6 +165,73 @@ async function updatePlan(req, res) {
     if (display_order !== undefined) plan.display_order = Number(display_order) || 0;
     if (is_active !== undefined) plan.is_active = Boolean(is_active);
     plan.updated_at = new Date();
+
+    const nextPrice = Number(plan.price);
+    const nextCurrency = String(plan.currency || "usd").toLowerCase();
+    const nextInterval = plan.billing_interval || "month";
+
+    const pricingChanged =
+      nextPrice !== prevPrice ||
+      nextCurrency !== prevCurrency ||
+      nextInterval !== prevInterval;
+
+    if (process.env.STRIPE_SECRET_KEY) {
+      if (plan.stripe_product_id && plan.stripe_price_id && pricingChanged && nextPrice > 0) {
+        const meta =
+          plan.metadata_json && typeof plan.metadata_json === "object" ? plan.metadata_json : {};
+        const app_plan_key = meta.app_plan_key || undefined;
+
+        const { stripe_price_id: newPriceId } = await replaceStripeRecurringPrice({
+          stripe_product_id: plan.stripe_product_id,
+          previous_price_id: plan.stripe_price_id,
+          amountDollars: nextPrice,
+          currency: nextCurrency,
+          billingInterval: nextInterval,
+          app_plan_key,
+          displayOrder: plan.display_order,
+          activatePrice: Boolean(plan.is_active),
+        });
+        plan.stripe_price_id = newPriceId;
+      } else if (!plan.stripe_price_id && nextPrice > 0) {
+        const stripeResult = await createStripeProductAndPrice({
+          name: plan.name,
+          description: plan.description || "",
+          amountDollars: nextPrice,
+          currency: nextCurrency,
+          billingInterval: nextInterval,
+          features: plan.features_json || [],
+          displayOrder: plan.display_order,
+          activatePrice: Boolean(plan.is_active),
+        });
+        plan.stripe_product_id = stripeResult.stripe_product_id;
+        plan.stripe_price_id = stripeResult.stripe_price_id;
+        plan.metadata_json = { ...(plan.metadata_json || {}), ...stripeResult.metadata_json };
+      }
+
+      if (plan.stripe_product_id && (name !== undefined || description !== undefined)) {
+        await updateStripeProduct(plan.stripe_product_id, {
+          name: plan.name,
+          description: plan.description,
+        });
+      }
+
+      if (plan.stripe_product_id && (Array.isArray(features) || display_order !== undefined)) {
+        const stripe = getStripeClient();
+        const existing = await stripe.products.retrieve(plan.stripe_product_id);
+        const prevMeta = (existing && existing.metadata) || {};
+        await stripe.products.update(plan.stripe_product_id, {
+          metadata: {
+            ...prevMeta,
+            features: JSON.stringify(plan.features_json || []),
+            display_order: String(plan.display_order ?? 0),
+          },
+        });
+      }
+      if (is_active !== undefined && plan.stripe_price_id) {
+        const stripe = getStripeClient();
+        await stripe.prices.update(plan.stripe_price_id, { active: Boolean(plan.is_active) });
+      }
+    }
 
     await plan.save();
     return res.status(200).json({ plan });

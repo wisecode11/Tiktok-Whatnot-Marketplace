@@ -16,6 +16,7 @@ const WhatnotProfileShipping = require("../models/WhatnotProfileShipping");
 const WhatnotLivestreamMainCategory = require("../models/WhatnotLivestreamMainCategory");
 const WhatnotLivestreamRefinementCategory = require("../models/WhatnotLivestreamRefinementCategory");
 const StripeConnectAccount = require("../models/StripeConnectAccount");
+const PlatformSetting = require("../models/PlatformSetting");
 const User = require("../models/Users");
 const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
 const { decryptText, encryptText } = require("../utils/crypto");
@@ -1220,11 +1221,20 @@ async function getTikTokVideoAnalytics({ clerkUserId, cursor = null, maxCount })
   };
 }
 
+function resolveStripeAccountTypeForRole(role) {
+  const normalized = typeof role === "string" ? role.trim().toLowerCase() : "";
+  if (normalized === "admin" || normalized === "platform") {
+    return "platform";
+  }
+  return "moderator";
+}
+
 async function upsertStripeConnectSnapshot({
   localUserId,
   stripeAccountId,
   stripeAccount = null,
   onboardingStatus,
+  accountType = "moderator",
 }) {
   if (!localUserId || !stripeAccountId) {
     return null;
@@ -1233,11 +1243,11 @@ async function upsertStripeConnectSnapshot({
   const now = new Date();
   const existing = await StripeConnectAccount.findOne({
     user_id: localUserId,
-    account_type: "moderator",
+    account_type: accountType,
   });
   const record = existing || new StripeConnectAccount({
     user_id: localUserId,
-    account_type: "moderator",
+    account_type: accountType,
     created_at: now,
   });
 
@@ -1258,7 +1268,47 @@ async function upsertStripeConnectSnapshot({
   record.updated_at = now;
   await record.save();
 
+  if (accountType === "platform") {
+    await upsertPlatformStripeSnapshot({
+      localUserId,
+      stripeAccountId,
+      stripeAccount,
+      onboardingStatus,
+    });
+  }
+
   return record;
+}
+
+async function upsertPlatformStripeSnapshot({
+  localUserId,
+  stripeAccountId,
+  stripeAccount,
+  onboardingStatus,
+}) {
+  const now = new Date();
+  let setting = await PlatformSetting.findOne({ scope: "global" });
+
+  if (!setting) {
+    setting = new PlatformSetting({ scope: "global", created_at: now });
+  }
+
+  setting.admin_stripe_account_id = stripeAccountId;
+  setting.admin_stripe_connected_user_id = localUserId || setting.admin_stripe_connected_user_id || null;
+
+  if (stripeAccount) {
+    setting.admin_stripe_charges_enabled = Boolean(stripeAccount.charges_enabled);
+    setting.admin_stripe_payouts_enabled = Boolean(stripeAccount.payouts_enabled);
+    setting.admin_stripe_details_submitted = Boolean(stripeAccount.details_submitted);
+  }
+
+  if (onboardingStatus) {
+    setting.admin_stripe_onboarding_status = onboardingStatus;
+  }
+
+  setting.updated_at = now;
+  await setting.save();
+  return setting;
 }
 
 async function getConnectedAccounts({ clerkUserId }) {
@@ -1379,6 +1429,7 @@ async function createStripeConnectSession({ clerkUserId, role }) {
   const stripe = getStripeClient();
   const { returnUrl, refreshUrl } = getStripeConfig();
   const user = await findLocalUser(clerkUserId);
+  const accountType = resolveStripeAccountTypeForRole(role);
 
   const returnUrlWithParams = new URL(returnUrl);
   returnUrlWithParams.searchParams.set("platform", "stripe");
@@ -1398,7 +1449,12 @@ async function createStripeConnectSession({ clerkUserId, role }) {
   if (!stripeAccountId) {
     const stripeAccount = await stripe.accounts.create({
       type: "express",
-      metadata: { clerkUserId, localUserId: user._id.toString() },
+      metadata: {
+        clerkUserId,
+        localUserId: user._id.toString(),
+        role: role || (accountType === "platform" ? "admin" : "moderator"),
+        accountType,
+      },
     });
 
     stripeAccountId = stripeAccount.id;
@@ -1413,6 +1469,10 @@ async function createStripeConnectSession({ clerkUserId, role }) {
 
     account.account_external_id = stripeAccountId;
     account.status = "error";
+    account.metadata_json = {
+      ...(account.metadata_json || {}),
+      accountType,
+    };
     account.updated_at = now;
     await account.save();
 
@@ -1420,6 +1480,7 @@ async function createStripeConnectSession({ clerkUserId, role }) {
       localUserId: user._id,
       stripeAccountId,
       onboardingStatus: "created",
+      accountType,
     });
   }
 
@@ -1438,6 +1499,7 @@ async function createStripeConnectSession({ clerkUserId, role }) {
 async function checkStripeAccountStatus({ clerkUserId }) {
   const stripe = getStripeClient();
   const user = await findLocalUser(clerkUserId);
+  const accountType = resolveStripeAccountTypeForRole(user.user_type);
 
   const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "stripe" });
 
@@ -1460,10 +1522,12 @@ async function checkStripeAccountStatus({ clerkUserId }) {
     ? stripeAccount.business_profile.name
     : (stripeAccount.email || account.account_external_id);
   account.metadata_json = {
+    ...(account.metadata_json || {}),
     charges_enabled: chargesEnabled,
     payouts_enabled: payoutsEnabled,
     requirements,
     details_submitted: stripeAccount.details_submitted,
+    accountType,
     checked_at: now.toISOString(),
   };
   account.updated_at = now;
@@ -1474,6 +1538,7 @@ async function checkStripeAccountStatus({ clerkUserId }) {
     stripeAccountId: account.account_external_id,
     stripeAccount,
     onboardingStatus,
+    accountType,
   });
 
   return {
@@ -1483,6 +1548,7 @@ async function checkStripeAccountStatus({ clerkUserId }) {
     requirements,
     detailsSubmitted: stripeAccount.details_submitted,
     stripeAccountId: account.account_external_id,
+    accountType,
   };
 }
 
@@ -1762,11 +1828,27 @@ async function disconnectPlatform({ clerkUserId, platform }) {
   await account.save();
 
   if (normalizedPlatform === "stripe" && account.account_external_id) {
+    const accountType = resolveStripeAccountTypeForRole(user.user_type);
     await upsertStripeConnectSnapshot({
       localUserId: user._id,
       stripeAccountId: account.account_external_id,
       onboardingStatus: "revoked",
+      accountType,
     });
+
+    if (accountType === "platform") {
+      const setting = await PlatformSetting.findOne({ scope: "global" });
+      if (setting && setting.admin_stripe_account_id === account.account_external_id) {
+        setting.admin_stripe_account_id = null;
+        setting.admin_stripe_charges_enabled = false;
+        setting.admin_stripe_payouts_enabled = false;
+        setting.admin_stripe_details_submitted = false;
+        setting.admin_stripe_onboarding_status = "revoked";
+        setting.admin_stripe_connected_user_id = null;
+        setting.updated_at = new Date();
+        await setting.save();
+      }
+    }
   }
 
   if (normalizedPlatform === "whatnot") {
