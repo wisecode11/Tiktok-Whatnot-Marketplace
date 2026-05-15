@@ -214,7 +214,9 @@ function PlanFormDialog({ open, plan, onClose, onSaved, getToken }: PlanFormDial
         <DialogHeader>
           <DialogTitle>{plan ? "Edit Plan" : "Create New Plan"}</DialogTitle>
           <DialogDescription>
-            {plan ? "Update the subscription plan details." : "Add a new subscription plan for streamers."}
+            {plan
+              ? "Update the subscription plan details. Price or interval changes create a new Stripe price and archive the old one."
+              : "With Stripe configured on the server, a paid plan (price greater than zero) creates a Stripe Product and Price. Active plans appear on the seller Subscription page."}
           </DialogDescription>
         </DialogHeader>
 
@@ -1100,7 +1102,8 @@ export default function SubscriptionManagementPage() {
                 <div>
                   <CardTitle>Subscription Plans</CardTitle>
                   <CardDescription>
-                    Plans created here appear for streamers to purchase. Active plans are shown on the pricing page.
+                    Paid plans create a matching Product and Price in Stripe and appear on the seller Subscription page.
+                    Changing amount or billing interval archives the old Stripe price and creates a new one.
                   </CardDescription>
                 </div>
                 <Button

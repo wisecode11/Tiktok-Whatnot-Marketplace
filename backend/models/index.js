@@ -35,6 +35,7 @@ module.exports = {
   ModeratorOrderReview: require('./ModeratorOrderReview'),
   KycVerification: require('./KycVerification'),
   StripeConnectAccount: require('./StripeConnectAccount'),
+  PlatformSetting: require('./PlatformSetting'),
 
   // Team chat
   ChatThread: require('./ChatThread'),

@@ -27,6 +27,7 @@ import {
   getBookingPaymentStatus,
   type CreateBookingIntentResponse,
 } from "@/lib/booking-payment"
+import { getPublicPlatformSettings } from "@/lib/auth"
 
 // ---------------------------------------------------------------------------
 // Stripe publishable key – set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in .env.local
@@ -54,17 +55,27 @@ const CARD_ELEMENT_OPTIONS = {
   },
 }
 
+const DEFAULT_PLATFORM_FEE_PERCENT = 15
+const DEFAULT_PLATFORM_FEE_BASIS_POINTS = 1500
+
+function formatFeePercent(value: number) {
+  if (!Number.isFinite(value)) return String(DEFAULT_PLATFORM_FEE_PERCENT)
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.0+$/, "")
+}
+
 // ---------------------------------------------------------------------------
 // Inner form component – must be rendered inside <Elements>
 // ---------------------------------------------------------------------------
 function CheckoutForm({
   intent,
   moderatorName,
+  platformFeePercent,
   onSuccess,
   onClose,
 }: {
   intent: CreateBookingIntentResponse
   moderatorName: string
+  platformFeePercent: number
   onSuccess: (bookingId: string) => void
   onClose: () => void
 }) {
@@ -144,11 +155,13 @@ function CheckoutForm({
           <span className="font-semibold">${(intent.amountCents / 100).toFixed(2)}</span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Platform fee (15%)</span>
+          <span>Platform fee ({formatFeePercent(platformFeePercent)}%)</span>
           <span>${(intent.platformFeeCents / 100).toFixed(2)}</span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Moderator receives (85%)</span>
+          <span>
+            Moderator receives ({formatFeePercent(Math.max(0, 100 - platformFeePercent))}%)
+          </span>
           <span>${(intent.moderatorPayoutCents / 100).toFixed(2)}</span>
         </div>
       </div>
@@ -230,6 +243,7 @@ export function HireModeratorModal({
 
   const [intent, setIntent] = useState<CreateBookingIntentResponse | null>(null)
   const [successBookingId, setSuccessBookingId] = useState<string | null>(null)
+  const [platformFeeBasisPoints, setPlatformFeeBasisPoints] = useState<number>(DEFAULT_PLATFORM_FEE_BASIS_POINTS)
 
   useEffect(() => {
     if (!open) return
@@ -237,6 +251,36 @@ export function HireModeratorModal({
     setScheduledStartTime(initialScheduledStartTime || "")
     setScheduledEndTime(initialScheduledEndTime || "")
   }, [open, initialScheduledDate, initialScheduledStartTime, initialScheduledEndTime])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+
+    async function loadFee() {
+      try {
+        const token = await getToken()
+        if (!token || cancelled) return
+        const result = await getPublicPlatformSettings(token)
+        if (cancelled) return
+        if (typeof result.platformFeeBasisPoints === "number") {
+          setPlatformFeeBasisPoints(result.platformFeeBasisPoints)
+        } else if (typeof result.platformFeePercent === "number") {
+          setPlatformFeeBasisPoints(Math.round(result.platformFeePercent * 100))
+        }
+      } catch {
+        // Silently fall back to the default fee.
+      }
+    }
+
+    void loadFee()
+    return () => {
+      cancelled = true
+    }
+  }, [open, getToken])
+
+  const platformFeePercentForDisplay = platformFeeBasisPoints / 100
+  const moderatorPayoutPercentForDisplay = (10000 - platformFeeBasisPoints) / 100
+  const moderatorPayoutFraction = (10000 - platformFeeBasisPoints) / 10000
 
   const hasFullScheduleValue = Boolean(scheduledDate && scheduledStartTime && scheduledEndTime)
 
@@ -340,7 +384,8 @@ export function HireModeratorModal({
             Hire {moderatorName}
           </DialogTitle>
           <DialogDescription>
-            15% platform fee applies. The moderator receives 85% via their connected Stripe account.
+            {formatFeePercent(platformFeePercentForDisplay)}% platform fee applies. The moderator
+            receives {formatFeePercent(moderatorPayoutPercentForDisplay)}% via their connected Stripe account.
           </DialogDescription>
         </DialogHeader>
 
@@ -403,8 +448,10 @@ export function HireModeratorModal({
                   <span>{durationHours.toFixed(2)} hour(s)</span>
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Moderator receives (85%)</span>
-                  <span>${(Math.round(derivedAmountCents * 0.85) / 100).toFixed(2)}</span>
+                  <span>Moderator receives ({formatFeePercent(moderatorPayoutPercentForDisplay)}%)</span>
+                  <span>
+                    ${(Math.round(derivedAmountCents * moderatorPayoutFraction) / 100).toFixed(2)}
+                  </span>
                 </div>
               </div>
             )}
@@ -444,6 +491,7 @@ export function HireModeratorModal({
             <CheckoutForm
               intent={intent}
               moderatorName={moderatorName}
+              platformFeePercent={platformFeePercentForDisplay}
               onSuccess={handlePaymentSuccess}
               onClose={() => handleClose(false)}
             />

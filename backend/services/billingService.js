@@ -129,17 +129,8 @@ function toDateFromUnix(value) {
   return new Date(Number(value) * 1000);
 }
 
-function shouldIncludeSellerPlan(price, product) {
-  if (!price || !price.active || price.type !== "recurring") {
-    return false;
-  }
-
-  const metadata = {
-    ...((product && product.metadata) || {}),
-    ...(price.metadata || {}),
-  };
-
-  if (metadata.app_plan_key !== SINGLE_SELLER_PLAN_KEY) {
+function metadataIncludesSellerRole(metadata) {
+  if (!metadata) {
     return false;
   }
 
@@ -156,6 +147,65 @@ function shouldIncludeSellerPlan(price, product) {
     .filter(Boolean);
 
   return roles.includes("seller") || roles.includes("streamer") || roles.includes("all");
+}
+
+function mergedStripePriceMetadata(price, product) {
+  return {
+    ...((product && product.metadata) || {}),
+    ...(price.metadata || {}),
+  };
+}
+
+function shouldIncludeSellerPlan(price, product) {
+  if (!price || !price.active || price.type !== "recurring") {
+    return false;
+  }
+
+  const metadata = mergedStripePriceMetadata(price, product);
+
+  if (!metadataIncludesSellerRole(metadata)) {
+    return false;
+  }
+
+  if (metadata.seller_subscription === "true" || metadata.seller_subscription === true) {
+    return true;
+  }
+
+  if (metadata.source === "admin_ui") {
+    return true;
+  }
+
+  if (metadata.app_plan_key === SINGLE_SELLER_PLAN_KEY) {
+    return true;
+  }
+
+  return false;
+}
+
+function isSellerPurchasablePlan(planDoc) {
+  if (!planDoc || !planDoc.is_active || !planDoc.stripe_price_id) {
+    return false;
+  }
+
+  const metadata = planDoc.metadata_json || {};
+
+  if (!metadataIncludesSellerRole(metadata)) {
+    return false;
+  }
+
+  if (metadata.seller_subscription === "true" || metadata.seller_subscription === true) {
+    return true;
+  }
+
+  if (metadata.source === "admin_ui") {
+    return true;
+  }
+
+  if (metadata.app_plan_key === SINGLE_SELLER_PLAN_KEY) {
+    return true;
+  }
+
+  return false;
 }
 
 async function getExpandedProduct(price) {
@@ -183,10 +233,7 @@ async function upsertPlanFromStripePrice(price) {
     return null;
   }
 
-  const metadata = {
-    ...((product && product.metadata) || {}),
-    ...(price.metadata || {}),
-  };
+  const metadata = mergedStripePriceMetadata(price, product);
   const features = parseFeatures(metadata.features);
   const name = price.nickname || (product && product.name) || "Subscription plan";
   const description = (product && product.description) || metadata.description || "";
@@ -223,7 +270,11 @@ async function upsertPlanFromStripePrice(price) {
 
 async function syncPlansFromStripe() {
   if (!process.env.STRIPE_SECRET_KEY) {
-    return [];
+    const rows = await SubscriptionPlan.find({
+      is_active: true,
+      stripe_price_id: { $nin: [null, ""] },
+    }).sort({ display_order: 1, price: 1, name: 1 });
+    return rows.filter((doc) => isSellerPurchasablePlan(doc));
   }
 
   const stripe = getStripeClient();
@@ -264,8 +315,9 @@ async function syncPlansFromStripe() {
   return SubscriptionPlan.find({
     is_active: true,
     stripe_price_id: { $nin: [null, ""] },
-    "metadata_json.app_plan_key": SINGLE_SELLER_PLAN_KEY,
-  }).sort({ display_order: 1, price: 1, name: 1 });
+  })
+    .sort({ display_order: 1, price: 1, name: 1 })
+    .then((rows) => rows.filter((doc) => isSellerPurchasablePlan(doc)));
 }
 
 async function findSellerUser(clerkUserId) {
@@ -879,8 +931,8 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
     throw createHttpError(404, "The selected plan was not found.");
   }
 
-  if (!plan.stripe_price_id || plan.metadata_json?.app_plan_key !== SINGLE_SELLER_PLAN_KEY) {
-    throw createHttpError(400, "Only the configured $300 monthly seller subscription can be purchased.");
+  if (!isSellerPurchasablePlan(plan)) {
+    throw createHttpError(400, "The selected plan is not available for seller billing.");
   }
 
   const customer = await ensureStripeCustomer({ workspace, user });

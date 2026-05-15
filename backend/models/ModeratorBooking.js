@@ -55,6 +55,16 @@ const ModeratorBookingSchema = new mongoose.Schema({
   stripe_charge_id: String,
   stripe_customer_id: String,
   stripe_invoice_id: String,
+
+  // Stripe transfer that forwards the platform fee to the admin Connect account.
+  admin_fee_transfer_id: String,
+  admin_fee_transfer_status: {
+    type: String,
+    enum: ["pending", "transferred", "skipped", "failed"],
+    default: "pending",
+  },
+  admin_fee_destination_account: String,
+
   payment_status: {
     type: String,
     enum: ["unpaid", "pending", "paid", "failed", "refunded"],

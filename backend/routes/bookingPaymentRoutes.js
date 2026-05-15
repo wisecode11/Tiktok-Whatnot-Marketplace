@@ -11,9 +11,13 @@ const {
 	getModeratorBookings,
 	submitReview,
 } = require("../controllers/bookingPaymentController");
+const { getPublicSettings } = require("../controllers/platformSettingsController");
 const { authenticateRequest } = require("../middleware/authenticate");
 
 const router = express.Router();
+
+// GET /api/booking-payments/platform-settings (public — needed for booking UI)
+router.get("/platform-settings", authenticateRequest, getPublicSettings);
 
 // POST /api/booking-payments/create-intent
 router.post("/create-intent", authenticateRequest, createIntent);

@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Loader2,
   Rocket,
+  Shield,
   Sparkles,
   Video,
   Users,
@@ -89,15 +90,29 @@ const moderatorPlatforms: Platform[] = [
   },
 ]
 
+const adminPlatforms: Platform[] = [
+  {
+    id: "stripe",
+    name: "Stripe Payments",
+    logo: "ST",
+    description: "Connect the platform Stripe account to receive booking platform fees",
+    connected: false,
+    connecting: false,
+    required: true,
+  },
+]
+
 function LaunchPadContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { getToken, isLoaded } = useAuth()
   const role = normalizeRole(searchParams.get("role")) || "streamer"
 
-  const [platforms, setPlatforms] = useState<Platform[]>(() =>
-    role === "moderator" ? moderatorPlatforms : streamerPlatforms
-  )
+  const [platforms, setPlatforms] = useState<Platform[]>(() => {
+    if (role === "moderator") return moderatorPlatforms
+    if (role === "admin") return adminPlatforms
+    return streamerPlatforms
+  })
   const [isLaunching, setIsLaunching] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(true)
   const [feedbackMessage, setFeedbackMessage] = useState("")
@@ -107,6 +122,7 @@ function LaunchPadContent() {
   const [licenseKey, setLicenseKey] = useState("")
   const [copiedLicenseKey, setCopiedLicenseKey] = useState(false)
   const isStreamer = role === "streamer"
+  const isAdmin = role === "admin"
 
   useEffect(() => {
     const platform = searchParams.get("platform")
@@ -131,7 +147,11 @@ function LaunchPadContent() {
                   : p,
               ),
             )
-            setFeedbackMessage("Stripe account connected successfully. You are ready to receive payouts.")
+            setFeedbackMessage(
+              isAdmin
+                ? "Platform Stripe account connected. You can now receive moderator booking platform fees."
+                : "Stripe account connected successfully. You are ready to receive payouts.",
+            )
             setErrorMessage("")
           } else {
             setFeedbackMessage("")
@@ -365,17 +385,19 @@ function LaunchPadContent() {
   const handleLaunch = async () => {
     setIsLaunching(true)
     await new Promise((resolve) => setTimeout(resolve, 1500))
-    
-    if (role === "moderator") {
+
+    if (role === "admin") {
+      router.push("/admin")
+    } else if (role === "moderator") {
       router.push("/moderator")
     } else {
       router.push("/seller")
     }
   }
 
-  const Icon = isStreamer ? Video : Users
-  const title = isStreamer ? "Streamer" : "Moderator"
-  const dashboardPath = isStreamer ? "/seller" : "/moderator"
+  const Icon = isAdmin ? Shield : isStreamer ? Video : Users
+  const title = isAdmin ? "Admin" : isStreamer ? "Streamer" : "Moderator"
+  const dashboardPath = isAdmin ? "/admin" : isStreamer ? "/seller" : "/moderator"
 
   return (
     <div className="w-full max-w-3xl space-y-6">
@@ -521,7 +543,9 @@ function LaunchPadContent() {
               <p className="mt-1 text-warning/80">
                 {role === "moderator"
                   ? "Please connect your Stripe account to enable payouts before launching your dashboard."
-                  : "Please connect at least one platform (TikTok Shop or Whatnot) to continue."}
+                  : role === "admin"
+                    ? "Please connect the platform Stripe account so the marketplace can collect platform fees."
+                    : "Please connect at least one platform (TikTok Shop or Whatnot) to continue."}
               </p>
             </div>
           </CardContent>
@@ -673,7 +697,7 @@ function LaunchPadContent() {
 
 export default function LaunchPadPage() {
   return (
-    <RoleGate allowedRoles={["streamer", "moderator"]} unauthenticatedPath="/login">
+    <RoleGate allowedRoles={["streamer", "moderator", "admin"]} unauthenticatedPath="/login">
       <Suspense fallback={
         <div className="flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
