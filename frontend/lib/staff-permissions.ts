@@ -108,4 +108,9 @@ export const DEFAULT_MODULES = [
     label: "Order Status Update",
     description: "Update order status",
   },
+  {
+    id: "attendance",
+    label: "Clock In / Clock Out",
+    description: "Clock in and out to record daily attendance",
+  },
 ]

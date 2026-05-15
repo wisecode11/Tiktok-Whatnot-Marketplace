@@ -6,6 +6,7 @@ const { buildMockOrdersSearch, findMockOrderById } = require("../data/tiktokShop
 const { buildMockGlobalProductsSearch } = require("../data/tiktokGlobalProductsSearchMock");
 const { buildMockGlobalProductsCreateResponse } = require("../data/tiktokGlobalProductsCreateMock");
 const { buildMockGlobalProductGetResponse } = require("../data/tiktokGlobalProductGetMock");
+const { buildMockGlobalProductUpdate202509Response } = require("../data/tiktokGlobalProductUpdate202509Mock");
 
 const TIKTOK_SHOP_API_BASE = (process.env.TIKTOK_SHOP_API_BASE || "https://open-api.tiktokglobalshop.com").replace(
   /\/$/,
@@ -18,6 +19,8 @@ const GLOBAL_PRODUCT_SEARCH_PATH = "/product/202309/global_products/search";
 const ORDER_GET_PATH = "/order/202309/orders";
 /** Create product (Partner API 202309). */
 const GLOBAL_PRODUCT_CREATE_PATH = "/product/202309/products";
+/** Update product (Partner API 202509). */
+const GLOBAL_PRODUCT_UPDATE_202509_PREFIX = "/product/202509/products";
 const FINANCE_STATEMENTS_PATH = "/finance/202309/statements";
 const FINANCE_PAYMENTS_PATH = "/finance/202309/payments";
 const FINANCE_WITHDRAWALS_PATH = "/finance/202309/withdrawals";
@@ -1038,6 +1041,73 @@ async function getTiktokGlobalProduct({ clerkUserId, productId } = {}) {
   return payload;
 }
 
+/**
+ * Proxies TikTok Shop Partner `PUT /product/202509/products/{product_id}`.
+ * Mock success envelope when shop credentials are not connected.
+ */
+async function updateTiktokGlobalProduct202509({ clerkUserId, productId, body = {} } = {}) {
+  const id = typeof productId === "string" ? productId.trim() : String(productId ?? "").trim();
+  if (!id) {
+    throw createHttpError(400, "product_id is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return buildMockGlobalProductUpdate202509Response(id, body);
+  }
+
+  const path = `${GLOBAL_PRODUCT_UPDATE_202509_PREFIX}/${encodeURIComponent(id)}`;
+  const cleanBody = stripUndefinedDeep(body && typeof body === "object" ? body : {});
+
+  const { payload } = await tiktokPartnerFetch(creds, {
+    method: "PUT",
+    path,
+    extraQuery: {},
+    bodyObject: cleanBody,
+  });
+
+  return payload;
+}
+
+/**
+ * Proxies TikTok Shop Partner `DELETE /product/202309/products` with `product_ids` body.
+ * Mock success envelope when shop credentials are not connected.
+ */
+async function deleteTiktokGlobalProducts({ clerkUserId, productIds = [] } = {}) {
+  const normalizedIds = Array.isArray(productIds)
+    ? [...new Set(productIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    : [];
+
+  if (!normalizedIds.length) {
+    throw createHttpError(400, "product_ids is required.");
+  }
+
+  const creds = await resolveShopCredentials(clerkUserId);
+
+  if (!creds.shopConnected) {
+    return {
+      code: 0,
+      message: "Success",
+      request_id: `MOCK_DELETE_${Date.now()}`,
+      data: {
+        errors: [],
+      },
+    };
+  }
+
+  const { payload } = await tiktokPartnerFetch(creds, {
+    method: "DELETE",
+    path: GLOBAL_PRODUCT_CREATE_PATH,
+    extraQuery: {},
+    bodyObject: {
+      product_ids: normalizedIds,
+    },
+  });
+
+  return payload;
+}
+
 async function getTiktokShopOrderDetail({ clerkUserId, orderId }) {
   const id = typeof orderId === "string" ? orderId.trim() : "";
   if (!id) {
@@ -1090,6 +1160,8 @@ module.exports = {
   searchTiktokGlobalProducts,
   createTiktokGlobalProduct,
   getTiktokGlobalProduct,
+  updateTiktokGlobalProduct202509,
+  deleteTiktokGlobalProducts,
   getTiktokShopOrderDetail,
   getTiktokFinanceStatements,
   getTiktokFinancePayments,

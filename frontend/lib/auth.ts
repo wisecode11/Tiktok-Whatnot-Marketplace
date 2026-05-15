@@ -604,6 +604,37 @@ export interface TikTokGlobalProductsCreateResponse {
     skus?: Array<Record<string, unknown>>
     warnings?: Array<{ message?: string }>
   }
+}
+
+/** TikTok Partner `PUT /product/202509/products/{product_id}` envelope. */
+export interface TikTokGlobalProductUpdate202509Response {
+  code: number
+  message: string
+  request_id?: string
+  data?: {
+    product_id?: string
+    skus?: Array<Record<string, unknown>>
+    warnings?: Array<{ message?: string }>
+    audit?: { status?: string }
+  }
+}
+
+/** TikTok Partner `DELETE /product/202309/products` envelope. */
+export interface TikTokGlobalProductsDeleteResponse {
+  code: number
+  message: string
+  request_id?: string
+  data?: {
+    errors?: Array<{
+      code?: number
+      message?: string
+      detail?: {
+        product_id?: string
+      }
+    }>
+  }
+}
+
 export interface TikTokFinanceStatementItem {
   id: string
   statement_time: number
@@ -983,8 +1014,12 @@ export function getDashboardPath(role: AppRole) {
 }
 
 export function getSignupRedirectPath(role: AppRole) {
-  if (role === "admin" || role === "staff") {
+  if (role === "admin") {
     return getDashboardPath(role)
+  }
+
+  if (role === "staff") {
+    return "/staff/launch-pad"
   }
 
   return `/launch-pad?role=${role}`
@@ -1036,7 +1071,7 @@ async function request<T>(
     token,
     method = "GET",
     body,
-  }: { token: string; method?: "GET" | "POST" | "DELETE"; body?: Record<string, unknown> },
+  }: { token: string; method?: "GET" | "POST" | "PUT" | "DELETE"; body?: Record<string, unknown> },
 ) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -1314,6 +1349,43 @@ export async function getTikTokGlobalProduct(token: string, productId: string) {
     `/api/integrations/tiktok/shop/product/202309/products/${encodeURIComponent(id)}`,
     { token },
   )
+}
+
+/**
+ * Proxies TikTok Shop Partner `PUT /product/202509/products/{product_id}` (product update).
+ */
+export async function updateTikTokGlobalProduct202509(
+  token: string,
+  productId: string,
+  body: Record<string, unknown>,
+) {
+  const id = typeof productId === "string" ? productId.trim() : ""
+  if (!id) {
+    throw new Error("productId is required.")
+  }
+  return request<TikTokGlobalProductUpdate202509Response>(
+    `/api/integrations/tiktok/shop/product/202509/products/${encodeURIComponent(id)}`,
+    { token, method: "PUT", body },
+  )
+}
+
+/** Proxies TikTok Shop Partner `DELETE /product/202309/products`. */
+export async function deleteTikTokGlobalProducts(token: string, productIds: string[]) {
+  const cleanedIds = Array.isArray(productIds)
+    ? [...new Set(productIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    : []
+
+  if (!cleanedIds.length) {
+    throw new Error("product_ids is required.")
+  }
+
+  return request<TikTokGlobalProductsDeleteResponse>("/api/integrations/tiktok/shop/product/202309/products", {
+    token,
+    method: "DELETE",
+    body: {
+      product_ids: cleanedIds,
+    },
+  })
 }
 
 export async function getTikTokShopOrderDetail(token: string, orderId: string) {

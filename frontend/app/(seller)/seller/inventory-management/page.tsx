@@ -11,6 +11,8 @@ import {
   Search,
   ShoppingBag,
   SlidersHorizontal,
+  Pencil,
+  Trash2,
 } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
@@ -45,13 +47,23 @@ import {
   getWhatnotInventoryCreateFormOptions,
   searchTikTokGlobalProducts,
   createTikTokGlobalProduct,
+  deleteTikTokGlobalProducts,
   getTikTokGlobalProduct,
+  updateTikTokGlobalProduct202509,
   syncWhatnotInventoryLive,
   waitForSessionToken,
   type TikTokGlobalProduct,
   type TikTokGlobalProductGetResponse,
   type TikTokGlobalProductsCreateResponse,
+  type TikTokGlobalProductUpdate202509Response,
+  type TikTokGlobalProductsDeleteResponse,
 } from "@/lib/auth"
+import {
+  emptyTiktokProductEditForm,
+  hydrateTiktokEditFormFromDetailData,
+  buildTiktok202509UpdatePayload,
+  type TiktokProductEditFormState,
+} from "@/lib/tiktok-product-edit-payload"
 import { cn } from "@/lib/utils"
 
 type InventoryStatus = "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT"
@@ -314,6 +326,8 @@ export default function SellerInventoryManagementPage() {
   const [tiktokGlobalError, setTiktokGlobalError] = useState("")
   const [tiktokGlobalProducts, setTiktokGlobalProducts] = useState<TikTokGlobalProduct[]>([])
   const [tiktokGlobalNextPage, setTiktokGlobalNextPage] = useState<string | null>(null)
+  const [tiktokDeleteLoadingProductId, setTiktokDeleteLoadingProductId] = useState<string | null>(null)
+  const [tiktokDeleteNotice, setTiktokDeleteNotice] = useState("")
   const [tiktokDetailProduct, setTiktokDetailProduct] = useState<TikTokGlobalProduct | null>(null)
   const [tiktokDetailEnvelope, setTiktokDetailEnvelope] = useState<TikTokGlobalProductGetResponse | null>(null)
   const [tiktokDetailLoading, setTiktokDetailLoading] = useState(false)
@@ -327,6 +341,16 @@ export default function SellerInventoryManagementPage() {
   const [tiktokCreateMainImageFile, setTiktokCreateMainImageFile] = useState<File | null>(null)
   const [tiktokCreateMainImagePreviewUrl, setTiktokCreateMainImagePreviewUrl] = useState("")
   const [tiktokCreateImageFieldKey, setTiktokCreateImageFieldKey] = useState(0)
+
+  const [tiktokEditOpen, setTiktokEditOpen] = useState(false)
+  const [tiktokEditProduct, setTiktokEditProduct] = useState<TikTokGlobalProduct | null>(null)
+  const [tiktokEditDetail, setTiktokEditDetail] = useState<Record<string, unknown> | null>(null)
+  const [tiktokEditForm, setTiktokEditForm] = useState<TiktokProductEditFormState>(() => emptyTiktokProductEditForm())
+  const [tiktokEditLoadLoading, setTiktokEditLoadLoading] = useState(false)
+  const [tiktokEditLoadError, setTiktokEditLoadError] = useState("")
+  const [tiktokEditSaveLoading, setTiktokEditSaveLoading] = useState(false)
+  const [tiktokEditError, setTiktokEditError] = useState("")
+  const [tiktokEditSuccess, setTiktokEditSuccess] = useState<TikTokGlobalProductUpdate202509Response | null>(null)
 
   useEffect(() => {
     return () => {
@@ -500,6 +524,44 @@ export default function SellerInventoryManagementPage() {
     }
   }, [tiktokDetailProduct?.id, isLoaded, getToken])
 
+  useEffect(() => {
+    if (!tiktokEditOpen || !isLoaded) return
+    const id = tiktokEditProduct?.id ? String(tiktokEditProduct.id).trim() : ""
+    if (!id) return
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        setTiktokEditLoadLoading(true)
+        setTiktokEditLoadError("")
+        setTiktokEditDetail(null)
+        const token = await waitForSessionToken(getToken)
+        const res = await getTikTokGlobalProduct(token, id)
+        if (cancelled) return
+        if (res.code !== 0 || !res.data || typeof res.data !== "object") {
+          setTiktokEditLoadError(res.message || "Could not load this product for editing.")
+          return
+        }
+        const d = res.data as Record<string, unknown>
+        setTiktokEditDetail(d)
+        setTiktokEditForm(hydrateTiktokEditFormFromDetailData(d))
+      } catch (error) {
+        if (!cancelled) {
+          setTiktokEditLoadError(getClerkErrorMessage(error))
+          setTiktokEditDetail(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setTiktokEditLoadLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tiktokEditOpen, tiktokEditProduct?.id, isLoaded, getToken])
+
   async function handleTiktokGlobalRefresh() {
     if (!isLoaded || inventoryPlatformTab !== "tiktok") return
     try {
@@ -543,6 +605,93 @@ export default function SellerInventoryManagementPage() {
       setTiktokGlobalError(getClerkErrorMessage(error))
     } finally {
       setTiktokGlobalLoadingMore(false)
+    }
+  }
+
+  async function handleTiktokDeleteProduct(product: TikTokGlobalProduct) {
+    if (!isLoaded) return
+
+    const id = typeof product.id === "string" ? product.id.trim() : String(product.id ?? "").trim()
+    if (!id) return
+
+    const title = typeof product.title === "string" && product.title.trim() ? product.title.trim() : `Product ${id}`
+
+    if (!window.confirm(`Delete \"${title}\"?`)) {
+      return
+    }
+
+    try {
+      setTiktokDeleteLoadingProductId(id)
+      setTiktokGlobalError("")
+      setTiktokDeleteNotice("")
+
+      const token = await waitForSessionToken(getToken)
+      const result = (await deleteTikTokGlobalProducts(token, [id])) as TikTokGlobalProductsDeleteResponse
+
+      const apiErrors = Array.isArray(result.data?.errors) ? result.data?.errors : []
+      const blockingError =
+        apiErrors.find((entry) => {
+          const targetId = entry?.detail?.product_id
+          return typeof targetId === "string" && targetId.trim() === id
+        }) || apiErrors[0]
+
+      if (blockingError?.message) {
+        throw new Error(blockingError.message)
+      }
+
+      setTiktokGlobalProducts((prev) =>
+        prev.filter((row) => String(row.id ?? "").trim() !== id),
+      )
+
+      if (String(tiktokDetailProduct?.id ?? "").trim() === id) {
+        setTiktokDetailProduct(null)
+        setTiktokDetailEnvelope(null)
+        setTiktokDetailError("")
+        setTiktokDetailLoading(false)
+      }
+
+      if (String(tiktokEditProduct?.id ?? "").trim() === id) {
+        setTiktokEditOpen(false)
+        setTiktokEditProduct(null)
+        setTiktokEditDetail(null)
+        setTiktokEditForm(emptyTiktokProductEditForm())
+        setTiktokEditLoadError("")
+        setTiktokEditError("")
+        setTiktokEditSuccess(null)
+        setTiktokEditLoadLoading(false)
+        setTiktokEditSaveLoading(false)
+      }
+
+      setTiktokDeleteNotice(`${title} deleted successfully.`)
+    } catch (error) {
+      setTiktokGlobalError(getClerkErrorMessage(error))
+    } finally {
+      setTiktokDeleteLoadingProductId(null)
+    }
+  }
+
+  async function handleTiktokEditSave() {
+    if (!isLoaded || !tiktokEditProduct?.id || !tiktokEditDetail) return
+    const id = String(tiktokEditProduct.id).trim()
+    if (!id) return
+    try {
+      setTiktokEditSaveLoading(true)
+      setTiktokEditError("")
+      setTiktokEditSuccess(null)
+      if (!tiktokEditForm.title.trim()) throw new Error("Product title is required.")
+      if (!tiktokEditForm.categoryId.trim()) throw new Error("Category ID is required.")
+      if (!tiktokEditForm.brandId.trim()) throw new Error("Brand ID is required.")
+      const token = await waitForSessionToken(getToken)
+      const body = buildTiktok202509UpdatePayload(tiktokEditForm, tiktokEditDetail)
+      const res = await updateTikTokGlobalProduct202509(token, id, body)
+      setTiktokEditSuccess(res)
+      if (res.code === 0) {
+        await handleTiktokGlobalRefresh()
+      }
+    } catch (error) {
+      setTiktokEditError(getClerkErrorMessage(error))
+    } finally {
+      setTiktokEditSaveLoading(false)
     }
   }
 
@@ -986,6 +1135,7 @@ export default function SellerInventoryManagementPage() {
               </div>
 
               {tiktokGlobalError ? <p className="text-destructive text-sm">{tiktokGlobalError}</p> : null}
+              {tiktokDeleteNotice ? <p className="text-emerald-600 text-sm">{tiktokDeleteNotice}</p> : null}
 
               <div className="overflow-hidden rounded-xl border border-border/60">
                 {tiktokGlobalLoading ? (
@@ -1034,17 +1184,51 @@ export default function SellerInventoryManagementPage() {
                             <TableCell className="text-right font-mono text-sm pr-10">{qty}</TableCell>
                             <TableCell className="font-mono text-sm pl-6">{formatTiktokProductListPrice(product)}</TableCell>
                             <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setTiktokDetailProduct(product)
-                                }}
-                              >
-                                Details
-                              </Button>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setTiktokDetailProduct(product)
+                                  }}
+                                >
+                                  Details
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="gap-1"
+                                  disabled={!product.id || tiktokDeleteLoadingProductId === rowKey}
+                                  onClick={() => {
+                                    if (!product.id) return
+                                    setTiktokEditProduct(product)
+                                    setTiktokEditOpen(true)
+                                    setTiktokEditDetail(null)
+                                    setTiktokEditForm(emptyTiktokProductEditForm())
+                                    setTiktokEditLoadError("")
+                                    setTiktokEditError("")
+                                    setTiktokEditSuccess(null)
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                  Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  disabled={!product.id || tiktokDeleteLoadingProductId === rowKey}
+                                  onClick={() => void handleTiktokDeleteProduct(product)}
+                                  aria-label={`Delete ${product.title || "product"}`}
+                                >
+                                  {tiktokDeleteLoadingProductId === rowKey ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                  ) : (
+                                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                                  )}
+                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1384,6 +1568,546 @@ export default function SellerInventoryManagementPage() {
                   }}
                 >
                   Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={tiktokEditOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                setTiktokEditProduct(null)
+                setTiktokEditDetail(null)
+                setTiktokEditForm(emptyTiktokProductEditForm())
+                setTiktokEditLoadError("")
+                setTiktokEditError("")
+                setTiktokEditSuccess(null)
+                setTiktokEditLoadLoading(false)
+                setTiktokEditSaveLoading(false)
+              }
+              setTiktokEditOpen(open)
+            }}
+          >
+            <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Edit TikTok product</DialogTitle>
+                <DialogDescription>
+                  {tiktokEditProduct?.title ? (
+                    <span className="text-foreground">{tiktokEditProduct.title}</span>
+                  ) : (
+                    "Load a product from the table, then adjust fields and save."
+                  )}{" "}
+                  Updates are sent to TikTok Shop when your integration is connected; otherwise you get a safe preview
+                  response.
+                </DialogDescription>
+              </DialogHeader>
+
+              {tiktokEditLoadLoading ? (
+                <div className="text-muted-foreground flex items-center gap-2 py-6 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+                  Loading current product…
+                </div>
+              ) : null}
+              {tiktokEditLoadError ? <p className="text-destructive text-sm">{tiktokEditLoadError}</p> : null}
+
+              {!tiktokEditLoadLoading && tiktokEditDetail ? (
+                <div className="grid gap-6 py-2">
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Product basics
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor="tte-title">Title</Label>
+                        <Input
+                          id="tte-title"
+                          value={tiktokEditForm.title}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, title: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label htmlFor="tte-desc">Description</Label>
+                        <Textarea
+                          id="tte-desc"
+                          rows={5}
+                          value={tiktokEditForm.descriptionHtml}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, descriptionHtml: e.target.value }))}
+                          className="font-mono text-xs sm:text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-cat">Category ID</Label>
+                        <Input
+                          id="tte-cat"
+                          value={tiktokEditForm.categoryId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, categoryId: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-brand">Brand ID</Label>
+                        <Input
+                          id="tte-brand"
+                          value={tiktokEditForm.brandId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, brandId: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-catver">Category version</Label>
+                        <Input
+                          id="tte-catver"
+                          value={tiktokEditForm.categoryVersion}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, categoryVersion: e.target.value }))}
+                          placeholder="v1"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 pt-6">
+                        <Switch
+                          id="tte-cod"
+                          checked={tiktokEditForm.isCodAllowed}
+                          onCheckedChange={(c) => setTiktokEditForm((p) => ({ ...p, isCodAllowed: Boolean(c) }))}
+                        />
+                        <Label htmlFor="tte-cod" className="cursor-pointer">
+                          Cash on delivery allowed
+                        </Label>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-moq">Minimum order quantity</Label>
+                        <Input
+                          id="tte-moq"
+                          inputMode="numeric"
+                          value={tiktokEditForm.minimumOrderQuantity}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, minimumOrderQuantity: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-inv-mode">Inventory mode</Label>
+                        <Input
+                          id="tte-inv-mode"
+                          value={tiktokEditForm.inventoryMode}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, inventoryMode: e.target.value }))}
+                          placeholder="SHARED"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 sm:col-span-2">
+                        <Switch
+                          id="tte-autotr"
+                          checked={tiktokEditForm.autoTranslateEnabled}
+                          onCheckedChange={(c) =>
+                            setTiktokEditForm((p) => ({ ...p, autoTranslateEnabled: Boolean(c) }))
+                          }
+                        />
+                        <Label htmlFor="tte-autotr" className="cursor-pointer">
+                          Auto-translate enabled
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Main image (TikTok file reference)
+                    </p>
+                    <p className="text-muted-foreground mb-2 text-xs">
+                      Use the image URI from TikTok upload (not a public web URL). Thumbnail preview uses your catalog
+                      image when available.
+                    </p>
+                    <div className="flex flex-wrap items-start gap-4">
+                      {tiktokEditForm.mainImageUri ? (
+                        <div className="border-border/60 overflow-hidden rounded-md border">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={
+                              collectTiktokDetailImageUrls(tiktokEditDetail)[0] ||
+                              `https://placehold.co/120x120/e2e8f0/64748b?text=URI`
+                            }
+                            alt=""
+                            className="h-24 w-24 object-cover"
+                          />
+                        </div>
+                      ) : null}
+                      <div className="min-w-[12rem] flex-1 space-y-1">
+                        <Label htmlFor="tte-main-uri">Main image URI</Label>
+                        <Input
+                          id="tte-main-uri"
+                          value={tiktokEditForm.mainImageUri}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, mainImageUri: e.target.value }))}
+                          className="font-mono text-xs"
+                          placeholder="tos-maliva-…"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Package & logistics IDs
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-pw">Package weight</Label>
+                        <Input
+                          id="tte-pw"
+                          value={tiktokEditForm.packageWeightValue}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, packageWeightValue: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-pwu">Weight unit</Label>
+                        <Input
+                          id="tte-pwu"
+                          value={tiktokEditForm.packageWeightUnit}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, packageWeightUnit: e.target.value }))}
+                          placeholder="KILOGRAM"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-ship-tpl">Shipping template ID</Label>
+                        <Input
+                          id="tte-ship-tpl"
+                          value={tiktokEditForm.shippingTemplateId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, shippingTemplateId: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-l">Length</Label>
+                        <Input
+                          id="tte-l"
+                          value={tiktokEditForm.pkgLen}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, pkgLen: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-w">Width</Label>
+                        <Input
+                          id="tte-w"
+                          value={tiktokEditForm.pkgWid}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, pkgWid: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-h">Height</Label>
+                        <Input
+                          id="tte-h"
+                          value={tiktokEditForm.pkgHt}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, pkgHt: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-3">
+                        <Label htmlFor="tte-pkg-u">Dimension unit</Label>
+                        <Input
+                          id="tte-pkg-u"
+                          value={tiktokEditForm.pkgUnit}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, pkgUnit: e.target.value }))}
+                          placeholder="CENTIMETER"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-3">
+                        <Label htmlFor="tte-ext-pid">External product ID (optional)</Label>
+                        <Input
+                          id="tte-ext-pid"
+                          value={tiktokEditForm.externalProductId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, externalProductId: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-3">
+                        <Label htmlFor="tte-vid">Video ID (optional)</Label>
+                        <Input
+                          id="tte-vid"
+                          value={tiktokEditForm.videoId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, videoId: e.target.value }))}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Size chart</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-sc-uri">Size chart image URI</Label>
+                        <Input
+                          id="tte-sc-uri"
+                          value={tiktokEditForm.sizeChartImageUri}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, sizeChartImageUri: e.target.value }))}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-sc-tpl">Size chart template ID</Label>
+                        <Input
+                          id="tte-sc-tpl"
+                          value={tiktokEditForm.sizeChartTemplateId}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, sizeChartTemplateId: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Discoverability</p>
+                    <div className="grid gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-terms">Search keywords (comma-separated)</Label>
+                        <Input
+                          id="tte-terms"
+                          value={tiktokEditForm.searchTermsLine}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, searchTermsLine: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="tte-features">Key product features (one per line)</Label>
+                        <Textarea
+                          id="tte-features"
+                          rows={3}
+                          value={tiktokEditForm.keyFeaturesLines}
+                          onChange={(e) => setTiktokEditForm((p) => ({ ...p, keyFeaturesLines: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/50 bg-muted/15 p-4">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Variants (SKUs)
+                    </p>
+                    <div className="space-y-4">
+                      {tiktokEditForm.skuRows.map((row, idx) => (
+                        <div key={row.id || `sku-${idx}`} className="space-y-3 rounded-md border border-border/40 p-3">
+                          <p className="text-xs font-medium text-muted-foreground">Variant {idx + 1}</p>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">SKU ID (from TikTok)</Label>
+                              <Input
+                                className="font-mono text-xs"
+                                value={row.id}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) => (i === idx ? { ...r, id: e.target.value } : r)),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1 sm:col-span-2">
+                              <Label className="text-xs">Seller SKU</Label>
+                              <Input
+                                value={row.sellerSku}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, sellerSku: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Attribute ID</Label>
+                              <Input
+                                className="font-mono text-xs"
+                                value={row.attrId}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, attrId: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Attribute name</Label>
+                              <Input
+                                value={row.attrName}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, attrName: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Value ID</Label>
+                              <Input
+                                className="font-mono text-xs"
+                                value={row.valueId}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, valueId: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Value label</Label>
+                              <Input
+                                value={row.valueName}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, valueName: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Currency</Label>
+                              <Input
+                                value={row.currency}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, currency: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Sale price</Label>
+                              <Input
+                                value={row.salePrice}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, salePrice: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">List / compare amount</Label>
+                              <Input
+                                value={row.amount}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, amount: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Warehouse ID</Label>
+                              <Input
+                                className="font-mono text-xs"
+                                value={row.warehouseId}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, warehouseId: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Stock quantity</Label>
+                              <Input
+                                inputMode="numeric"
+                                value={row.quantity}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, quantity: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Backorder qty</Label>
+                              <Input
+                                inputMode="numeric"
+                                value={row.backorderQuantity}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, backorderQuantity: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Handling time (days)</Label>
+                              <Input
+                                inputMode="numeric"
+                                value={row.handlingTime}
+                                onChange={(e) =>
+                                  setTiktokEditForm((p) => ({
+                                    ...p,
+                                    skuRows: p.skuRows.map((r, i) =>
+                                      i === idx ? { ...r, handlingTime: e.target.value } : r,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {tiktokEditError ? <p className="text-destructive text-sm">{tiktokEditError}</p> : null}
+                  {tiktokEditSuccess?.code === 0 ? (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
+                      <p className="font-medium text-emerald-800 dark:text-emerald-200">Saved successfully.</p>
+                      {tiktokEditSuccess.data?.audit?.status ? (
+                        <p className="text-muted-foreground mt-1 text-xs">
+                          Review status: {tiktokEditSuccess.data.audit.status}
+                        </p>
+                      ) : null}
+                      {tiktokEditSuccess.data?.warnings?.length ? (
+                        <ul className="mt-2 list-disc pl-5 text-xs text-amber-900 dark:text-amber-100">
+                          {tiktokEditSuccess.data.warnings.map((w, i) => (
+                            <li key={i}>{w.message || "Warning"}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setTiktokEditOpen(false)}
+                  disabled={tiktokEditSaveLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={tiktokEditSaveLoading || tiktokEditLoadLoading || !tiktokEditDetail}
+                  className="gap-2"
+                  onClick={() => void handleTiktokEditSave()}
+                >
+                  {tiktokEditSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                  Save changes
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -12,7 +12,7 @@ const StripeConnectAccountSchema = new mongoose.Schema({
 
   account_type: {
     type: String,
-    enum: ["moderator", "seller_payouts", "platform"],
+    enum: ["moderator", "staff", "seller_payouts", "platform"],
   },
 
   stripe_account_id: String,

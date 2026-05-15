@@ -14,6 +14,8 @@ const integrationRoutes = require("./routes/integrationRoutes");
 const moderatorProfileRoutes = require("./routes/moderatorProfileRoutes");
 const aiRoutes = require("./routes/aiRoutes");
 const staffRoutes = require("./routes/staffRoutes");
+const attendanceRoutes = require("./routes/attendanceRoutes");
+const payrollRoutes = require("./routes/payrollRoutes");
 const { initializeChatSocket } = require("./socket/chatSocket");
 const { initializeWhatnotExtensionBridge } = require("./socket/whatnotExtensionBridge");
 const { startPendingInventoryAutoSyncWorker } = require("./services/pendingInventoryService");
@@ -69,6 +71,8 @@ app.use("/api/integrations", integrationRoutes);
 app.use("/api/moderator-profile", moderatorProfileRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/staff", staffRoutes);
+app.use("/api/attendance", attendanceRoutes);
+app.use("/api/payroll", payrollRoutes);
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, models: Object.keys(models).length });

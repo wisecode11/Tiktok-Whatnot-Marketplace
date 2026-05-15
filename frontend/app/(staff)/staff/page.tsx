@@ -70,10 +70,17 @@ export default function StaffDashboardPage() {
         <CardHeader>
           <CardTitle className="text-2xl md:text-3xl">Welcome Staff, {displayName}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
             You only see modules that your streamer has allowed for your account.
           </p>
+          <Link
+            href="/staff/launch-pad"
+            className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+          >
+            Open Launch Pad to connect Stripe
+            <ArrowRight className="size-4" />
+          </Link>
         </CardContent>
       </Card>
 

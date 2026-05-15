@@ -241,13 +241,32 @@ function getStripeClient() {
   return new Stripe(secretKey, { apiVersion: "2025-03-31.basil" });
 }
 
-function getStripeConfig() {
+function getStripeConnectUrlsForRole(role) {
   const frontendUrl = getFrontendUrl();
+  const defaultReturn = process.env.STRIPE_CONNECT_RETURN_URL || `${frontendUrl}/launch-pad`;
+  const defaultRefresh = process.env.STRIPE_CONNECT_REFRESH_URL || defaultReturn;
+
+  if (role === "staff") {
+    return {
+      returnUrl:
+        process.env.STRIPE_CONNECT_STAFF_RETURN_URL || `${frontendUrl}/staff/launch-pad`,
+      refreshUrl:
+        process.env.STRIPE_CONNECT_STAFF_REFRESH_URL || `${frontendUrl}/staff/launch-pad`,
+    };
+  }
 
   return {
-    returnUrl: process.env.STRIPE_CONNECT_RETURN_URL || `${frontendUrl}/launch-pad`,
-    refreshUrl: process.env.STRIPE_CONNECT_REFRESH_URL || `${frontendUrl}/launch-pad`,
+    returnUrl: defaultReturn,
+    refreshUrl: defaultRefresh,
   };
+}
+
+function resolveStripeAccountType(role) {
+  if (role === "staff") {
+    return "staff";
+  }
+
+  return "moderator";
 }
 
 function toBase64Url(value) {
@@ -1225,6 +1244,7 @@ async function upsertStripeConnectSnapshot({
   stripeAccountId,
   stripeAccount = null,
   onboardingStatus,
+  accountType = "moderator",
 }) {
   if (!localUserId || !stripeAccountId) {
     return null;
@@ -1233,11 +1253,11 @@ async function upsertStripeConnectSnapshot({
   const now = new Date();
   const existing = await StripeConnectAccount.findOne({
     user_id: localUserId,
-    account_type: "moderator",
+    account_type: accountType,
   });
   const record = existing || new StripeConnectAccount({
     user_id: localUserId,
-    account_type: "moderator",
+    account_type: accountType,
     created_at: now,
   });
 
@@ -1377,8 +1397,9 @@ async function createWhatnotConnectionSession({ clerkUserId, role }) {
 
 async function createStripeConnectSession({ clerkUserId, role }) {
   const stripe = getStripeClient();
-  const { returnUrl, refreshUrl } = getStripeConfig();
+  const { returnUrl, refreshUrl } = getStripeConnectUrlsForRole(role);
   const user = await findLocalUser(clerkUserId);
+  const stripeAccountType = resolveStripeAccountType(role);
 
   const returnUrlWithParams = new URL(returnUrl);
   returnUrlWithParams.searchParams.set("platform", "stripe");
@@ -1420,6 +1441,7 @@ async function createStripeConnectSession({ clerkUserId, role }) {
       localUserId: user._id,
       stripeAccountId,
       onboardingStatus: "created",
+      accountType: stripeAccountType,
     });
   }
 
@@ -1438,6 +1460,7 @@ async function createStripeConnectSession({ clerkUserId, role }) {
 async function checkStripeAccountStatus({ clerkUserId }) {
   const stripe = getStripeClient();
   const user = await findLocalUser(clerkUserId);
+  const stripeAccountType = user.user_type === "staff" ? "staff" : "moderator";
 
   const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "stripe" });
 
@@ -1474,6 +1497,7 @@ async function checkStripeAccountStatus({ clerkUserId }) {
     stripeAccountId: account.account_external_id,
     stripeAccount,
     onboardingStatus,
+    accountType: stripeAccountType,
   });
 
   return {
@@ -1766,6 +1790,7 @@ async function disconnectPlatform({ clerkUserId, platform }) {
       localUserId: user._id,
       stripeAccountId: account.account_external_id,
       onboardingStatus: "revoked",
+      accountType: resolveStripeAccountType(user.user_type === "staff" ? "staff" : "moderator"),
     });
   }
 

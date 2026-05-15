@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { BarChart3, Box, ClipboardList, type LucideIcon, Printer, Warehouse } from "lucide-react"
+import { BarChart3, Box, ClipboardList, Clock, type LucideIcon, Printer, Rocket, Warehouse } from "lucide-react"
 
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
@@ -19,6 +19,7 @@ const moduleIcons: Record<string, LucideIcon> = {
   labelling: Printer,
   order_status_update: ClipboardList,
   order_management: BarChart3,
+  attendance: Clock,
 }
 
 const moduleOrder = [
@@ -28,6 +29,7 @@ const moduleOrder = [
   "labelling",
   "order_status_update",
   "order_management",
+  "attendance",
 ] as const
 
 const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
@@ -37,6 +39,7 @@ const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
   labelling: "Labelling",
   order_status_update: "Order Status Update",
   order_management: "Order Management",
+  attendance: "Clock In / Clock Out",
 }
 
 export default function StaffLayout({
@@ -95,8 +98,20 @@ export default function StaffLayout({
         icon: moduleIcons[moduleId],
       }))
 
+    const launchPadSection = {
+      label: "Setup",
+      items: [
+        {
+          title: "Launch Pad",
+          href: "/staff/launch-pad",
+          icon: Rocket,
+        },
+      ],
+    }
+
     if (items.length === 0) {
       return [
+        launchPadSection,
         {
           label: "Modules",
           items: [
@@ -114,12 +129,7 @@ export default function StaffLayout({
       ]
     }
 
-    return [
-      {
-        label: "Modules",
-        items,
-      },
-    ]
+    return [launchPadSection, { label: "Modules", items }]
   }, [loading, modules, permissionError])
 
   return (
@@ -128,7 +138,7 @@ export default function StaffLayout({
         <AppSidebar
           navigation={staffNavigation}
           logo={{
-            href: "/staff",
+            href: "/staff/launch-pad",
           }}
         />
         <SidebarInset>

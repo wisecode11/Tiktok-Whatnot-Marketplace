@@ -17,6 +17,8 @@ const {
   searchTikTokGlobalProductsData,
   createTikTokGlobalProductsData,
   getTikTokGlobalProductData,
+  updateTikTokGlobalProduct202509Data,
+  deleteTikTokGlobalProductsData,
   getTikTokShopOrderDetailData,
   getTikTokFinanceStatementsData,
   getTikTokFinancePaymentsData,
@@ -35,7 +37,11 @@ const {
   saveWhatnotSessionData,
   syncWhatnotInventoryLiveData,
   syncWhatnotEarlyPayoutBalanceData,
+  syncQuickBooksPayrollRun,
+  downloadQuickBooksPayrollPdf,
   startConnection,
+  startQuickBooksConnection,
+  quickBooksCallback,
   whatnotCallback,
   tiktokCallback,
   updateWhatnotBio,
@@ -88,6 +94,16 @@ router.get(
   authenticateRequest,
   getTikTokGlobalProductData,
 );
+router.put(
+  "/tiktok/shop/product/202509/products/:productId",
+  authenticateRequest,
+  updateTikTokGlobalProduct202509Data,
+);
+router.delete(
+  "/tiktok/shop/product/202309/products",
+  authenticateRequest,
+  deleteTikTokGlobalProductsData,
+);
 router.get("/tiktok/shop/orders/:orderId", authenticateRequest, getTikTokShopOrderDetailData);
 router.get("/tiktok/shop/finance/statements", authenticateRequest, getTikTokFinanceStatementsData);
 router.get("/tiktok/shop/finance/payments", authenticateRequest, getTikTokFinancePaymentsData);
@@ -125,6 +141,10 @@ router.post("/tiktok/posts/photo", authenticateRequest, createTikTokPhotoPost);
 router.post("/tiktok/posts/status", authenticateRequest, getTikTokPostStatusData);
 router.post("/tiktok/posts/video", authenticateRequest, createTikTokVideoPost);
 router.post("/connect", authenticateRequest, startConnection);
+router.get("/quickbooks/connect", authenticateRequest, startQuickBooksConnection);
+router.get("/quickbooks/callback", quickBooksCallback);
+router.post("/quickbooks/payroll/sync", authenticateRequest, syncQuickBooksPayrollRun);
+router.get("/quickbooks/payroll/:payrollRunId/pdf", authenticateRequest, downloadQuickBooksPayrollPdf);
 router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatnotSessionData);
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
 router.post("/whatnot/inventory-edit-categories", authenticateWhatnotExtension, saveWhatnotInventoryEditCategoriesEntry);

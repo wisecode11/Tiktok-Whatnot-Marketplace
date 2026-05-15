@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import {
   AlertCircle,
   ArrowRight,
+  Building,
   CheckCircle2,
   Clapperboard,
   ExternalLink,
@@ -37,7 +38,7 @@ import {
   type WhatnotExtensionStatusResponse,
 } from "@/lib/auth"
 
-type SupportedPlatformId = "tiktok" | "whatnot"
+type SupportedPlatformId = "tiktok" | "whatnot" | "quickbooks"
 
 interface PlatformDefinition {
   id: SupportedPlatformId
@@ -58,6 +59,12 @@ const supportedPlatforms: PlatformDefinition[] = [
     name: "Whatnot",
     shortName: "WN",
     description: "Manage your Whatnot connection and keep platform access up to date.",
+  },
+  {
+    id: "quickbooks",
+    name: "QuickBooks",
+    shortName: "QB",
+    description: "Connect QuickBooks to sync payroll and financial records automatically.",
   },
 ]
 
@@ -88,6 +95,22 @@ function formatOptionalNumber(value: number | null | undefined) {
 
 function getConnectHref(platformId: SupportedPlatformId) {
   return `/launch-pad?role=streamer&autoconnect=${platformId}`
+}
+
+async function handleConnectQuickBooks(token: string) {
+  const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'}/api/integrations/quickbooks/connect`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Connection failed' }))
+    throw new Error(error.error || 'Failed to connect QuickBooks')
+  }
+
+  const data = await response.json()
+  window.location.href = data.authorizationUrl
 }
 
 export default function SellerConnectPlatformsPage() {
@@ -189,6 +212,16 @@ export default function SellerConnectPlatformsPage() {
         }
       }
 
+      if (platform.id === "quickbooks") {
+        return {
+          ...platform,
+          connected: Boolean(account?.connected),
+          username: account?.username || null,
+          status: account?.status || "not connected",
+          externalId: account?.externalId || null,
+        }
+      }
+
       return {
         ...platform,
         connected: Boolean(whatnotStatus?.connected),
@@ -225,7 +258,7 @@ export default function SellerConnectPlatformsPage() {
             Connect Platforms
           </h1>
           <p className="text-muted-foreground">
-            Manage only the platforms currently supported for streamers: TikTok Shop and Whatnot.
+            Manage the platforms currently supported: TikTok Shop, Whatnot, and QuickBooks for payroll.
           </p>
         </div>
         <Button asChild className="gap-2 shadow-lg shadow-primary/25">
@@ -290,42 +323,99 @@ export default function SellerConnectPlatformsPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {platformCards.map((platform) => (
-              <Card key={platform.id} className="border-border/50 bg-card/50">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl font-bold ${platform.connected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                        {platform.shortName}
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold">{platform.name}</div>
-                          <StatusBadge variant={platform.connected ? "success" : "warning"}>
-                            {platform.connected ? "Connected" : "Not connected"}
-                          </StatusBadge>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {platformCards.map((platform) => {
+              const isQuickBooks = platform.id === "quickbooks"
+              const handleQuickBooksConnect = async () => {
+                try {
+                  const token = await waitForSessionToken(getToken)
+                  await handleConnectQuickBooks(token)
+                } catch (error) {
+                  setErrorMessage(error instanceof Error ? error.message : 'Connection failed')
+                }
+              }
+
+              if (isQuickBooks && !platform.connected) {
+                return (
+                  <Card key={platform.id} className="border-border/50 bg-card/50">
+                    <CardContent className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`flex h-12 w-12 items-center justify-center rounded-xl font-bold ${platform.connected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                            <Building className="h-5 w-5" />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-semibold">{platform.name}</div>
+                              <StatusBadge variant={platform.connected ? "success" : "warning"}>
+                                {platform.connected ? "Connected" : "Not connected"}
+                              </StatusBadge>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {platform.connected
+                                ? platform.username || platform.externalId || "Not available"
+                                : platform.description}
+                            </p>
+                            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                              Status: {platform.status}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {platform.connected
-                            ? platform.username || platform.externalId || "Not available"
-                            : platform.description}
-                        </p>
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                          Status: {platform.status}
-                        </p>
+                        <Button onClick={handleQuickBooksConnect} variant="default" size="sm" className="gap-2">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Connect
+                        </Button>
                       </div>
+                    </CardContent>
+                  </Card>
+                )
+              }
+
+              return (
+                <Card key={platform.id} className="border-border/50 bg-card/50">
+                  <CardContent className="p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <div className={`flex h-12 w-12 items-center justify-center rounded-xl font-bold ${platform.connected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                          {platform.id === "quickbooks" ? <Building className="h-5 w-5" /> : platform.shortName}
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <div className="font-semibold">{platform.name}</div>
+                            <StatusBadge variant={platform.connected ? "success" : "warning"}>
+                              {platform.connected ? "Connected" : "Not connected"}
+                            </StatusBadge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {platform.connected
+                              ? platform.username || platform.externalId || "Not available"
+                              : platform.description}
+                          </p>
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                            Status: {platform.status}
+                          </p>
+                        </div>
+                      </div>
+                      {platform.id === "quickbooks" ? (
+                        <Button asChild variant={platform.connected ? "outline" : "default"} size="sm" className="gap-2">
+                          <Link href={platform.connected ? "/seller/manage-staff" : getConnectHref(platform.id)}>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {platform.connected ? "Manage" : "Connect"}
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button asChild variant={platform.connected ? "outline" : "default"} size="sm" className="gap-2">
+                          <Link href={platform.connected ? "/launch-pad?role=streamer" : getConnectHref(platform.id)}>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {platform.connected ? "Manage" : "Connect"}
+                          </Link>
+                        </Button>
+                      )}
                     </div>
-                    <Button asChild variant={platform.connected ? "outline" : "default"} size="sm" className="gap-2">
-                      <Link href={platform.connected ? "/launch-pad?role=streamer" : getConnectHref(platform.id)}>
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        {platform.connected ? "Manage" : "Connect"}
-                      </Link>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         )}
       </div>

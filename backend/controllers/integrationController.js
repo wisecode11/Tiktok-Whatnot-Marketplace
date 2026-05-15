@@ -3,7 +3,8 @@ const {
   searchTiktokGlobalProducts,
   createTiktokGlobalProduct,
   getTiktokGlobalProduct,
-  getTiktokShopOrderDetail,
+  updateTiktokGlobalProduct202509,
+  deleteTiktokGlobalProducts,
   getTiktokShopOrderDetail,
   getTiktokFinanceStatements,
   getTiktokFinancePayments,
@@ -52,6 +53,12 @@ const {
   publishTikTokPhoto,
   publishTikTokVideo,
 } = require("../services/tiktokPostingService");
+const {
+  createQuickBooksConnectionSession,
+  handleQuickBooksCallback,
+  syncPayrollRunToQuickBooks,
+  downloadPayrollRunPdfFromQuickBooks,
+} = require("../services/quickbooksService");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -519,6 +526,13 @@ async function searchTikTokGlobalProductsData(req, res) {
     const result = await searchTiktokGlobalProducts({
       clerkUserId: req.auth.userId,
       body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinanceStatementsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -544,6 +558,13 @@ async function createTikTokGlobalProductsData(req, res) {
     const result = await createTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinancePaymentsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -572,6 +593,52 @@ async function getTikTokGlobalProductData(req, res) {
     const result = await getTiktokGlobalProduct({
       clerkUserId: req.auth.userId,
       productId: decodeURIComponent(rawId.trim()),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/** Proxies TikTok Shop `PUT /product/202509/products/{product_id}` (mock until shop is connected). */
+async function updateTikTokGlobalProduct202509Data(req, res) {
+  try {
+    const rawId =
+      typeof req.params.productId === "string"
+        ? req.params.productId
+        : String(req.params.productId ?? "");
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await updateTiktokGlobalProduct202509({
+      clerkUserId: req.auth.userId,
+      productId: decodeURIComponent(rawId.trim()),
+      body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/** Proxies TikTok Shop `DELETE /product/202309/products` (mock until shop is connected). */
+async function deleteTikTokGlobalProductsData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const productIds = Array.isArray(body.product_ids)
+      ? body.product_ids
+      : Array.isArray(body.productIds)
+        ? body.productIds
+        : [];
+
+    const result = await deleteTiktokGlobalProducts({
+      clerkUserId: req.auth.userId,
+      productIds,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function getTikTokFinanceWithdrawalsData(req, res) {
   try {
     const query = req.query && typeof req.query === "object" ? req.query : {};
@@ -696,6 +763,64 @@ async function whatnotCallback(req, res) {
   return res.redirect(result.redirectUrl);
 }
 
+async function startQuickBooksConnection(req, res) {
+  try {
+    const result = await createQuickBooksConnectionSession({
+      clerkUserId: req.auth.userId,
+      role: req.query && req.query.role ? req.query.role : "streamer",
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function quickBooksCallback(req, res) {
+  const result = await handleQuickBooksCallback({
+    code: req.query.code,
+    state: req.query.state,
+    realmId: req.query.realmId,
+    error: req.query.error,
+    errorDescription: req.query.error_description,
+  });
+
+  return res.redirect(result.redirectUrl);
+}
+
+async function syncQuickBooksPayrollRun(req, res) {
+  try {
+    const result = await syncPayrollRunToQuickBooks({
+      clerkUserId: req.auth.userId,
+      payrollRunId: req.body && req.body.payrollRunId,
+      force: Boolean(req.body && req.body.force),
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function downloadQuickBooksPayrollPdf(req, res) {
+  try {
+    const { pdfBuffer, filename, source } = await downloadPayrollRunPdfFromQuickBooks({
+      clerkUserId: req.auth.userId,
+      payrollRunId: req.params.payrollRunId,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    if (source) {
+      res.setHeader('X-QB-PDF-Source', source);
+    }
+    return res.send(pdfBuffer);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 module.exports = {
   checkStripeStatus,
   createTikTokPhotoPost,
@@ -713,6 +838,8 @@ module.exports = {
   searchTikTokGlobalProductsData,
   createTikTokGlobalProductsData,
   getTikTokGlobalProductData,
+  updateTikTokGlobalProduct202509Data,
+  deleteTikTokGlobalProductsData,
   getTikTokShopOrderDetailData,
   getTikTokFinanceStatementsData,
   getTikTokFinancePaymentsData,
@@ -738,6 +865,10 @@ module.exports = {
   fetchWhatnotShipmentsTableData,
   syncWhatnotEarlyPayoutBalanceData,
   startConnection,
+  startQuickBooksConnection,
+  quickBooksCallback,
+  syncQuickBooksPayrollRun,
+  downloadQuickBooksPayrollPdf,
   whatnotCallback,
   tiktokCallback,
   updateWhatnotBio,

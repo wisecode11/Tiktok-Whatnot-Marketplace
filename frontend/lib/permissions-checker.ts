@@ -85,4 +85,8 @@ export const MODULE_DEFINITIONS: Record<
     label: "Order Management",
     description: "View seller order stats and shipment details from synced database snapshots",
   },
+  attendance: {
+    label: "Clock In / Clock Out",
+    description: "Clock in and out to record daily attendance",
+  },
 }

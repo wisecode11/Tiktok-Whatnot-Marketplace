@@ -266,10 +266,6 @@ export default function FinanceManagementPage() {
   }, [getToken, isLoaded])
 
   useEffect(() => {
-    void loadWhatnotBalance()
-  }, [loadWhatnotBalance])
-
-  useEffect(() => {
     if (!isLoaded || activePlatform !== "tiktok") {
       return
     }

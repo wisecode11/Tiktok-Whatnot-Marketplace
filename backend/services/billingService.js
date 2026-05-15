@@ -1031,11 +1031,21 @@ async function handleStripeWebhookEvent({ signature, payload }) {
 
   // Lazy-load to avoid circular dependencies.
   const bookingPaymentService = require("./bookingPaymentService");
+  const payrollPaymentService = require("./payrollPaymentService");
 
   switch (event.type) {
     case "customer.created":
     case "customer.updated": {
-      await syncWorkspaceFromCustomer(event.data.object);
+      const customer = event.data.object;
+      if (customer.metadata && customer.metadata.user_type === "seller" && customer.metadata.user_id) {
+        await User.findByIdAndUpdate(customer.metadata.user_id, {
+          $set: {
+            stripe_customer_id: customer.id,
+            updated_at: new Date(),
+          },
+        });
+      }
+      await syncWorkspaceFromCustomer(customer);
       break;
     }
 
@@ -1067,6 +1077,18 @@ async function handleStripeWebhookEvent({ signature, payload }) {
     case "invoice.payment_failed":
     case "invoice.voided": {
       const invoice = event.data.object;
+      const invoicePurpose =
+        invoice.metadata && invoice.metadata.payment_purpose
+          ? invoice.metadata.payment_purpose
+          : null;
+
+      if (invoicePurpose === "staff_payroll") {
+        if (event.type === "invoice.paid") {
+          await payrollPaymentService.handlePayrollInvoicePaid(invoice);
+        }
+        break;
+      }
+
       const reference = await resolveWorkspaceSubscriptionReference({
         stripeSubscriptionId: extractStripeId(invoice.subscription),
         stripeCustomerId: extractStripeId(invoice.customer),
@@ -1075,22 +1097,43 @@ async function handleStripeWebhookEvent({ signature, payload }) {
       break;
     }
 
+    case "payment_intent.canceled":
     case "payment_intent.processing":
     case "payment_intent.succeeded":
     case "payment_intent.payment_failed":
     case "payment_intent.requires_action":
     case "payment_intent.requires_payment_method": {
       const paymentIntent = event.data.object;
-      const isBookingPayment =
-        paymentIntent.metadata && paymentIntent.metadata.payment_purpose === "moderator_booking";
+      const purpose =
+        paymentIntent.metadata && paymentIntent.metadata.payment_purpose
+          ? paymentIntent.metadata.payment_purpose
+          : null;
 
-      if (isBookingPayment) {
+      if (purpose === "staff_payroll") {
+        if (event.type === "payment_intent.succeeded") {
+          await payrollPaymentService.handlePayrollPaymentSucceeded(paymentIntent);
+        } else if (event.type === "payment_intent.payment_failed") {
+          await payrollPaymentService.handlePayrollPaymentFailed(paymentIntent);
+        } else if (event.type === "payment_intent.canceled") {
+          await payrollPaymentService.handlePayrollPaymentCanceled(paymentIntent);
+        }
+        break;
+      }
+
+      if (purpose === "moderator_booking") {
         if (event.type === "payment_intent.succeeded") {
           await bookingPaymentService.handleBookingPaymentSucceeded(paymentIntent);
         } else if (event.type === "payment_intent.payment_failed") {
           await bookingPaymentService.handleBookingPaymentFailed(paymentIntent);
         }
-      } else {
+        break;
+      }
+
+      if (
+        event.type === "payment_intent.succeeded" ||
+        event.type === "payment_intent.payment_failed" ||
+        event.type === "payment_intent.processing"
+      ) {
         const reference = await resolveWorkspaceSubscriptionReference({
           stripeSubscriptionId: null,
           stripeCustomerId: extractStripeId(paymentIntent.customer),

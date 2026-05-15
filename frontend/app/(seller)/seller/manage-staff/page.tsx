@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useAuth } from "@clerk/nextjs"
-import { Loader2, Lock, Mail, Plus, ShieldCheck, Users } from "lucide-react"
+import { Building, CalendarDays, DollarSign, Loader2, Lock, Plus } from "lucide-react"
 
 import { AccessControlModal } from "@/components/staff/access-control-modal"
 import { PageHeader } from "@/components/page-header"
@@ -33,7 +34,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
-import { getClerkErrorMessage, waitForSessionToken } from "@/lib/auth"
+import {
+  disconnectPlatform,
+  getClerkErrorMessage,
+  getConnectedAccounts,
+  waitForSessionToken,
+} from "@/lib/auth"
 import {
   createStaffMember,
   listStaffMembers,
@@ -59,6 +65,7 @@ function formatDate(value: string | null) {
 }
 
 export default function ManageStaffPage() {
+  const router = useRouter()
   const { getToken, isLoaded } = useAuth()
   const { toast } = useToast()
 
@@ -79,6 +86,19 @@ export default function ManageStaffPage() {
   const [selectedStaffName, setSelectedStaffName] = useState<string | null>(null)
   const [staffPermissions, setStaffPermissions] = useState<StaffPermissions | null>(null)
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false)
+  const [isQuickBooksConnected, setIsQuickBooksConnected] = useState(false)
+  const [isQuickBooksLoading, setIsQuickBooksLoading] = useState(true)
+  const [isQuickBooksConnecting, setIsQuickBooksConnecting] = useState(false)
+  const [isQuickBooksDisconnecting, setIsQuickBooksDisconnecting] = useState(false)
+  const [quickBooksError, setQuickBooksError] = useState<string | null>(null)
+
+  function handleOpenAttendance(staffId: string) {
+    router.push(`/seller/manage-staff/attendance/${staffId}`)
+  }
+
+  function handleOpenPayroll() {
+    router.push(`/seller/payroll`)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +130,43 @@ export default function ManageStaffPage() {
     }
 
     void loadStaff()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getToken, isLoaded])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadQuickBooksState() {
+      if (!isLoaded) {
+        return
+      }
+
+      try {
+        setIsQuickBooksLoading(true)
+        setQuickBooksError(null)
+        const token = await waitForSessionToken(getToken)
+        const result = await getConnectedAccounts(token)
+        const connected = result.accounts.some((account) => account.platform === "quickbooks" && account.connected)
+
+        if (!cancelled) {
+          setIsQuickBooksConnected(connected)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setQuickBooksError(getClerkErrorMessage(error))
+          setIsQuickBooksConnected(false)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsQuickBooksLoading(false)
+        }
+      }
+    }
+
+    void loadQuickBooksState()
 
     return () => {
       cancelled = true
@@ -183,6 +240,46 @@ export default function ManageStaffPage() {
     })
   }
 
+  async function handleDisconnectQuickBooks() {
+    try {
+      setIsQuickBooksDisconnecting(true)
+      setQuickBooksError(null)
+
+      const token = await waitForSessionToken(getToken)
+      await disconnectPlatform(token, "quickbooks")
+      setIsQuickBooksConnected(false)
+    } catch (error) {
+      setQuickBooksError(getClerkErrorMessage(error))
+    } finally {
+      setIsQuickBooksDisconnecting(false)
+    }
+  }
+
+  async function handleConnectQuickBooks() {
+    try {
+      setIsQuickBooksConnecting(true)
+      setQuickBooksError(null)
+
+      const token = await waitForSessionToken(getToken)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"}/api/integrations/quickbooks/connect`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Connection failed" }))
+        throw new Error(error.error || "Failed to connect QuickBooks")
+      }
+
+      const data = await response.json()
+      window.location.href = data.authorizationUrl
+    } catch (error) {
+      setQuickBooksError(getClerkErrorMessage(error))
+      setIsQuickBooksConnecting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -195,40 +292,78 @@ export default function ManageStaffPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Total staff</CardDescription>
-            <CardTitle className="text-3xl">{staffMembers.length}</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Users className="size-4 text-primary" />
-            Active team members attached to your streamer workspace
-          </CardContent>
-        </Card>
+      <Card className="border-amber-200 bg-amber-50">
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2">
+              <Building className="h-5 w-5 text-amber-700" />
+              <div>
+                <CardTitle>QuickBooks Integration</CardTitle>
+                <CardDescription>
+                  {isQuickBooksConnected
+                    ? "Connected to QuickBooks for staff payroll sync"
+                    : "Connect your QuickBooks account from Connect Platforms to enable staff payroll sync"}
+                </CardDescription>
+              </div>
+            </div>
+            {isQuickBooksConnected ? (
+              <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Connected</span>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          {isQuickBooksLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : isQuickBooksConnected ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isQuickBooksDisconnecting}
+              onClick={() => void handleDisconnectQuickBooks()}
+            >
+              {isQuickBooksDisconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Disconnect
+            </Button>
+          ) : quickBooksError ? (
+            <Button disabled size="sm" variant="destructive">
+              Connection Error
+            </Button>
+          ) : (
+            <Button size="sm" disabled={isQuickBooksConnecting} onClick={() => void handleConnectQuickBooks()}>
+              {isQuickBooksConnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Connect QuickBooks
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Default role</CardDescription>
-            <CardTitle className="text-3xl">Staff</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ShieldCheck className="size-4 text-primary" />
-            New members are created with the staff role automatically
-          </CardContent>
-        </Card>
+      {quickBooksError ? <p className="text-sm text-destructive">{quickBooksError}</p> : null}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription>Email delivery</CardDescription>
-            <CardTitle className="text-3xl">SMTP</CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Mail className="size-4 text-primary" />
-            Login credentials are sent as soon as the account is created
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="border-emerald-200 bg-emerald-50">
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-emerald-700" />
+              <div>
+                <CardTitle>Payroll Management</CardTitle>
+                <CardDescription>
+                  Generate payroll from attendance records and sync to QuickBooks
+                </CardDescription>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          <Button 
+            size="sm" 
+            onClick={() => void handleOpenPayroll()}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            <CalendarDays className="mr-2 h-4 w-4" />
+            Manage Payroll
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -260,6 +395,7 @@ export default function ManageStaffPage() {
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Added</TableHead>
+                  <TableHead className="text-right">Attendance</TableHead>
                   <TableHead className="text-right">Access</TableHead>
                 </TableRow>
               </TableHeader>
@@ -271,6 +407,16 @@ export default function ManageStaffPage() {
                     <TableCell className="capitalize">{member.role}</TableCell>
                     <TableCell className="capitalize">{member.status}</TableCell>
                     <TableCell>{formatDate(member.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenAttendance(member.id)}
+                      >
+                        <CalendarDays className="mr-1.5 size-3.5" />
+                        Attendance
+                      </Button>
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button
                         variant="outline"

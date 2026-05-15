@@ -15,6 +15,7 @@
     "nodemailer": "^8.0.7",
     "nodemon": "^3.1.14",
     "openai": "^4.104.0",
+    "pdfkit": "^0.18.0",
     "socket.io": "^4.8.1",
     "stripe": "^22.0.0"
   }
