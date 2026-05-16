@@ -2412,3 +2412,127 @@ export async function getPublicPlatformSettings(token: string) {
     token,
   })
 }
+
+// ─── Admin Dashboard Stats ────────────────────────────────────────────────────
+
+export interface AdminDashboardStats {
+  totalUsers: number
+  totalModerators: number
+  totalSellers: number
+  totalStaff: number
+  blockedAccounts: number
+  pendingAccounts: number
+  totalReports: number
+  openReports: number
+  totalBookings: number
+  activeSubscriptions: number
+}
+
+export interface AdminRecentSignup {
+  _id: string
+  first_name: string
+  last_name: string
+  email: string
+  user_type: string
+  created_at: string
+}
+
+export interface AdminRecentReport {
+  _id: string
+  reported_user_id: string
+  report_type: string
+  reason: string
+  priority: string
+  status: string
+  created_at: string
+}
+
+export interface AdminDashboardStatsResponse {
+  stats: AdminDashboardStats
+  recentSignups: AdminRecentSignup[]
+  recentReports: AdminRecentReport[]
+}
+
+export async function getAdminDashboardStats(token: string) {
+  return request<AdminDashboardStatsResponse>("/api/admin/dashboard/stats", { token })
+}
+
+// ─── Admin Risk Analytics ─────────────────────────────────────────────────────
+
+export interface AdminRiskReportUser {
+  _id: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  user_type?: string
+  status?: string
+}
+
+export interface AdminRiskReport {
+  _id: string
+  reported_user_id: string
+  report_type: string
+  reason: string
+  description: string
+  priority: string
+  status: string
+  created_at: string
+  reportedUser: AdminRiskReportUser | null
+}
+
+export interface AdminBlockedUser {
+  _id: string
+  first_name: string
+  last_name: string
+  email: string
+  user_type: string
+  updated_at: string
+}
+
+export interface AdminRiskAnalyticsResponse {
+  summary: {
+    totalReportedUsers: number
+    blockedAccounts: number
+    openReports: number
+    underReviewReports: number
+    resolvedReports: number
+    dismissedReports: number
+    totalReports: number
+  }
+  reportsByPriority: Record<string, number>
+  reportsByType: Record<string, number>
+  recentReports: AdminRiskReport[]
+  recentlyBlocked: AdminBlockedUser[]
+}
+
+export async function getAdminRiskAnalytics(token: string) {
+  return request<AdminRiskAnalyticsResponse>("/api/admin/analytics/risk", { token })
+}
+
+export async function createAdminUserReport(
+  token: string,
+  payload: {
+    reported_user_id: string
+    report_type?: string
+    reason: string
+    description?: string
+    priority?: string
+  },
+) {
+  return request<{ message: string; report: AdminRiskReport }>("/api/admin/reports", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function updateAdminReportStatus(
+  token: string,
+  reportId: string,
+  status: "open" | "under_review" | "resolved" | "dismissed",
+) {
+  return request<{ message: string; report: AdminRiskReport }>(
+    `/api/admin/reports/${encodeURIComponent(reportId)}/status`,
+    { token, method: "PATCH", body: { status } },
+  )
+}

@@ -103,6 +103,11 @@ export function AppSidebar({
     : pathname.startsWith("/staff")
       ? "/staff/profile"
       : "/seller/profile"
+  const accountSettingsHref = isModerator
+    ? "/moderator/settings"
+    : pathname.startsWith("/admin")
+      ? "/admin/settings"
+      : "/seller/settings"
 
   useEffect(() => {
     let cancelled = false
@@ -345,9 +350,11 @@ export function AppSidebar({
                     Profile
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
+                <DropdownMenuItem asChild>
+                  <Link href={accountSettingsHref}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    Settings
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

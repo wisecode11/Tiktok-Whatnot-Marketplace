@@ -6,6 +6,10 @@ const {
   getUserProfileById,
   updateUserStatus,
   getReviewStats,
+  getDashboardStats,
+  getRiskAnalytics,
+  createUserReport,
+  updateUserReport,
 } = require("../controllers/adminController");
 const {
   listPlans,
@@ -25,6 +29,14 @@ const {
 const { authenticateRequest } = require("../middleware/authenticate");
 
 const router = express.Router();
+
+// Dashboard & Analytics
+router.get("/dashboard/stats", authenticateRequest, getDashboardStats);
+router.get("/analytics/risk", authenticateRequest, getRiskAnalytics);
+
+// User Reports
+router.post("/reports", authenticateRequest, createUserReport);
+router.patch("/reports/:reportId/status", authenticateRequest, updateUserReport);
 
 // Feedback Monitoring Routes
 router.get("/reviews", authenticateRequest, getAllModeratorReviews);

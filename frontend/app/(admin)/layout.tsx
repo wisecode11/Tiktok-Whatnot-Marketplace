@@ -24,7 +24,7 @@ const navigation = [
   {
     items: [
       { title: "Overview", href: "/admin", icon: LayoutDashboard },
-      // { title: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+      { title: "Analytics & Risk Control", href: "/admin/analytics", icon: ShieldCheck },
     ],
   },
   // {

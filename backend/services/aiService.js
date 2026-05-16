@@ -35,6 +35,33 @@ function isAbortLikeError(error) {
   );
 }
 
+function parseJsonObject(content) {
+  if (typeof content !== "string") {
+    throw new Error("Model response is not text");
+  }
+
+  const trimmed = content.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (_error) {
+    const fenced = trimmed.match(/```json\s*([\s\S]*?)\s*```/i);
+    if (fenced && fenced[1]) {
+      return JSON.parse(fenced[1]);
+    }
+
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const sliced = trimmed.slice(firstBrace, lastBrace + 1);
+      return JSON.parse(sliced);
+    }
+
+    throw new Error("Unable to parse JSON object from model response");
+  }
+}
+
 function parseJsonArray(content) {
   if (typeof content !== "string") {
     throw new Error("Model response is not text");
@@ -505,6 +532,219 @@ Make it conversational, energetic, concise, and suitable for spoken delivery on 
   }
 }
 
+function sanitizeInventoryListing(rawListing = {}) {
+  const title =
+    typeof rawListing.title === "string" ? rawListing.title.trim().slice(0, 120) : "";
+  let description =
+    typeof rawListing.description === "string" ? rawListing.description.trim() : "";
+
+  if (description.length > 120) {
+    description = description.slice(0, 120).trim();
+  }
+
+  return { title, description };
+}
+
+function buildFallbackInventoryListing(category) {
+  const categoryLabel = category.trim();
+  const title = `Premium ${categoryLabel} — Live Stream Exclusive`.slice(0, 80);
+  let description = `Discover this top ${categoryLabel.toLowerCase()} pick—quality you can trust, perfect for live deals. Limited stock, order during the show!`;
+  if (description.length > 120) {
+    description = description.slice(0, 120).trim();
+  }
+  while (description.length < 80) {
+    description = `${description} Shop now.`.slice(0, 120);
+  }
+  return { title, description };
+}
+
+async function generateInventoryListingFromCategory(category, userTitle = "") {
+  if (!category || typeof category !== "string") {
+    throw createHttpError(400, "Product category is required");
+  }
+
+  const categoryTrimmed = category.trim();
+  if (!categoryTrimmed) {
+    throw createHttpError(400, "Product category cannot be empty");
+  }
+
+  const userTitleTrimmed =
+    typeof userTitle === "string" ? userTitle.trim().slice(0, 120) : "";
+
+  try {
+    const client = getOpenAIClient();
+    const prompt = userTitleTrimmed
+      ? `You are an expert e-commerce copywriter for TikTok Shop and Whatnot live stream listings.
+
+Product category: "${categoryTrimmed}"
+Seller draft product title: "${userTitleTrimmed}"
+
+The seller already named their product. Generate ONE improved marketplace listing that keeps the same product identity and intent as their draft title, while fitting the category.
+
+Requirements:
+1. title — refine and enhance the seller's draft title; engaging, scroll-stopping, 40-80 characters, suitable for live selling (no emojis unless they fit naturally, max 2). Must clearly refer to the same product as "${userTitleTrimmed}".
+2. description — exactly 80-120 characters (count carefully), punchy benefit-focused copy for a product card, aligned with the category and draft title.
+
+Return ONLY valid JSON in this exact shape:
+{
+  "title": "Your title here",
+  "description": "Your description between 80 and 120 characters inclusive."
+}`
+      : `You are an expert e-commerce copywriter for TikTok Shop and Whatnot live stream listings.
+
+Product category: "${categoryTrimmed}"
+
+Generate ONE marketplace listing with:
+1. title — engaging, scroll-stopping, 40-80 characters, suitable for live selling (no emojis unless they fit naturally, max 2)
+2. description — exactly 80-120 characters (count carefully), punchy benefit-focused copy for a product card
+
+Return ONLY valid JSON in this exact shape:
+{
+  "title": "Your title here",
+  "description": "Your description between 80 and 120 characters inclusive."
+}`;
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.75,
+      max_tokens: 300,
+    });
+
+    const content = response.choices[0]?.message?.content || "";
+    const parsed = parseJsonObject(content);
+    let listing = sanitizeInventoryListing(parsed);
+
+    if (!listing.title) {
+      throw new Error("Invalid title in model response");
+    }
+
+    if (listing.description.length < 80) {
+      const fallback = buildFallbackInventoryListing(categoryTrimmed);
+      listing.description = fallback.description;
+    }
+
+    if (userTitleTrimmed && listing.title.length < 10) {
+      listing.title = userTitleTrimmed.slice(0, 80);
+    }
+
+    return listing;
+  } catch (error) {
+    if (error.status) {
+      throw error;
+    }
+
+    console.error("Error generating inventory listing from category:", error);
+    throw createHttpError(
+      500,
+      "Failed to generate listing details",
+      error.message,
+    );
+  }
+}
+
+function buildQuickInventoryThumbnailPrompt(title, description, productCategory) {
+  const shortDescription = (description || "").replace(/\s+/g, " ").trim().slice(0, 120);
+
+  return [
+    "Square 1:1 e-commerce livestream product thumbnail.",
+    `Product title: ${title}.`,
+    shortDescription ? `Product details: ${shortDescription}.` : null,
+    productCategory ? `Category: ${productCategory}.` : null,
+    "Style: bold colors, centered product hero, clean gradient background, high contrast, scroll-stopping, professional marketplace thumbnail.",
+    "Keep text minimal and readable. No watermark, no logos, no brand trademarks.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function extractGeneratedImageData(imageResponse) {
+  const firstImage = imageResponse?.data?.[0];
+  if (!firstImage) {
+    return null;
+  }
+
+  if (firstImage.b64_json) {
+    return `data:image/png;base64,${firstImage.b64_json}`;
+  }
+
+  if (firstImage.url) {
+    return firstImage.url;
+  }
+
+  return null;
+}
+
+async function generateQuickInventoryThumbnailImage(client, prompt) {
+  try {
+    const imageResponse = await client.images.generate({
+      model: "dall-e-2",
+      prompt,
+      size: "256x256",
+      response_format: "b64_json",
+      n: 1,
+    });
+
+    const imageUrl = extractGeneratedImageData(imageResponse);
+    if (imageUrl) {
+      return imageUrl;
+    }
+  } catch (error) {
+    console.error("Quick thumbnail failed with dall-e-2:", error.message || error);
+  }
+
+  try {
+    const imageResponse = await client.images.generate({
+      model: "gpt-image-1",
+      prompt,
+      size: "1024x1024",
+    });
+
+    const imageUrl = extractGeneratedImageData(imageResponse);
+    if (imageUrl) {
+      return imageUrl;
+    }
+  } catch (error) {
+    console.error("Quick thumbnail failed with gpt-image-1:", error.message || error);
+  }
+
+  return null;
+}
+
+async function generateInventoryThumbnail(title, description = "", productCategory = "") {
+  if (!title || typeof title !== "string") {
+    throw createHttpError(400, "Product title is required");
+  }
+
+  const titleTrimmed = title.trim();
+  if (!titleTrimmed) {
+    throw createHttpError(400, "Product title cannot be empty");
+  }
+
+  const client = getOpenAIClient();
+  const prompt = buildQuickInventoryThumbnailPrompt(
+    titleTrimmed,
+    description || "",
+    productCategory || "",
+  );
+
+  const imageUrl = await generateQuickInventoryThumbnailImage(client, prompt);
+  if (!imageUrl) {
+    throw createHttpError(500, "Failed to generate thumbnail image");
+  }
+
+  return {
+    imageUrl,
+    suggestion: {
+      title: `${titleTrimmed} Thumbnail`,
+      visualElements: ["product hero", "bold background", "live-deal mood"],
+      colorScheme: "high contrast marketplace palette",
+      textOverlay: titleTrimmed.slice(0, 24),
+      why: "Optimized for live stream product cards at 225x225 display size.",
+    },
+  };
+}
+
 async function generateSingleThumbnailImage(suggestion, title, description, productCategory) {
   if (!suggestion || typeof suggestion !== "object") {
     throw createHttpError(400, "Suggestion object is required");
@@ -531,4 +771,6 @@ module.exports = {
   generateThumbnailSuggestions,
   generateSingleThumbnailImage,
   generateScript,
+  generateInventoryListingFromCategory,
+  generateInventoryThumbnail,
 };

@@ -4,6 +4,8 @@ const {
   generateThumbnailSuggestions,
   generateSingleThumbnailImage,
   generateScript,
+  generateInventoryListingFromCategory,
+  generateInventoryThumbnail,
 } = require("../services/aiService");
 
 async function generateTitleHandler(req, res, next) {
@@ -150,10 +152,71 @@ async function generateThumbnailImageHandler(req, res, next) {
   }
 }
 
+async function generateInventoryListingHandler(req, res, next) {
+  try {
+    const { category, userTitle } = req.body;
+    const userId = req.auth.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!category || typeof category !== "string" || !category.trim()) {
+      return res.status(400).json({ error: "Product category is required" });
+    }
+
+    const listing = await generateInventoryListingFromCategory(
+      category,
+      typeof userTitle === "string" ? userTitle : "",
+    );
+
+    res.json({
+      success: true,
+      title: listing.title,
+      description: listing.description,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function generateInventoryThumbnailHandler(req, res, next) {
+  try {
+    const { title, description, productCategory } = req.body;
+    const userId = req.auth.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!title || typeof title !== "string" || !title.trim()) {
+      return res.status(400).json({ error: "Product title is required" });
+    }
+
+    const result = await generateInventoryThumbnail(
+      title,
+      description || "",
+      productCategory || "",
+    );
+
+    res.json({
+      success: true,
+      imageUrl: result.imageUrl,
+      suggestion: result.suggestion,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   generateTitleHandler,
   generateDescriptionHandler,
   generateThumbnailSuggestionsHandler,
   generateThumbnailImageHandler,
   generateScriptHandler,
+  generateInventoryListingHandler,
+  generateInventoryThumbnailHandler,
 };
