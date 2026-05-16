@@ -1072,7 +1072,24 @@ function getAuthErrorPayload(error: AuthApiError) {
     return null
   }
 
-  return error.details as Record<string, unknown>
+  const root = error.details as Record<string, unknown>
+  const nested =
+    root.details && typeof root.details === "object"
+      ? (root.details as Record<string, unknown>)
+      : null
+
+  return nested ? { ...root, ...nested } : root
+}
+
+export function getAuthErrorRedirectTo(error: unknown): string | null {
+  if (!(error instanceof AuthApiError)) {
+    return null
+  }
+
+  const payload = getAuthErrorPayload(error)
+  const redirectTo = payload?.redirectTo
+
+  return typeof redirectTo === "string" ? redirectTo : null
 }
 
 export function getAccountStatusErrorCopy(error: unknown): AccountStatusErrorCopy | null {
@@ -1175,16 +1192,23 @@ export function getDashboardPath(role: AppRole) {
   return "/seller"
 }
 
+/** Post-sign-up destination (mirrors backend getSignupRedirect). Prefer routing via /auth-complete. */
 export function getSignupRedirectPath(role: AppRole) {
-  if (role === "admin") {
+  if (role === "staff") {
     return getDashboardPath(role)
   }
 
-  if (role === "staff") {
-    return "/staff/launch-pad"
-  }
-
   return `/launch-pad?role=${role}`
+}
+
+export function getAuthCompletePath(
+  flow: "login" | "signup",
+  role: AppRole | null | undefined,
+) {
+  return buildPath("/auth-complete", {
+    flow,
+    role: role || undefined,
+  })
 }
 
 export function getClerkErrorMessage(error: unknown) {

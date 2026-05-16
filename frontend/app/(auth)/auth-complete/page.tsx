@@ -7,7 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { AlertCircle, Loader2 } from "lucide-react"
 
 import {
-  AuthApiError,
   buildPath,
   getAccountStatusErrorCopy,
   getClerkErrorMessage,
@@ -16,6 +15,7 @@ import {
   normalizeRole,
   syncCurrentUser,
   waitForSessionToken,
+  getAuthErrorRedirectTo,
   type AppRole,
 } from "@/lib/auth"
 
@@ -64,6 +64,12 @@ function AuthCompleteContent() {
         throw new Error("No account role was selected. Please choose a role and try again.")
       }
 
+      if (flow === "signup" && effectiveRole === "staff") {
+        throw new Error(
+          "Staff accounts cannot be created here. Ask your streamer for an invite, then sign in with the Staff portal.",
+        )
+      }
+
       const token = await waitForSessionToken(getToken)
       const result = flow === "signup"
         ? await syncCurrentUser(token, effectiveRole)
@@ -73,12 +79,10 @@ function AuthCompleteContent() {
     }
 
     void completeAuthentication().catch((error: unknown) => {
-      if (error instanceof AuthApiError && error.details && typeof error.details === "object") {
-        const redirectTo = (error.details as { redirectTo?: string }).redirectTo
+      const wrongPortalRedirect = getAuthErrorRedirectTo(error)
 
-        if (typeof redirectTo === "string") {
-          setAlternateRedirect(redirectTo)
-        }
+      if (wrongPortalRedirect) {
+        setAlternateRedirect(wrongPortalRedirect)
       }
 
       const accountStatusError = getAccountStatusErrorCopy(error)
