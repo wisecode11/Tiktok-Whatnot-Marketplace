@@ -3474,6 +3474,122 @@ function buildShowsFromMyLivesPayload(myLivesPayload) {
   };
 }
 
+function mapDashboardUpcomingNodeToShow(node) {
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+  const scheduledAt = node.scheduledAt || node.startTime || null;
+  const startTimeMs = scheduledAt != null ? Number(new Date(scheduledAt).getTime()) : null;
+  const id = node.id ? String(node.id) : node.uuid ? String(node.uuid) : null;
+  return {
+    id,
+    title: node.title ? String(node.title).trim() : null,
+    startTime: Number.isFinite(startTimeMs) ? startTimeMs : null,
+    endTime: null,
+    status: node.status ? String(node.status) : "CREATED",
+    userId: node.user && node.user.id ? String(node.user.id) : null,
+    showType: "Upcoming",
+    link: id ? `https://www.whatnot.com/live/${id}` : null,
+  };
+}
+
+function mergeShowsFromDashboardUpcoming(shows, dashboardPayload) {
+  const edges = dashboardPayload &&
+    dashboardPayload.data &&
+    dashboardPayload.data.upcomingShows &&
+    Array.isArray(dashboardPayload.data.upcomingShows.edges)
+    ? dashboardPayload.data.upcomingShows.edges
+    : [];
+
+  if (!edges.length) {
+    return shows;
+  }
+
+  const seen = new Set(
+    (Array.isArray(shows) ? shows : [])
+      .map((show) => (show && show.id ? String(show.id) : ""))
+      .filter(Boolean),
+  );
+
+  const merged = Array.isArray(shows) ? [...shows] : [];
+  for (const edge of edges) {
+    const mapped = mapDashboardUpcomingNodeToShow(edge && typeof edge === "object" ? edge.node : null);
+    if (!mapped || !mapped.id || seen.has(mapped.id)) {
+      continue;
+    }
+    seen.add(mapped.id);
+    merged.push(mapped);
+  }
+
+  return merged;
+}
+
+async function fetchMyLivesThroughExtension({ clerkUserId, sellerId }) {
+  const normalizedSellerId = typeof sellerId === "string" ? sellerId.trim() : "";
+  if (!normalizedSellerId) {
+    return { payload: {}, shows: [], currentCount: 0, upcomingCount: 0, pastCount: 0 };
+  }
+
+  const myLivesAction = await requestWhatnotAction({
+    action: "fetch_whatnot_my_lives",
+    clerkUserId,
+    sellerId: normalizedSellerId,
+  }, 300000);
+
+  if (!myLivesAction || !myLivesAction.success) {
+    throw createHttpError(
+      (myLivesAction && myLivesAction.status) || 502,
+      (myLivesAction && myLivesAction.error) || "Failed to fetch MyLives through extension.",
+      myLivesAction || null,
+    );
+  }
+
+  const myLivesPayload = myLivesAction.data && typeof myLivesAction.data === "object" ? myLivesAction.data : {};
+  const myLivesErrors = Array.isArray(myLivesPayload.errors) ? myLivesPayload.errors : [];
+  if (myLivesErrors.length) {
+    const firstError = myLivesErrors[0] && myLivesErrors[0].message
+      ? String(myLivesErrors[0].message)
+      : "MyLives GraphQL returned errors.";
+    throw createHttpError(502, firstError, myLivesPayload);
+  }
+
+  return {
+    payload: myLivesPayload,
+    ...buildShowsFromMyLivesPayload(myLivesPayload),
+  };
+}
+
+function whatnotShowSnapshotHasStoredShows(snapshot) {
+  return Boolean(
+    snapshot &&
+    Array.isArray(snapshot.shows_payload) &&
+    snapshot.shows_payload.length > 0,
+  );
+}
+
+function getGraphqlErrorMessage(payload) {
+  const errors = payload && Array.isArray(payload.errors) ? payload.errors : [];
+  if (!errors.length) {
+    return null;
+  }
+  return errors[0] && errors[0].message
+    ? String(errors[0].message)
+    : "GraphQL returned errors.";
+}
+
+function isNonFatalWhatnotShowTabGraphqlError(message) {
+  if (!message) {
+    return false;
+  }
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("viewer unauthorized") ||
+    lower.includes("unauthorized") ||
+    lower.includes("unauthenticated") ||
+    lower.includes("forbidden")
+  );
+}
+
 async function saveWhatnotShowSnapshot({
   clerkUserId,
   whatnotSellerId,
@@ -3482,30 +3598,39 @@ async function saveWhatnotShowSnapshot({
   source = "whatnot-extension",
 }) {
   const now = new Date();
-  await WhatnotShowSnapshot.findOneAndUpdate(
-    {
-      platform: "whatnot",
-      clerk_user_id: clerkUserId,
-    },
-    {
-      $set: {
-        whatnot_seller_id: whatnotSellerId || null,
-        source,
-        my_lives_payload: myLivesPayload && typeof myLivesPayload === "object" ? myLivesPayload : {},
-        shows_payload: Array.isArray(shows) ? shows : [],
-        synced_at: now,
-        updated_at: now,
+  const showsPayload = Array.isArray(shows) ? shows : [];
+  try {
+    await WhatnotShowSnapshot.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        clerk_user_id: clerkUserId,
       },
-      $setOnInsert: {
-        created_at: now,
+      {
+        $set: {
+          whatnot_seller_id: whatnotSellerId || null,
+          source,
+          my_lives_payload: myLivesPayload && typeof myLivesPayload === "object" ? myLivesPayload : {},
+          shows_payload: showsPayload,
+          synced_at: now,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
       },
-    },
-    {
-      upsert: true,
-      new: false,
-      setDefaultsOnInsert: true,
-    },
-  );
+      {
+        upsert: true,
+        new: false,
+        setDefaultsOnInsert: true,
+      },
+    );
+    console.log(
+      `[Whatnot Show Tab] Snapshot saved for ${clerkUserId}: ${showsPayload.length} show(s).`,
+    );
+  } catch (saveErr) {
+    console.error("[Whatnot Show Tab] Failed to save snapshot:", saveErr.message);
+    throw createHttpError(500, "Failed to save Whatnot show snapshot.", { cause: saveErr.message });
+  }
 }
 
 async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShowsCount = 0, forceRefresh = false }) {
@@ -3516,22 +3641,22 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
 
   const user = await findLocalUser(normalizedClerkUserId);
 
-  if (!forceRefresh) {
-    const cachedSnapshot = await WhatnotShowSnapshot.findOne({
-      platform: "whatnot",
-      clerk_user_id: normalizedClerkUserId,
-    }).sort({ updated_at: -1 });
+  const cachedSnapshot = await WhatnotShowSnapshot.findOne({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+  }).sort({ updated_at: -1 });
 
-    if (cachedSnapshot && Array.isArray(cachedSnapshot.shows_payload) && cachedSnapshot.shows_payload.length) {
-      return {
-        sellerId: cachedSnapshot.whatnot_seller_id || user.whatnot_seller_id || null,
-        upcomingShowUserId: null,
-        upcomingShows: [],
-        shows: cachedSnapshot.shows_payload,
-        liveReadiness: null,
-        sellerHomeDashboard: null,
-      };
-    }
+  const hasStoredSnapshot = whatnotShowSnapshotHasStoredShows(cachedSnapshot);
+
+  if (!forceRefresh && hasStoredSnapshot) {
+    return {
+      sellerId: cachedSnapshot.whatnot_seller_id || user.whatnot_seller_id || null,
+      upcomingShowUserId: null,
+      upcomingShows: [],
+      shows: cachedSnapshot.shows_payload,
+      liveReadiness: null,
+      sellerHomeDashboard: null,
+    };
   }
 
   const bridgeState = getWhatnotExtensionBridgeState();
@@ -3555,49 +3680,36 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
 
   const existingSellerId = user && typeof user.whatnot_seller_id === "string" ? user.whatnot_seller_id.trim() : "";
 
+  // MyLives-only path when seller id is known (avoids GetSellerHomeDashboard "Viewer unauthorized").
   if (existingSellerId) {
-    const myLivesAction = await requestWhatnotAction({
-      action: "fetch_whatnot_my_lives",
+    const myLivesLabel = hasStoredSnapshot ? "refresh" : "seed";
+    console.log(`[Whatnot Show Tab] Loading shows via MyLives (${myLivesLabel}).`);
+    const myLivesResult = await fetchMyLivesThroughExtension({
       clerkUserId: normalizedClerkUserId,
       sellerId: existingSellerId,
-    }, 300000);
-
-    if (!myLivesAction || !myLivesAction.success) {
-      throw createHttpError(
-        (myLivesAction && myLivesAction.status) || 502,
-        (myLivesAction && myLivesAction.error) || "Failed to fetch MyLives through extension.",
-        myLivesAction || null,
-      );
-    }
-
-    const myLivesPayload = myLivesAction.data && typeof myLivesAction.data === "object" ? myLivesAction.data : {};
-    const myLivesErrors = Array.isArray(myLivesPayload.errors) ? myLivesPayload.errors : [];
-    if (myLivesErrors.length) {
-      const firstError = myLivesErrors[0] && myLivesErrors[0].message
-        ? String(myLivesErrors[0].message)
-        : "MyLives GraphQL returned errors.";
-      throw createHttpError(502, firstError, myLivesPayload);
-    }
-
-    const { shows, currentCount, upcomingCount, pastCount } = buildShowsFromMyLivesPayload(myLivesPayload);
-    console.log(`[Whatnot Show Tab] MyLives (direct): ${currentCount} live, ${upcomingCount} upcoming, ${pastCount} past.`);
+    });
+    console.log(
+      `[Whatnot Show Tab] MyLives (${myLivesLabel}): ${myLivesResult.currentCount} live, ${myLivesResult.upcomingCount} upcoming, ${myLivesResult.pastCount} past.`,
+    );
 
     await saveWhatnotShowSnapshot({
       clerkUserId: normalizedClerkUserId,
       whatnotSellerId: existingSellerId,
-      myLivesPayload,
-      shows,
+      myLivesPayload: myLivesResult.payload,
+      shows: myLivesResult.shows,
     });
 
     return {
       sellerId: existingSellerId,
       upcomingShowUserId: null,
       upcomingShows: [],
-      shows,
+      shows: myLivesResult.shows,
       liveReadiness: null,
       sellerHomeDashboard: null,
     };
   }
+
+  console.log("[Whatnot Show Tab] No seller id yet — running full show-tab bootstrap.");
 
   console.log("[Whatnot Show Tab] Waiting for extension response...");
 
@@ -3610,9 +3722,13 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
   console.log("[Whatnot Show Tab] Extension response received.");
 
   if (!actionResult || !actionResult.success) {
+    const extensionError = actionResult && actionResult.error
+      ? String(actionResult.error)
+      : "Failed to fetch Whatnot show tab data through extension.";
+    console.error(`[Whatnot Show Tab] Extension action failed: ${extensionError}`);
     throw createHttpError(
       (actionResult && actionResult.status) || 502,
-      (actionResult && actionResult.error) || "Failed to fetch Whatnot show tab data through extension.",
+      extensionError,
       actionResult || null,
     );
   }
@@ -3625,22 +3741,20 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
     ? body.sellerHomeDashboard
     : null;
 
-  const readinessErrors =
-    readinessPayload && Array.isArray(readinessPayload.errors) ? readinessPayload.errors : [];
-  if (readinessErrors.length) {
-    const firstError = readinessErrors[0] && readinessErrors[0].message
-      ? String(readinessErrors[0].message)
-      : "GetSellerLiveReadiness GraphQL returned errors.";
-    throw createHttpError(502, firstError, readinessPayload);
+  const readinessErrorMessage = getGraphqlErrorMessage(readinessPayload);
+  if (readinessErrorMessage && !isNonFatalWhatnotShowTabGraphqlError(readinessErrorMessage)) {
+    throw createHttpError(502, readinessErrorMessage, readinessPayload);
+  }
+  if (readinessErrorMessage) {
+    console.warn(`[Whatnot Show Tab] Readiness warning (non-fatal): ${readinessErrorMessage}`);
   }
 
-  const dashboardErrors =
-    dashboardPayload && Array.isArray(dashboardPayload.errors) ? dashboardPayload.errors : [];
-  if (dashboardErrors.length) {
-    const firstError = dashboardErrors[0] && dashboardErrors[0].message
-      ? String(dashboardErrors[0].message)
-      : "GetSellerHomeDashboard GraphQL returned errors.";
-    throw createHttpError(502, firstError, dashboardPayload);
+  const dashboardErrorMessage = getGraphqlErrorMessage(dashboardPayload);
+  if (dashboardErrorMessage && !isNonFatalWhatnotShowTabGraphqlError(dashboardErrorMessage)) {
+    throw createHttpError(502, dashboardErrorMessage, dashboardPayload);
+  }
+  if (dashboardErrorMessage) {
+    console.warn(`[Whatnot Show Tab] Dashboard warning (non-fatal): ${dashboardErrorMessage}`);
   }
 
   const sellerIdFromDashboardPath =
@@ -3702,8 +3816,24 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
     console.log("Upcoming show user ID: <missing>");
   }
 
-  const myLivesPayload = body.myLives && typeof body.myLives === "object" ? body.myLives : {};
-  const { shows, currentCount, upcomingCount, pastCount } = buildShowsFromMyLivesPayload(myLivesPayload);
+  const resolvedSellerId = sellerId || existingSellerId || null;
+  let myLivesPayload = body.myLives && typeof body.myLives === "object" ? body.myLives : {};
+  let { shows, currentCount, upcomingCount, pastCount } = buildShowsFromMyLivesPayload(myLivesPayload);
+
+  if (!shows.length && resolvedSellerId) {
+    console.log("[Whatnot Show Tab] Bootstrap missing MyLives data — retrying MyLives fetch.");
+    const myLivesResult = await fetchMyLivesThroughExtension({
+      clerkUserId: normalizedClerkUserId,
+      sellerId: resolvedSellerId,
+    });
+    myLivesPayload = myLivesResult.payload;
+    shows = myLivesResult.shows;
+    currentCount = myLivesResult.currentCount;
+    upcomingCount = myLivesResult.upcomingCount;
+    pastCount = myLivesResult.pastCount;
+  }
+
+  shows = mergeShowsFromDashboardUpcoming(shows, dashboardPayload);
   console.log(`[Whatnot Show Tab] MyLives: ${currentCount} live, ${upcomingCount} upcoming, ${pastCount} past.`);
 
   const edges = dashboardPayload &&
@@ -3727,13 +3857,13 @@ async function fetchWhatnotShowTabDataFromExtension({ clerkUserId, upcomingShows
 
   await saveWhatnotShowSnapshot({
     clerkUserId: normalizedClerkUserId,
-    whatnotSellerId: sellerId || null,
+    whatnotSellerId: resolvedSellerId,
     myLivesPayload,
     shows,
   });
 
   return {
-    sellerId: sellerId || null,
+    sellerId: resolvedSellerId,
     upcomingShowUserId: upcomingShowUserId || null,
     upcomingShows,
     shows,

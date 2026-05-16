@@ -9,6 +9,7 @@ import { Loader2, Shield, Users, Video } from "lucide-react"
 import { BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
 import { buildPath, getAuthCompletePath, normalizeRole, type AppRole } from "@/lib/auth"
+import { signOutAndClearAuth } from "@/lib/auth-session"
 import { BrandLogo } from "../../../components/brand-logo"
 
 const clerkAppearance = {
@@ -183,7 +184,7 @@ function SignupContent() {
 
               <button
                 type="button"
-                onClick={() => void signOut({ redirectUrl: signOutRedirectUrl })}
+                onClick={() => void signOutAndClearAuth(signOut, { redirectUrl: signOutRedirectUrl })}
                 className="inline-flex h-11 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
               >
                 Sign out and create another account

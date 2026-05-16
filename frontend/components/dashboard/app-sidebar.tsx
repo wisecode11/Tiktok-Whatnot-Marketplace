@@ -7,6 +7,7 @@ import { BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
 import { BrandLogo } from "@/components/brand-logo"
 import { useAuthenticatedUser } from "@/components/auth/authenticated-user-context"
+import { signOutAndClearAuth } from "@/lib/auth-session"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -93,7 +94,15 @@ export function AppSidebar({
   const [lockedItemTitle, setLockedItemTitle] = useState<string | null>(null)
   const [moderatorProfile, setModeratorProfile] = useState<ModeratorProfileResponse["profile"] | null>(null)
   const [sellerPlatformNames, setSellerPlatformNames] = useState<string[]>([])
-  const logoutRedirectUrl = pathname.startsWith("/admin") ? "/admin-login" : "/login"
+  const logoutRedirectUrl = pathname.startsWith("/admin")
+    ? "/admin-login"
+    : pathname.startsWith("/staff")
+      ? "/login?role=staff"
+      : pathname.startsWith("/moderator")
+        ? "/login?role=moderator"
+        : pathname.startsWith("/seller")
+          ? "/login?role=streamer"
+          : "/login"
   const hasActiveSubscription = subscriptionAccess?.hasActiveSubscription ?? true
   const isLoading = subscriptionAccess?.isLoading ?? false
   const isModerator = authenticatedUser?.backendRole === "moderator"
@@ -360,7 +369,7 @@ export function AppSidebar({
                 <DropdownMenuItem
                   className="text-destructive"
                   onClick={() => {
-                    void signOut({ redirectUrl: logoutRedirectUrl })
+                    void signOutAndClearAuth(signOut, { redirectUrl: logoutRedirectUrl })
                   }}
                 >
                   <LogOut className="mr-2 h-4 w-4" />

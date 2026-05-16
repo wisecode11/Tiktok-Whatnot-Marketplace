@@ -55,6 +55,7 @@ function formatStartTime(startTime: number | null): { date: string; time: string
 export default function SellerWhatnotShowPage() {
   const { getToken, isLoaded } = useAuth()
   const [shows, setShows] = useState<WhatnotLiveShowItem[] | null>(null)
+  const [loadError, setLoadError] = useState("")
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [activeFilter, setActiveFilter] = useState<FilterType>("All")
@@ -90,13 +91,24 @@ export default function SellerWhatnotShowPage() {
     async function loadShows() {
       if (!isLoaded) return
       setLoading(true)
+      setLoadError("")
       try {
         const token = await waitForSessionToken(getToken)
         if (cancelled) return
         const data = await fetchWhatnotShowTabData(token, 0, { forceRefresh: false })
-        if (!cancelled) setShows(data.shows ?? [])
-      } catch (_e) {
-        // shows stays null → empty state shown
+        if (!cancelled) {
+          setShows(data.shows ?? [])
+          setLoadError("")
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setShows(null)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Could not load Whatnot shows. Connect the extension and try Refetch.",
+          )
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -111,12 +123,18 @@ export default function SellerWhatnotShowPage() {
   async function handleRefetchShows() {
     if (!isLoaded || refreshing) return
     setRefreshing(true)
+    setLoadError("")
     try {
       const token = await waitForSessionToken(getToken)
       const data = await fetchWhatnotShowTabData(token, 0, { forceRefresh: true })
       setShows(data.shows ?? [])
-    } catch (_error) {
-      // keep previous data on refetch failure
+      setLoadError("")
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Refetch failed. Keep Whatnot open, reconnect the extension, and try again.",
+      )
     } finally {
       setRefreshing(false)
     }
@@ -355,6 +373,7 @@ export default function SellerWhatnotShowPage() {
         </Button>
       </PageHeader>
       {scheduleNotice ? <p className="text-sm text-emerald-600">{scheduleNotice}</p> : null}
+      {loadError ? <p className="text-sm text-destructive">{loadError}</p> : null}
 
       <Card className="overflow-hidden border-border/60 bg-card">
         <CardContent className="space-y-4 p-4 md:p-6">

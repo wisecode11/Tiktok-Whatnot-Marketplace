@@ -853,8 +853,18 @@ async function loginWithRole({ clerkUserId, role }) {
   let user = await User.findOne({ clerk_user_id: clerkUserId });
 
   if (!user) {
-    const syncResult = await upsertUserFromClerk({ clerkUserId, role: normalizedRole });
-    user = await User.findById(syncResult.user.id);
+    if (normalizedRole === "staff") {
+      throw createHttpError(
+        403,
+        "Staff accounts must be created by a streamer. Use the sign-in page with the Staff portal instead.",
+        {
+          redirectTo: "/login?role=staff",
+        },
+      );
+    }
+
+    await upsertUserFromClerk({ clerkUserId, role: normalizedRole });
+    user = await User.findOne({ clerk_user_id: clerkUserId });
   }
 
   if (!user) {

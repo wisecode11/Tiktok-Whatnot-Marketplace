@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Shield, Radio, Users, Loader2, UserCog } from "lucide-react"
 import { BrandLogo } from "../../../components/brand-logo"
 import { buildPath, getDashboardPath, normalizeRole, type AppRole } from "@/lib/auth"
+import { signOutAndClearAuth } from "@/lib/auth-session"
 import { cn } from "@/lib/utils"
 
 const clerkAppearance = {
@@ -223,7 +224,7 @@ function LoginContent() {
 
               <button
                 type="button"
-                onClick={() => void signOut({ redirectUrl: switchAccountRedirectUrl })}
+                onClick={() => void signOutAndClearAuth(signOut, { redirectUrl: switchAccountRedirectUrl })}
                 className="inline-flex h-11 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
               >
                 Sign out and use another account
@@ -238,8 +239,11 @@ function LoginContent() {
               signUpUrl={signUpUrl}
               signInFallbackRedirectUrl={completionUrl}
               signInForceRedirectUrl={completionUrl}
+              signUpFallbackRedirectUrl={completionUrl}
+              signUpForceRedirectUrl={completionUrl}
               fallbackRedirectUrl={completionUrl}
               forceRedirectUrl={completionUrl}
+              unsafeMetadata={{ role: selectedRole }}
               appearance={selectedRole === "staff" ? staffOnlyClerkAppearance : clerkAppearance}
             />
           </div>

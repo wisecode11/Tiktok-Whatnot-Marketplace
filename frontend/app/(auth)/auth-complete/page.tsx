@@ -8,16 +8,16 @@ import { AlertCircle, Loader2 } from "lucide-react"
 
 import {
   buildPath,
+  completePortalAuthentication,
   getAccountStatusErrorCopy,
   getClerkErrorMessage,
   getDashboardPath,
-  loginWithRole,
   normalizeRole,
-  syncCurrentUser,
   waitForSessionToken,
   getAuthErrorRedirectTo,
   type AppRole,
 } from "@/lib/auth"
+import { signOutAndClearAuth } from "@/lib/auth-session"
 
 type Flow = "login" | "signup"
 
@@ -64,16 +64,8 @@ function AuthCompleteContent() {
         throw new Error("No account role was selected. Please choose a role and try again.")
       }
 
-      if (flow === "signup" && effectiveRole === "staff") {
-        throw new Error(
-          "Staff accounts cannot be created here. Ask your streamer for an invite, then sign in with the Staff portal.",
-        )
-      }
-
       const token = await waitForSessionToken(getToken)
-      const result = flow === "signup"
-        ? await syncCurrentUser(token, effectiveRole)
-        : await loginWithRole(token, effectiveRole)
+      const result = await completePortalAuthentication(token, flow, effectiveRole)
 
       router.replace(result.redirectTo)
     }
@@ -151,7 +143,7 @@ function AuthCompleteContent() {
 
         <button
           type="button"
-          onClick={() => signOut({ redirectUrl: signOutRedirectUrl })}
+          onClick={() => void signOutAndClearAuth(signOut, { redirectUrl: signOutRedirectUrl })}
           className="rounded-lg border border-border bg-background px-4 py-3 font-medium text-foreground transition-colors hover:bg-muted"
         >
           Sign out and try another account

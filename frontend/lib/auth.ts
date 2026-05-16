@@ -1309,6 +1309,30 @@ export async function loginWithRole(token: string, role: AppRole) {
   })
 }
 
+/**
+ * Completes portal auth after Clerk sign-in/sign-up.
+ * Login auto-provisions Admin, Moderator, and Streamer via the backend login endpoint.
+ * Signup uses sync-user for the same provisioning logic with signup redirects.
+ * Staff never auto-provisions on login.
+ */
+export async function completePortalAuthentication(
+  token: string,
+  flow: "login" | "signup",
+  role: AppRole,
+) {
+  if (role === "staff" && flow === "signup") {
+    throw new Error(
+      "Staff accounts cannot be created here. Ask your streamer for an invite, then sign in with the Staff portal.",
+    )
+  }
+
+  if (flow === "signup") {
+    return syncCurrentUser(token, role)
+  }
+
+  return loginWithRole(token, role)
+}
+
 export async function getCurrentUserProfile(token: string) {
   return request<AuthResponse>("/api/auth/me", {
     token,

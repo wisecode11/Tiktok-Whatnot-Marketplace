@@ -1646,20 +1646,26 @@ async function executeWhatnotShowTabFromPlatform(payload) {
     sellerId: readinessSellerId,
     upcomingShowsCount: payload?.upcomingShowsCount ?? 0,
   });
+  const dashboardData = dashboardResponse?.success && dashboardResponse?.data
+    ? dashboardResponse.data
+    : null;
   if (!dashboardResponse?.success) {
-    return dashboardResponse;
+    console.warn(
+      "[Whatnot Show Tab] GetSellerHomeDashboard failed; continuing with MyLives:",
+      dashboardResponse?.error || "unknown error",
+    );
   }
 
   const dashboardSellerId =
-    dashboardResponse?.data &&
-    dashboardResponse.data.data &&
-    dashboardResponse.data.data.upcomingShows &&
-    Array.isArray(dashboardResponse.data.data.upcomingShows.edges) &&
-    dashboardResponse.data.data.upcomingShows.edges[0] &&
-    dashboardResponse.data.data.upcomingShows.edges[0].node &&
-    dashboardResponse.data.data.upcomingShows.edges[0].node.user &&
-    dashboardResponse.data.data.upcomingShows.edges[0].node.user.id
-      ? String(dashboardResponse.data.data.upcomingShows.edges[0].node.user.id || "").trim() || null
+    dashboardData &&
+    dashboardData.data &&
+    dashboardData.data.upcomingShows &&
+    Array.isArray(dashboardData.data.upcomingShows.edges) &&
+    dashboardData.data.upcomingShows.edges[0] &&
+    dashboardData.data.upcomingShows.edges[0].node &&
+    dashboardData.data.upcomingShows.edges[0].node.user &&
+    dashboardData.data.upcomingShows.edges[0].node.user.id
+      ? String(dashboardData.data.upcomingShows.edges[0].node.user.id || "").trim() || null
       : null;
 
   const sellerId = dashboardSellerId || readinessSellerId;
@@ -1671,25 +1677,29 @@ async function executeWhatnotShowTabFromPlatform(payload) {
   const myLivesResponse = await executeMyLivesFromPlatform(sellerId);
 
   const upcomingShowUserId =
-    dashboardResponse?.data &&
-    dashboardResponse.data.data &&
-    dashboardResponse.data.data.upcomingShows &&
-    Array.isArray(dashboardResponse.data.data.upcomingShows.edges) &&
-    dashboardResponse.data.data.upcomingShows.edges[0] &&
-    dashboardResponse.data.data.upcomingShows.edges[0].node &&
-    dashboardResponse.data.data.upcomingShows.edges[0].node.user
-      ? String(dashboardResponse.data.data.upcomingShows.edges[0].node.user.id || "").trim() || null
+    dashboardData &&
+    dashboardData.data &&
+    dashboardData.data.upcomingShows &&
+    Array.isArray(dashboardData.data.upcomingShows.edges) &&
+    dashboardData.data.upcomingShows.edges[0] &&
+    dashboardData.data.upcomingShows.edges[0].node &&
+    dashboardData.data.upcomingShows.edges[0].node.user
+      ? String(dashboardData.data.upcomingShows.edges[0].node.user.id || "").trim() || null
       : null;
+
+  if (!myLivesResponse?.success) {
+    return myLivesResponse || { success: false, error: "MyLives fetch failed during show-tab bootstrap." };
+  }
 
   return {
     success: true,
-    status: dashboardResponse.status || readinessResponse.status || 200,
+    status: myLivesResponse.status || dashboardResponse?.status || readinessResponse.status || 200,
     data: {
       sellerId,
       upcomingShowUserId,
       liveReadiness: readinessResponse.data || null,
-      sellerHomeDashboard: dashboardResponse.data || null,
-      myLives: myLivesResponse?.success ? (myLivesResponse.data || null) : null,
+      sellerHomeDashboard: dashboardData,
+      myLives: myLivesResponse.data || null,
     }
   };
 }
@@ -2493,60 +2503,8 @@ async function onObservedApi(payload) {
   resolveObservedGraphqlWaiters(payload);
   ingestShipmentIdsFromObservedApiPayload(payload);
 
-  const observedOperationName = extractObservedOperationName(payload);
-  if (
-    observedOperationName === "GetSellerHomeDashboard" &&
-    pendingShowTabRequestContext &&
-    pendingShowTabRequestContext.requestId &&
-    payload &&
-    typeof payload.responseBody === "object" &&
-    payload.responseBody
-  ) {
-    const dashboardPayload = payload.responseBody;
-    const upcomingShowUserId =
-      dashboardPayload &&
-      dashboardPayload.data &&
-      dashboardPayload.data.upcomingShows &&
-      Array.isArray(dashboardPayload.data.upcomingShows.edges) &&
-      dashboardPayload.data.upcomingShows.edges[0] &&
-      dashboardPayload.data.upcomingShows.edges[0].node &&
-      dashboardPayload.data.upcomingShows.edges[0].node.user &&
-      dashboardPayload.data.upcomingShows.edges[0].node.user.id
-        ? String(dashboardPayload.data.upcomingShows.edges[0].node.user.id).trim() || null
-        : null;
-
-    const observedSellerId = pendingShowTabRequestContext.sellerId || null;
-    let myLivesData = null;
-    if (observedSellerId) {
-      try {
-        const myLivesResponse = await executeMyLivesFromPlatform(observedSellerId);
-        if (myLivesResponse?.success) {
-          myLivesData = myLivesResponse.data || null;
-        }
-      } catch (_e) {
-        // MyLives failure does not block the observed-path response
-      }
-    }
-
-    sendSocketMessage("action_response", {
-      requestId: pendingShowTabRequestContext.requestId,
-      status: "success",
-      operationName: "GetSellerHomeDashboard",
-      response: {
-        success: true,
-        status: payload.status >= 200 && payload.status < 300 ? payload.status : 200,
-        data: {
-          sellerId: observedSellerId,
-          upcomingShowUserId,
-          liveReadiness: null,
-          sellerHomeDashboard: dashboardPayload,
-          myLives: myLivesData,
-        },
-        observed: true,
-      },
-      timestamp: Date.now(),
-    });
-  }
+  // Do not settle fetch_whatnot_show_tab via observed GetSellerHomeDashboard — it races the
+  // programmatic bootstrap in handlePlatformAction and can return myLives:null before sellerId is set.
 
   await persistState();
   sendSocketMessage("action_response", {
