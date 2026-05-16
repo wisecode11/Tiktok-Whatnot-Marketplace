@@ -34,7 +34,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
-        <ClerkProvider signInUrl="/login" signUpUrl="/signup">
+        <ClerkProvider
+          signInUrl="/login"
+          signUpUrl="/signup"
+          signInFallbackRedirectUrl="/auth-complete"
+          signUpFallbackRedirectUrl="/auth-complete"
+        >
           <ThemeProvider
             attribute="class"
             defaultTheme="system"

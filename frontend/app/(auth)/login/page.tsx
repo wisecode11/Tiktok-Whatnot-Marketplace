@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { SignIn, useAuth, useClerk, useUser } from "@clerk/nextjs"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Shield, Radio, Users, Loader2, UserCog } from "lucide-react"
 import { BrandLogo } from "../../../components/brand-logo"
 import { buildPath, getDashboardPath, normalizeRole, type AppRole } from "@/lib/auth"
@@ -50,6 +50,7 @@ const staffOnlyClerkAppearance = {
 type Role = AppRole | null
 
 function LoginContent() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { isLoaded, isSignedIn } = useAuth()
   const { signOut } = useClerk()
@@ -57,14 +58,29 @@ function LoginContent() {
   const initialRole = normalizeRole(searchParams.get("role"))
   const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
 
+  // Keep the browser URL as /login?role=... (no Clerk #/tasks/... hash routes).
+  useEffect(() => {
+    const targetPath = selectedRole ? buildPath("/login", { role: selectedRole }) : "/login"
+    router.replace(targetPath, { scroll: false })
+  }, [router, selectedRole])
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return
     }
 
-    // Clear stale Clerk hash routes (for example #/factor-two) when role changes.
-    if (window.location.hash) {
-      const nextUrl = `${window.location.pathname}${window.location.search}`
+    const hash = window.location.hash
+    if (!hash) {
+      return
+    }
+
+    const isClerkTaskHash =
+      hash.includes("choose-organization") ||
+      hash.includes("/tasks/") ||
+      hash.includes("sign_up_force_redirect_url")
+
+    if (isClerkTaskHash) {
+      const nextUrl = selectedRole ? buildPath("/login", { role: selectedRole }) : "/login"
       window.history.replaceState(null, "", nextUrl)
     }
   }, [selectedRole])
@@ -218,11 +234,8 @@ function LoginContent() {
           <div className="w-full">
             <SignIn
               key={`sign-in-${selectedRole}-${isSignedIn ? "signed" : "guest"}`}
-              routing="virtual"
+              routing="hash"
               signUpUrl={signUpUrl}
-              signUpFallbackRedirectUrl={completionUrl}
-              signUpForceRedirectUrl={completionUrl}
-              fallbackRedirectUrl={completionUrl}
               forceRedirectUrl={completionUrl}
               appearance={selectedRole === "staff" ? staffOnlyClerkAppearance : clerkAppearance}
             />
