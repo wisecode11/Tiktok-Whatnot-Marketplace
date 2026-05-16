@@ -3,6 +3,8 @@ const {
   User,
   ModeratorProfile,
   ModeratorBooking,
+  WorkspaceSubscription,
+  UserReport,
 } = require("../models");
 
 function sendError(res, error) {
@@ -311,4 +313,212 @@ module.exports = {
   getUserProfileById,
   updateUserStatus,
   getReviewStats,
+  getDashboardStats,
+  getRiskAnalytics,
+  createUserReport,
+  updateUserReport,
 };
+
+/**
+ * Get admin dashboard summary stats
+ */
+async function getDashboardStats(req, res) {
+  try {
+    const [
+      totalUsers,
+      totalModerators,
+      totalSellers,
+      totalStaff,
+      blockedAccounts,
+      pendingAccounts,
+      totalReports,
+      openReports,
+      totalBookings,
+      activeSubscriptions,
+      recentSignups,
+      recentReports,
+    ] = await Promise.all([
+      User.countDocuments({ status: { $ne: "deleted" } }),
+      User.countDocuments({ user_type: "moderator", status: { $ne: "deleted" } }),
+      User.countDocuments({ user_type: "seller", status: { $ne: "deleted" } }),
+      User.countDocuments({ user_type: "staff", status: { $ne: "deleted" } }),
+      User.countDocuments({ status: "blocked" }),
+      User.countDocuments({ status: "pending" }),
+      UserReport.countDocuments(),
+      UserReport.countDocuments({ status: "open" }),
+      ModeratorBooking.countDocuments(),
+      WorkspaceSubscription.countDocuments({ status: "active" }),
+      User.find({ status: { $ne: "deleted" } })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .select("first_name last_name email user_type created_at")
+        .lean(),
+      UserReport.find()
+        .sort({ created_at: -1 })
+        .limit(5)
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      stats: {
+        totalUsers,
+        totalModerators,
+        totalSellers,
+        totalStaff,
+        blockedAccounts,
+        pendingAccounts,
+        totalReports,
+        openReports,
+        totalBookings,
+        activeSubscriptions,
+      },
+      recentSignups,
+      recentReports,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/**
+ * Get risk analytics data for the Analytics & Risk Control tab
+ */
+async function getRiskAnalytics(req, res) {
+  try {
+    const [
+      blockedAccounts,
+      openReports,
+      resolvedReports,
+      dismissedReports,
+      underReviewReports,
+      reportsByPriorityRaw,
+      reportsByTypeRaw,
+      recentReports,
+      recentlyBlocked,
+      totalReportedUserIds,
+    ] = await Promise.all([
+      User.countDocuments({ status: "blocked" }),
+      UserReport.countDocuments({ status: "open" }),
+      UserReport.countDocuments({ status: "resolved" }),
+      UserReport.countDocuments({ status: "dismissed" }),
+      UserReport.countDocuments({ status: "under_review" }),
+      UserReport.aggregate([{ $group: { _id: "$priority", count: { $sum: 1 } } }]),
+      UserReport.aggregate([{ $group: { _id: "$report_type", count: { $sum: 1 } } }]),
+      UserReport.find()
+        .sort({ created_at: -1 })
+        .limit(10)
+        .lean(),
+      User.find({ status: "blocked" })
+        .sort({ updated_at: -1 })
+        .limit(5)
+        .select("first_name last_name email user_type updated_at")
+        .lean(),
+      UserReport.distinct("reported_user_id"),
+    ]);
+
+    const totalReportedUsers = totalReportedUserIds.length;
+    const totalReports = openReports + resolvedReports + dismissedReports + underReviewReports;
+
+    const reportsByPriority = reportsByPriorityRaw.reduce((acc, item) => {
+      acc[item._id] = item.count;
+      return acc;
+    }, {});
+
+    const reportsByType = reportsByTypeRaw.reduce((acc, item) => {
+      acc[item._id] = item.count;
+      return acc;
+    }, {});
+
+    // Populate reported-user info on recent reports
+    const recentReportsWithUsers = await Promise.all(
+      recentReports.map(async (report) => {
+        const reportedUser = await User.findById(report.reported_user_id)
+          .select("first_name last_name email user_type status")
+          .lean();
+        return { ...report, reportedUser };
+      })
+    );
+
+    return res.status(200).json({
+      summary: {
+        totalReportedUsers,
+        blockedAccounts,
+        openReports,
+        underReviewReports,
+        resolvedReports,
+        dismissedReports,
+        totalReports,
+      },
+      reportsByPriority,
+      reportsByType,
+      recentReports: recentReportsWithUsers,
+      recentlyBlocked,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/**
+ * Create a user report
+ */
+async function createUserReport(req, res) {
+  try {
+    const { reported_user_id, report_type, reason, description, priority } = req.body;
+
+    if (!reported_user_id || !reason) {
+      return res.status(400).json({ error: "reported_user_id and reason are required" });
+    }
+
+    const user = await User.findById(reported_user_id).lean();
+    if (!user) {
+      return res.status(404).json({ error: "Reported user not found" });
+    }
+
+    const report = await UserReport.create({
+      reported_user_id,
+      reported_by_user_id: req.adminUserId || null,
+      report_type: report_type || "other",
+      reason,
+      description: description || "",
+      priority: priority || "medium",
+    });
+
+    return res.status(201).json({ message: "Report created", report });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+/**
+ * Update a user report status
+ */
+async function updateUserReport(req, res) {
+  try {
+    const { reportId } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ["open", "under_review", "resolved", "dismissed"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+
+    const update = {
+      status,
+      updated_at: new Date(),
+    };
+
+    if (status === "resolved" || status === "dismissed") {
+      update.resolved_at = new Date();
+    }
+
+    const report = await UserReport.findByIdAndUpdate(reportId, update, { new: true }).lean();
+    if (!report) {
+      return res.status(404).json({ error: "Report not found" });
+    }
+
+    return res.status(200).json({ message: "Report updated", report });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}

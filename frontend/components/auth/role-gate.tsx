@@ -80,7 +80,7 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
           if (error instanceof AuthApiError && error.status === 401) {
             router.replace(unauthenticatedPath)
           } else {
-            router.replace(userId ? "/login" : unauthenticatedPath)
+            router.replace(unauthenticatedPath)
           }
         }
       } finally {

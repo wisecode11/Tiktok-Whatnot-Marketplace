@@ -236,6 +236,9 @@ function LoginContent() {
               key={`sign-in-${selectedRole}-${isSignedIn ? "signed" : "guest"}`}
               routing="hash"
               signUpUrl={signUpUrl}
+              signInFallbackRedirectUrl={completionUrl}
+              signInForceRedirectUrl={completionUrl}
+              fallbackRedirectUrl={completionUrl}
               forceRedirectUrl={completionUrl}
               appearance={selectedRole === "staff" ? staffOnlyClerkAppearance : clerkAppearance}
             />

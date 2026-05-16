@@ -3,14 +3,18 @@
 import { useAuth } from "@clerk/nextjs"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  Download,
+  ImageIcon,
   ImagePlus,
   Link2,
   Loader2,
   Plus,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   Pencil,
   Trash2,
+  Sparkles,
 } from "lucide-react"
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
@@ -64,6 +68,7 @@ import {
   type TiktokProductEditFormState,
 } from "@/lib/tiktok-product-edit-payload"
 import { cn } from "@/lib/utils"
+import { aiApi } from "@/lib/ai"
 
 type InventoryStatus = "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT"
 type InventoryPlatformTab = "whatnot" | "tiktok"
@@ -310,6 +315,11 @@ export default function SellerInventoryManagementPage() {
   const [isMediaUploaded, setIsMediaUploaded] = useState(false)
   const [uploadedImageId, setUploadedImageId] = useState("")
   const [isPublishingInventory, setIsPublishingInventory] = useState(false)
+  const [isGeneratingListingAi, setIsGeneratingListingAi] = useState(false)
+  const [aiThumbnailModalOpen, setAiThumbnailModalOpen] = useState(false)
+  const [aiThumbnailLoading, setAiThumbnailLoading] = useState(false)
+  const [aiThumbnailImageUrl, setAiThumbnailImageUrl] = useState("")
+  const [aiThumbnailError, setAiThumbnailError] = useState("")
   const [createForm, setCreateForm] = useState<CreateInventoryForm>({
     subcategoryId: "",
     title: "",
@@ -953,7 +963,118 @@ export default function SellerInventoryManagementPage() {
     setIsMediaUploaded(false)
     setUploadedImageId("")
     setIsPublishingInventory(false)
+    setIsGeneratingListingAi(false)
+    setAiThumbnailModalOpen(false)
+    setAiThumbnailLoading(false)
+    setAiThumbnailImageUrl("")
+    setAiThumbnailError("")
     setCreateFormError("")
+  }
+
+  async function handleGenerateAiThumbnail() {
+    const title = createForm.title.trim()
+    if (!title) {
+      setCreateFormError("Enter a product title before generating an AI thumbnail.")
+      return
+    }
+
+    setAiThumbnailModalOpen(true)
+    setAiThumbnailLoading(true)
+    setAiThumbnailError("")
+    setAiThumbnailImageUrl("")
+
+    try {
+      const token = await waitForSessionToken(getToken)
+      const result = await aiApi.generateInventoryThumbnail(
+        token,
+        title,
+        createForm.description,
+        categorySearchValue.trim() || undefined,
+      )
+      setAiThumbnailImageUrl(result.imageUrl)
+    } catch (error) {
+      setAiThumbnailError(getClerkErrorMessage(error))
+    } finally {
+      setAiThumbnailLoading(false)
+    }
+  }
+
+  async function handleDownloadAiThumbnail() {
+    if (!aiThumbnailImageUrl) {
+      return
+    }
+
+    const safeName =
+      createForm.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50) || "ai-thumbnail"
+
+    if (aiThumbnailImageUrl.startsWith("data:")) {
+      const link = document.createElement("a")
+      link.href = aiThumbnailImageUrl
+      link.download = `${safeName}-225x225.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      return
+    }
+
+    try {
+      const response = await fetch(aiThumbnailImageUrl)
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = blobUrl
+      link.download = `${safeName}-225x225.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      const link = document.createElement("a")
+      link.href = aiThumbnailImageUrl
+      link.download = `${safeName}-225x225.png`
+      link.target = "_blank"
+      link.rel = "noopener noreferrer"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    }
+  }
+
+  function openAiThumbnailModal() {
+    void handleGenerateAiThumbnail()
+  }
+
+  async function handleAiInventoryListing() {
+    const categoryLabel = categorySearchValue.trim()
+    if (!createForm.subcategoryId || !categoryLabel) {
+      setCreateFormError("Select a category before using AI auto fill.")
+      return
+    }
+
+    setIsGeneratingListingAi(true)
+    setCreateFormError("")
+    try {
+      const token = await waitForSessionToken(getToken)
+      const userTitle = createForm.title.trim()
+      const listing = await aiApi.generateInventoryListing(
+        token,
+        categoryLabel,
+        userTitle || undefined,
+      )
+      setCreateForm((current) => ({
+        ...current,
+        title: listing.title,
+        description: listing.description,
+      }))
+    } catch (error) {
+      setCreateFormError(getClerkErrorMessage(error))
+    } finally {
+      setIsGeneratingListingAi(false)
+    }
   }
 
   function openCreateDialog() {
@@ -2488,7 +2609,7 @@ export default function SellerInventoryManagementPage() {
       ) : null}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create Inventory</DialogTitle>
             <DialogDescription>All fields below are required before saving inventory.</DialogDescription>
@@ -2588,7 +2709,12 @@ export default function SellerInventoryManagementPage() {
                   value={categorySearchValue}
                   onChange={(event) => {
                     setCategorySearchValue(event.target.value)
-                    setCreateForm((current) => ({ ...current, subcategoryId: "" }))
+                    setCreateForm((current) => ({
+                      ...current,
+                      subcategoryId: "",
+                      title: "",
+                      description: "",
+                    }))
                     setCreateFormError("")
                     setIsCategoryDropdownOpen(true)
                   }}
@@ -2610,7 +2736,12 @@ export default function SellerInventoryManagementPage() {
                           className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
                           onMouseDown={(event) => {
                             event.preventDefault()
-                            setCreateForm((current) => ({ ...current, subcategoryId: option.id }))
+                            setCreateForm((current) => ({
+                              ...current,
+                              subcategoryId: option.id,
+                              title: "",
+                              description: "",
+                            }))
                             setCategorySearchValue(option.label)
                             setCreateFormError("")
                             setIsCategoryDropdownOpen(false)
@@ -2625,6 +2756,51 @@ export default function SellerInventoryManagementPage() {
                   </div>
                 ) : null}
               </div>
+              {createForm.subcategoryId ? (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="gap-2"
+                    disabled={isGeneratingListingAi}
+                    onClick={() => void handleAiInventoryListing()}
+                  >
+                    {isGeneratingListingAi ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    AI Auto Fill
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    disabled={isGeneratingListingAi}
+                    onClick={() => void handleAiInventoryListing()}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Regenerate
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    disabled={!createForm.title.trim() || aiThumbnailLoading || isGeneratingListingAi}
+                    onClick={openAiThumbnailModal}
+                  >
+                    {aiThumbnailLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ImageIcon className="h-4 w-4" />
+                    )}
+                    AI Thumbnail
+                  </Button>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid gap-2">
@@ -2643,7 +2819,12 @@ export default function SellerInventoryManagementPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="inventory-description">Description *</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="inventory-description">Description *</Label>
+                <span className="text-xs text-muted-foreground">
+                  {createForm.description.length}/120 (aim 80–120)
+                </span>
+              </div>
               <Textarea
                 id="inventory-description"
                 value={createForm.description}
@@ -2652,7 +2833,8 @@ export default function SellerInventoryManagementPage() {
                   setCreateFormError("")
                 }}
                 placeholder="Enter description"
-                className="h-14 text-base"
+                className="min-h-20 text-base"
+                maxLength={120}
                 required
               />
             </div>
@@ -2751,6 +2933,85 @@ export default function SellerInventoryManagementPage() {
                 "Publish Inventory"
               )}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={aiThumbnailModalOpen}
+        onOpenChange={(open) => {
+          setAiThumbnailModalOpen(open)
+          if (!open) {
+            setAiThumbnailError("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>AI Thumbnail</DialogTitle>
+            {/* <DialogDescription>
+              Suggested thumbnail for your listing (225 × 225). Download or regenerate a new version.
+            </DialogDescription> */}
+          </DialogHeader>
+
+          <div className="flex flex-col items-center gap-4 py-2">
+            <div className="flex h-[225px] w-[225px] items-center justify-center overflow-hidden rounded-lg border bg-muted/30">
+              {aiThumbnailLoading ? (
+                <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                  <span>Generating thumbnail...</span>
+                </div>
+              ) : aiThumbnailImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={aiThumbnailImageUrl}
+                  alt={`AI thumbnail for ${createForm.title}`}
+                  width={225}
+                  height={225}
+                  className="h-[225px] w-[225px] object-cover"
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-2 px-4 text-center text-sm text-muted-foreground">
+                  <ImageIcon className="h-8 w-8 opacity-50" />
+                  <span>{aiThumbnailError || "No thumbnail yet."}</span>
+                </div>
+              )}
+            </div>
+
+            {aiThumbnailError && !aiThumbnailLoading ? (
+              <p className="text-center text-sm text-destructive">{aiThumbnailError}</p>
+            ) : null}
+          </div>
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              disabled={aiThumbnailLoading}
+              onClick={() => void handleGenerateAiThumbnail()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Regenerate
+            </Button>
+            <div className="flex w-full gap-2 sm:w-auto">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAiThumbnailModalOpen(false)}
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                className="gap-2"
+                disabled={!aiThumbnailImageUrl || aiThumbnailLoading}
+                onClick={() => void handleDownloadAiThumbnail()}
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -8,10 +8,13 @@ async function postAi<T>(
   path: string,
   token: string,
   body: Record<string, unknown>,
-  timeoutMs = 90000,
+  timeoutMs: number | null = 200000,
 ): Promise<T> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutId =
+    timeoutMs != null && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -22,7 +25,7 @@ async function postAi<T>(
       },
       body: JSON.stringify(body),
       cache: "no-store",
-      signal: controller.signal,
+      signal: timeoutId ? controller.signal : undefined,
     })
 
     const payload = (await response.json().catch(() => ({}))) as AiApiErrorPayload & T
@@ -39,7 +42,9 @@ async function postAi<T>(
 
     throw error
   } finally {
-    clearTimeout(timeoutId)
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
   }
 }
 
@@ -84,13 +89,47 @@ export const aiApi = {
     description?: string,
     productCategory?: string,
   ): Promise<string | null> {
-    const data = await postAi<{ imageUrl: string | null }>("/ai/generate-thumbnail-image", token, {
-      suggestion,
-      title,
-      description,
-      productCategory,
-    })
+    const data = await postAi<{ imageUrl: string | null }>(
+      "/ai/generate-thumbnail-image",
+      token,
+      {
+        suggestion,
+        title,
+        description,
+        productCategory,
+      },
+      null,
+    )
     return data.imageUrl ?? null
+  },
+
+  async generateInventoryThumbnail(
+    token: string,
+    title: string,
+    description?: string,
+    productCategory?: string,
+  ): Promise<{ imageUrl: string; suggestion?: Record<string, unknown> }> {
+    const data = await postAi<{ imageUrl: string; suggestion?: Record<string, unknown> }>(
+      "/ai/generate-inventory-thumbnail",
+      token,
+      { title, description, productCategory },
+      null,
+    )
+    return { imageUrl: data.imageUrl, suggestion: data.suggestion }
+  },
+
+  async generateInventoryListing(
+    token: string,
+    category: string,
+    userTitle?: string,
+  ): Promise<{ title: string; description: string }> {
+    const data = await postAi<{ title: string; description: string }>(
+      "/ai/generate-inventory-listing",
+      token,
+      { category, userTitle: userTitle?.trim() || undefined },
+      45000,
+    )
+    return { title: data.title, description: data.description }
   },
 
   async generateScript(

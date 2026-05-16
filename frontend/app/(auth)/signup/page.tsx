@@ -8,7 +8,7 @@ import { Loader2, Shield, Users, Video } from "lucide-react"
 
 import { BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
-import { buildPath, getSignupRedirectPath, normalizeRole, type AppRole } from "@/lib/auth"
+import { buildPath, getAuthCompletePath, normalizeRole, type AppRole } from "@/lib/auth"
 import { BrandLogo } from "../../../components/brand-logo"
 
 const clerkAppearance = {
@@ -94,7 +94,7 @@ function SignupContent() {
   }, [user?.publicMetadata, user?.unsafeMetadata])
 
   const currentEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses[0]?.emailAddress || "this account"
-  const continueUrl = currentRole ? getSignupRedirectPath(currentRole) : signInUrl
+  const continueUrl = getAuthCompletePath("signup", currentRole || selectedRole)
   const signOutRedirectUrl = buildPath("/signup", { role: selectedRole || currentRole })
   const roleMismatch = Boolean(selectedRole && currentRole && selectedRole !== currentRole)
 

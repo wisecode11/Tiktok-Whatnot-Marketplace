@@ -1072,7 +1072,24 @@ function getAuthErrorPayload(error: AuthApiError) {
     return null
   }
 
-  return error.details as Record<string, unknown>
+  const root = error.details as Record<string, unknown>
+  const nested =
+    root.details && typeof root.details === "object"
+      ? (root.details as Record<string, unknown>)
+      : null
+
+  return nested ? { ...root, ...nested } : root
+}
+
+export function getAuthErrorRedirectTo(error: unknown): string | null {
+  if (!(error instanceof AuthApiError)) {
+    return null
+  }
+
+  const payload = getAuthErrorPayload(error)
+  const redirectTo = payload?.redirectTo
+
+  return typeof redirectTo === "string" ? redirectTo : null
 }
 
 export function getAccountStatusErrorCopy(error: unknown): AccountStatusErrorCopy | null {
@@ -1175,16 +1192,23 @@ export function getDashboardPath(role: AppRole) {
   return "/seller"
 }
 
+/** Post-sign-up destination (mirrors backend getSignupRedirect). Prefer routing via /auth-complete. */
 export function getSignupRedirectPath(role: AppRole) {
-  if (role === "admin") {
+  if (role === "staff") {
     return getDashboardPath(role)
   }
 
-  if (role === "staff") {
-    return "/staff/launch-pad"
-  }
-
   return `/launch-pad?role=${role}`
+}
+
+export function getAuthCompletePath(
+  flow: "login" | "signup",
+  role: AppRole | null | undefined,
+) {
+  return buildPath("/auth-complete", {
+    flow,
+    role: role || undefined,
+  })
 }
 
 export function getClerkErrorMessage(error: unknown) {
@@ -2411,4 +2435,128 @@ export async function getPublicPlatformSettings(token: string) {
   return request<PublicPlatformSettingsResponse>("/api/booking-payments/platform-settings", {
     token,
   })
+}
+
+// ─── Admin Dashboard Stats ────────────────────────────────────────────────────
+
+export interface AdminDashboardStats {
+  totalUsers: number
+  totalModerators: number
+  totalSellers: number
+  totalStaff: number
+  blockedAccounts: number
+  pendingAccounts: number
+  totalReports: number
+  openReports: number
+  totalBookings: number
+  activeSubscriptions: number
+}
+
+export interface AdminRecentSignup {
+  _id: string
+  first_name: string
+  last_name: string
+  email: string
+  user_type: string
+  created_at: string
+}
+
+export interface AdminRecentReport {
+  _id: string
+  reported_user_id: string
+  report_type: string
+  reason: string
+  priority: string
+  status: string
+  created_at: string
+}
+
+export interface AdminDashboardStatsResponse {
+  stats: AdminDashboardStats
+  recentSignups: AdminRecentSignup[]
+  recentReports: AdminRecentReport[]
+}
+
+export async function getAdminDashboardStats(token: string) {
+  return request<AdminDashboardStatsResponse>("/api/admin/dashboard/stats", { token })
+}
+
+// ─── Admin Risk Analytics ─────────────────────────────────────────────────────
+
+export interface AdminRiskReportUser {
+  _id: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  user_type?: string
+  status?: string
+}
+
+export interface AdminRiskReport {
+  _id: string
+  reported_user_id: string
+  report_type: string
+  reason: string
+  description: string
+  priority: string
+  status: string
+  created_at: string
+  reportedUser: AdminRiskReportUser | null
+}
+
+export interface AdminBlockedUser {
+  _id: string
+  first_name: string
+  last_name: string
+  email: string
+  user_type: string
+  updated_at: string
+}
+
+export interface AdminRiskAnalyticsResponse {
+  summary: {
+    totalReportedUsers: number
+    blockedAccounts: number
+    openReports: number
+    underReviewReports: number
+    resolvedReports: number
+    dismissedReports: number
+    totalReports: number
+  }
+  reportsByPriority: Record<string, number>
+  reportsByType: Record<string, number>
+  recentReports: AdminRiskReport[]
+  recentlyBlocked: AdminBlockedUser[]
+}
+
+export async function getAdminRiskAnalytics(token: string) {
+  return request<AdminRiskAnalyticsResponse>("/api/admin/analytics/risk", { token })
+}
+
+export async function createAdminUserReport(
+  token: string,
+  payload: {
+    reported_user_id: string
+    report_type?: string
+    reason: string
+    description?: string
+    priority?: string
+  },
+) {
+  return request<{ message: string; report: AdminRiskReport }>("/api/admin/reports", {
+    token,
+    method: "POST",
+    body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export async function updateAdminReportStatus(
+  token: string,
+  reportId: string,
+  status: "open" | "under_review" | "resolved" | "dismissed",
+) {
+  return request<{ message: string; report: AdminRiskReport }>(
+    `/api/admin/reports/${encodeURIComponent(reportId)}/status`,
+    { token, method: "PATCH", body: { status } },
+  )
 }

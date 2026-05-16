@@ -266,12 +266,12 @@ export default function UserProfileManagementPage() {
                 Manage and review all user accounts
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            {/* <div className="flex gap-2">
               <Button variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export
               </Button>
-            </div>
+            </div> */}
           </div>
         </CardHeader>
         <CardContent>

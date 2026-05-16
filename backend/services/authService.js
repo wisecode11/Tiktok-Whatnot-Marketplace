@@ -747,6 +747,42 @@ async function updateClerkRole(clerkUser, role) {
   });
 }
 
+function assertSignupRoleAllowed({ normalizedRole, clerkUser }) {
+  if (normalizedRole !== "staff") {
+    return;
+  }
+
+  const parentSellerUserId =
+    clerkUser.privateMetadata && typeof clerkUser.privateMetadata.parentSellerUserId === "string"
+      ? clerkUser.privateMetadata.parentSellerUserId.trim()
+      : "";
+
+  if (!parentSellerUserId) {
+    throw createHttpError(
+      403,
+      "Staff accounts must be created by a streamer. Use the sign-in page with the Staff portal instead.",
+      {
+        redirectTo: "/login?role=staff",
+      },
+    );
+  }
+}
+
+function assertRequestedRoleMatchesExistingUser({ existingUser, normalizedRole }) {
+  if (!existingUser || !existingUser.user_type) {
+    return;
+  }
+
+  const actualRole = FRONTEND_ROLE_MAP[existingUser.user_type];
+
+  if (actualRole !== normalizedRole) {
+    throw createHttpError(403, `This account belongs to the ${actualRole} portal.`, {
+      actualRole,
+      redirectTo: getDashboardPath(actualRole),
+    });
+  }
+}
+
 async function upsertUserFromClerk({ clerkUserId, role }) {
   const normalizedRole = normalizeRole(role);
 
@@ -755,6 +791,7 @@ async function upsertUserFromClerk({ clerkUserId, role }) {
   }
 
   const clerkUser = await getClerkUser(clerkUserId);
+  assertSignupRoleAllowed({ normalizedRole, clerkUser });
   const email = pickPrimaryEmail(clerkUser);
 
   if (!email) {
@@ -768,6 +805,8 @@ async function upsertUserFromClerk({ clerkUserId, role }) {
   const existingUser = await User.findOne({
     $or: [{ clerk_user_id: clerkUser.id }, { email: email.toLowerCase() }],
   });
+
+  assertRequestedRoleMatchesExistingUser({ existingUser, normalizedRole });
 
   const now = new Date();
   const user = existingUser || new User({ created_at: now });
@@ -823,7 +862,9 @@ async function loginWithRole({ clerkUserId, role }) {
   }
 
   if (user.status && user.status !== "active") {
-    throw createHttpError(403, "This account is not active.");
+    throw createHttpError(403, "This account is not active.", {
+      accountStatus: user.status === "pending" ? "inactive" : user.status,
+    });
   }
 
   const actualRole = FRONTEND_ROLE_MAP[user.user_type];
