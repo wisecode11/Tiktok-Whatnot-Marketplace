@@ -2667,6 +2667,18 @@ async function syncWhatnotOrdersFromExtension({ clerkUserId }) {
     );
   }
 
+  try {
+    const liveInfo = await fetchWhatnotCurrentLiveIdFromExtension({
+      clerkUserId: normalizedClerkUserId,
+    });
+    await tryResolveShipmentIdsFromExtensionProactive({
+      clerkUserId: normalizedClerkUserId,
+      liveId: liveInfo && liveInfo.liveId ? liveInfo.liveId : null,
+    });
+  } catch (_e) {
+    /* Shipment prefetch is best-effort and must not fail order sync. */
+  }
+
   return {
     triggered: true,
     reason: "sync_started",
@@ -3306,13 +3318,7 @@ async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
     .map((edge) => (edge && typeof edge === "object" ? edge.node : null))
     .filter((node) => node && typeof node === "object" && typeof node.id === "string" && node.id.trim());
 
-  nodes.sort((a, b) => {
-    const ta = typeof a.startTime === "number" ? a.startTime : Number(a.startTime) || 0;
-    const tb = typeof b.startTime === "number" ? b.startTime : Number(b.startTime) || 0;
-    return tb - ta;
-  });
-
-  const top = nodes[0] || null;
+  const top = pickBestWhatnotLivestreamNode(nodes);
 
   return {
     liveId: top && typeof top.id === "string" ? top.id.trim() : null,
@@ -3322,8 +3328,111 @@ async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
       id: String(n.id || "").trim(),
       title: typeof n.title === "string" ? n.title : null,
       startTime: n.startTime != null ? Number(n.startTime) : null,
+      pendingShippingShipmentsCount:
+        n.pendingShippingShipmentsCount != null ? Number(n.pendingShippingShipmentsCount) : 0,
     })),
   };
+}
+
+function pickBestWhatnotLivestreamNode(nodes) {
+  if (!Array.isArray(nodes) || !nodes.length) {
+    return null;
+  }
+
+  const withPending = nodes.filter((node) => {
+    const count = node && node.pendingShippingShipmentsCount != null
+      ? Number(node.pendingShippingShipmentsCount)
+      : 0;
+    return Number.isFinite(count) && count > 0;
+  });
+
+  const pool = withPending.length ? withPending : nodes;
+  const sorted = [...pool].sort((a, b) => {
+    const ta = typeof a.startTime === "number" ? a.startTime : Number(a.startTime) || 0;
+    const tb = typeof b.startTime === "number" ? b.startTime : Number(b.startTime) || 0;
+    return tb - ta;
+  });
+
+  return sorted[0] || null;
+}
+
+async function tryResolveShipmentIdsFromExtensionProactive({ clerkUserId, liveId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  const normalizedLiveId = typeof liveId === "string" ? liveId.trim() : "";
+  if (!normalizedClerkUserId) {
+    return [];
+  }
+
+  try {
+    const actionResult = await requestWhatnotAction({
+      action: "fetch_whatnot_shipment_ids_for_live",
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId || null,
+    });
+    const rawIds =
+      actionResult &&
+      actionResult.success &&
+      actionResult.data &&
+      Array.isArray(actionResult.data.shipmentIds)
+        ? actionResult.data.shipmentIds
+        : [];
+    return dedupeShipmentIdsPreserveOrder(
+      rawIds.map((id) => normalizeShipmentGraphqlId(String(id || "").trim())).filter(Boolean),
+    );
+  } catch (_e) {
+    return [];
+  }
+}
+
+async function tryResolveShipmentIdsAcrossPendingLivestreams({ clerkUserId, primaryLiveId = null }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    return [];
+  }
+
+  try {
+    const livestreamsResult = await fetchWhatnotCurrentLiveIdFromExtension({
+      clerkUserId: normalizedClerkUserId,
+    });
+    const candidates = Array.isArray(livestreamsResult?.livestreams)
+      ? livestreamsResult.livestreams
+      : [];
+    const pendingFirst = candidates.filter((row) => Number(row?.pendingShippingShipmentsCount) > 0);
+    const pool = pendingFirst.length ? pendingFirst : candidates;
+    const orderedLiveIds = [];
+    const seen = new Set();
+    const pushId = (value) => {
+      const id = typeof value === "string" ? value.trim() : "";
+      if (!id || seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      orderedLiveIds.push(id);
+    };
+
+    pushId(primaryLiveId);
+    for (const row of pool) {
+      pushId(row?.id);
+    }
+
+    const merged = [];
+    for (const liveId of orderedLiveIds.slice(0, 5)) {
+      const chunk = await tryResolveShipmentIdsFromExtensionProactive({
+        clerkUserId: normalizedClerkUserId,
+        liveId,
+      });
+      if (chunk.length) {
+        merged.push(...chunk);
+      }
+      if (merged.length >= 30) {
+        break;
+      }
+    }
+
+    return dedupeShipmentIdsPreserveOrder(merged).slice(0, 30);
+  } catch (_e) {
+    return [];
+  }
 }
 
 async function upsertWhatnotLiveStatsSnapshot({
@@ -4448,6 +4557,13 @@ async function fetchWhatnotShipmentsTable({
     : [];
 
   if (!ids.length) {
+    ids = await tryResolveShipmentIdsFromExtensionProactive({
+      clerkUserId: normalizedClerkUserId,
+      liveId,
+    });
+  }
+
+  if (!ids.length) {
     try {
       const peekAction = await requestWhatnotAction({
         action: "peek_observed_shipment_ids",
@@ -4468,6 +4584,9 @@ async function fetchWhatnotShipmentsTable({
   if (!ids.length) {
     const orderResult = await getWhatnotOrders({ clerkUserId: ownerClerkUserId, limit: 100 });
     ids = collectShipmentIdsFromWhatnotOrders(orderResult.orders, liveId);
+    if (!ids.length) {
+      ids = collectShipmentIdsFromWhatnotOrders(orderResult.orders, null);
+    }
   }
 
   if (!ids.length && Array.isArray(manifestUrls) && manifestUrls.length) {
@@ -4481,6 +4600,13 @@ async function fetchWhatnotShipmentsTable({
     });
   }
 
+  if (!ids.length) {
+    ids = await tryResolveShipmentIdsAcrossPendingLivestreams({
+      clerkUserId: normalizedClerkUserId,
+      primaryLiveId: liveId,
+    });
+  }
+
   ids = dedupeShipmentIdsPreserveOrder(ids).slice(0, 30);
 
   if (!ids.length) {
@@ -4488,7 +4614,7 @@ async function fetchWhatnotShipmentsTable({
       rows: [],
       requestedIds: [],
       hint:
-        "No shipment IDs found. Open a shipment on Whatnot (Seller Hub → Shipments) once while this extension is connected so GetShipment traffic is captured, sync orders on the Orders tab, or ensure MyLiveStats includes manifest links.",
+        "No shipment IDs found yet. Keep the Whatnot extension connected, sync orders on the Orders tab, then refresh shipments. The hub will pull shipment IDs from synced orders and Whatnot shipment pages automatically.",
     };
   }
 

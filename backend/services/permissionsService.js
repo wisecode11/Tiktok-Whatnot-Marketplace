@@ -14,6 +14,7 @@ const DEFAULT_MODULES = [
   "update_stock",
   "add_edit_products",
   "view_orders",
+  "shipment_details",
   "packing",
   "labelling",
   "order_status_update",

@@ -94,6 +94,11 @@ export const DEFAULT_MODULES = [
     description: "View customer orders",
   },
   {
+    id: "shipment_details",
+    label: "Shipment Details",
+    description: "View Whatnot shipment labels, tracking, and packaging details",
+  },
+  {
     id: "packing",
     label: "Packing",
     description: "Handle order packing",

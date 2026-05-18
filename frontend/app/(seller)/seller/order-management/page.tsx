@@ -1253,7 +1253,7 @@ export default function SellerOrderManagementPage() {
             </CardHeader>
             <CardContent className="space-y-4 p-5">
               <p className="text-sm text-muted-foreground">
-                Shipments load after stats and use manifest links from MyLiveStats when available. Use refresh shipments to pull a new operational snapshot.
+                Shipments sync automatically from synced orders and Whatnot shipment data via the extension. Use refresh shipments to pull the latest snapshot.
               </p>
 
               {isShipmentsLoading && shipmentRows.length === 0 ? (

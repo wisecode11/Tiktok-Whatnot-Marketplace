@@ -524,6 +524,7 @@ function extractApolloSSRData(htmlString) {
   if (!html) {
     return {
       orders: [],
+      shipmentIds: [],
       debug: {
         htmlLength: 0,
         scriptMatches: 0,
@@ -606,6 +607,14 @@ function extractApolloSSRData(htmlString) {
 
   const orders = [];
   const seenOrderIds = new Set();
+  const shipmentIdSet = new Set();
+
+  function maybePushShipmentId(id) {
+    const normalized = normalizeShipmentIdCandidate(id);
+    if (normalized) {
+      shipmentIdSet.add(normalized);
+    }
+  }
 
   function maybePushOrder(node) {
     if (!node || typeof node !== "object") {
@@ -646,6 +655,13 @@ function extractApolloSSRData(htmlString) {
     }
 
     extractFromMeOrdersPath(value);
+
+    if (value.__typename === "ShipmentNode" && typeof value.id === "string") {
+      maybePushShipmentId(value.id);
+    }
+    if (typeof value.shipmentId === "string") {
+      maybePushShipmentId(value.shipmentId);
+    }
 
     const directEdges = value?.me?.orders?.edges;
     if (Array.isArray(directEdges)) {
@@ -755,6 +771,7 @@ function extractApolloSSRData(htmlString) {
 
   return {
     orders,
+    shipmentIds: [...shipmentIdSet],
     debug: {
       htmlLength: html.length,
       scriptMatches,
@@ -1145,6 +1162,13 @@ async function handlePlatformAction(payload) {
         shipmentIds: Array.isArray(state.recentObservedShipmentIds) ? [...state.recentObservedShipmentIds] : [],
       },
     };
+  } else if (payload?.action === "fetch_whatnot_shipment_ids_for_live") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeFetchWhatnotShipmentIdsForLive(payload);
   } else if (payload?.action === "generate_media_upload_urls") {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
@@ -2385,6 +2409,9 @@ function getOperationName(payload) {
   if (payload?.action === "peek_observed_shipment_ids") {
     return "PeekObservedShipmentIds";
   }
+  if (payload?.action === "fetch_whatnot_shipment_ids_for_live") {
+    return "FetchWhatnotShipmentIdsForLive";
+  }
   if (payload?.action === "fetch_my_live_stats") {
     return "MyLiveStats";
   }
@@ -2463,11 +2490,302 @@ function recordObservedShipmentGraphqlIds(ids) {
   state.recentObservedShipmentIds = out;
 }
 
+function normalizeShipmentIdCandidate(id) {
+  const s = typeof id === "string" ? id.trim() : id != null ? String(id).trim() : "";
+  if (!s) {
+    return "";
+  }
+  return s.replace(/Ob2R1/g, "Ob2Rl");
+}
+
+function collectShipmentIdsFromGraphqlValue(value, seen) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectShipmentIdsFromGraphqlValue(item, seen);
+    }
+    return;
+  }
+  if (value.__typename === "ShipmentNode" && typeof value.id === "string" && value.id.trim()) {
+    seen.add(normalizeShipmentIdCandidate(value.id));
+  }
+  if (typeof value.shipmentId === "string" && value.shipmentId.trim()) {
+    seen.add(normalizeShipmentIdCandidate(value.shipmentId));
+  }
+  if (value.shipment && typeof value.shipment === "object" && typeof value.shipment.id === "string" && value.shipment.id.trim()) {
+    seen.add(normalizeShipmentIdCandidate(value.shipment.id));
+  }
+  for (const nested of Object.values(value)) {
+    if (nested && typeof nested === "object") {
+      collectShipmentIdsFromGraphqlValue(nested, seen);
+    }
+  }
+}
+
+function extractShipmentIdsFromHtml(htmlString) {
+  const html = typeof htmlString === "string" ? htmlString : "";
+  const seen = new Set();
+  if (!html) {
+    return [];
+  }
+
+  const ssrExtract = extractApolloSSRData(html);
+  for (const order of Array.isArray(ssrExtract?.orders) ? ssrExtract.orders : []) {
+    collectShipmentIdsFromGraphqlValue(order, seen);
+  }
+  for (const id of Array.isArray(ssrExtract?.shipmentIds) ? ssrExtract.shipmentIds : []) {
+    if (id) {
+      seen.add(normalizeShipmentIdCandidate(id));
+    }
+  }
+
+  const marker = "\"__typename\":\"ShipmentNode\"";
+  if (html.includes(marker)) {
+    let cursor = 0;
+    while (cursor < html.length) {
+      const markerIndex = html.indexOf(marker, cursor);
+      if (markerIndex === -1) {
+        break;
+      }
+      let extracted = false;
+      for (let probe = markerIndex; probe >= Math.max(0, markerIndex - 4000); probe -= 1) {
+        if (html[probe] !== "{") {
+          continue;
+        }
+        const objectText = readBalancedJsonObjectFromHtml(html, probe);
+        if (!objectText || !objectText.includes(marker)) {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(objectText);
+          collectShipmentIdsFromGraphqlValue(parsed, seen);
+          extracted = true;
+          break;
+        } catch (_error) {
+          /* try next brace */
+        }
+      }
+      cursor = extracted ? markerIndex + marker.length : markerIndex + 1;
+    }
+  }
+
+  const rePath = /\/shipments\/(\d+)/gi;
+  let m = rePath.exec(html);
+  while (m) {
+    seen.add(m[1]);
+    m = rePath.exec(html);
+  }
+
+  return [...seen].filter(Boolean);
+}
+
+function readBalancedJsonObjectFromHtml(source, startIndex) {
+  if (startIndex < 0 || source[startIndex] !== "{") {
+    return null;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = startIndex; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function getShipmentListGraphqlTemplate(templates) {
+  if (!templates || typeof templates !== "object") {
+    return null;
+  }
+
+  const candidates = Object.entries(templates)
+    .filter(([operationName, template]) => {
+      if (!template || typeof template !== "object") {
+        return false;
+      }
+      const op = String(operationName || "").toLowerCase();
+      if (op === "getshipment" || op === "getshipmentslivestreams") {
+        return false;
+      }
+      const body = template.requestBody && typeof template.requestBody === "object"
+        ? template.requestBody
+        : {};
+      const query = typeof body.query === "string" ? body.query.toLowerCase() : "";
+      return op.includes("shipment") || query.includes("shipmentnode") || query.includes("shipment(");
+    })
+    .map(([, template]) => template);
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  candidates.sort((a, b) => scoreTemplate(b) - scoreTemplate(a));
+  return candidates[0];
+}
+
+async function fetchShipmentIdsFromCapturedGraphqlTemplate(tabId, liveId) {
+  const template = getShipmentListGraphqlTemplate(state.observedGraphqlTemplates || {});
+  if (!template) {
+    return [];
+  }
+
+  const requestBody = template.requestBody && typeof template.requestBody === "object"
+    ? structuredClone(template.requestBody)
+    : null;
+  if (!requestBody) {
+    return [];
+  }
+
+  if (!requestBody.variables || typeof requestBody.variables !== "object") {
+    requestBody.variables = {};
+  }
+  const normalizedLiveId = typeof liveId === "string" ? liveId.trim() : "";
+  if (normalizedLiveId) {
+    if (requestBody.variables.liveId == null && requestBody.variables.livestreamId == null) {
+      requestBody.variables.liveId = normalizedLiveId;
+    }
+    if (requestBody.variables.livestreamId == null && "liveId" in requestBody.variables) {
+      requestBody.variables.livestreamId = normalizedLiveId;
+    }
+  }
+
+  const templateHeaders = filterAllowedHeaders(template.requestHeaders || {});
+  const headers = {
+    ...templateHeaders,
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-wn-extension": "1",
+  };
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (csrfToken && csrfToken !== "-") {
+    headers["x-csrf-token"] = csrfToken;
+  }
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  const response = await executeApi(tabId, {
+    url: template.url || "https://www.whatnot.com/services/graphql/?ssr=0",
+    method: String(template.method || "POST").toUpperCase(),
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response?.success || !response?.data) {
+    return [];
+  }
+
+  const seen = new Set();
+  collectShipmentIdsFromGraphqlValue(response.data, seen);
+  return [...seen].filter(Boolean);
+}
+
+async function executeFetchWhatnotShipmentIdsForLive(payload) {
+  const liveId = typeof payload?.liveId === "string" ? payload.liveId.trim() : "";
+  let targetTabId = payload?.tabId || state.tabId;
+  if (!targetTabId || !state.connected || !state.auth) {
+    const connected = await ensureConnectedWhatnotSession(targetTabId);
+    if (!connected.success) {
+      return { success: false, error: connected.error || "Not connected to Whatnot." };
+    }
+    targetTabId = connected.tabId;
+  }
+
+  const seen = new Set();
+
+  try {
+    const ordersResponse = await executeApi(targetTabId, {
+      url: "https://www.whatnot.com/en-GB/dashboard/orders",
+      method: "GET",
+    });
+    if (ordersResponse?.success && typeof ordersResponse.data === "string") {
+      for (const id of extractShipmentIdsFromHtml(ordersResponse.data)) {
+        seen.add(id);
+      }
+    }
+  } catch (_e) {
+    /* orders page optional */
+  }
+
+  const shipmentPageUrls = [
+    "https://www.whatnot.com/en-GB/dashboard/shipments",
+    "https://www.whatnot.com/dashboard/shipments",
+  ];
+  if (liveId) {
+    shipmentPageUrls.push(
+      `https://www.whatnot.com/en-GB/dashboard/shipments?livestreamId=${encodeURIComponent(liveId)}`,
+      `https://www.whatnot.com/en-GB/dashboard/shipments?liveId=${encodeURIComponent(liveId)}`,
+    );
+  }
+
+  for (const url of shipmentPageUrls) {
+    try {
+      const response = await executeApi(targetTabId, { url, method: "GET" });
+      if (response?.success && typeof response.data === "string") {
+        for (const id of extractShipmentIdsFromHtml(response.data)) {
+          seen.add(id);
+        }
+      }
+    } catch (_e) {
+      /* try next url */
+    }
+  }
+
+  try {
+    for (const id of await fetchShipmentIdsFromCapturedGraphqlTemplate(targetTabId, liveId)) {
+      seen.add(id);
+    }
+  } catch (_e) {
+    /* template optional */
+  }
+
+  const shipmentIds = [...seen].filter(Boolean).slice(0, 40);
+  if (shipmentIds.length) {
+    recordObservedShipmentGraphqlIds(shipmentIds);
+  }
+
+  return {
+    success: true,
+    status: 200,
+    data: {
+      shipmentIds,
+      liveId: liveId || null,
+    },
+  };
+}
+
 function ingestShipmentIdsFromObservedApiPayload(payload) {
   try {
     if (!payload || typeof payload !== "object") {
       return;
     }
+    const ids = [];
     const rb = payload.requestBody && typeof payload.requestBody === "object" ? payload.requestBody : null;
     let operationName = rb && typeof rb.operationName === "string" ? rb.operationName.trim() : "";
     if (!operationName && typeof payload.url === "string") {
@@ -2477,21 +2795,20 @@ function ingestShipmentIdsFromObservedApiPayload(payload) {
         operationName = "";
       }
     }
-    if (operationName !== "GetShipment") {
-      return;
-    }
-    const ids = [];
-    const variables = rb && rb.variables && typeof rb.variables === "object" ? rb.variables : {};
-    const vid = variables.id;
-    if (vid != null && String(vid).trim()) {
-      ids.push(String(vid).trim());
+    if (operationName === "GetShipment") {
+      const variables = rb && rb.variables && typeof rb.variables === "object" ? rb.variables : {};
+      const vid = variables.id;
+      if (vid != null && String(vid).trim()) {
+        ids.push(String(vid).trim());
+      }
     }
     const res = payload.responseBody;
-    const shipment = res && res.data && typeof res.data === "object" ? res.data.shipment : null;
-    if (shipment && typeof shipment.id === "string" && shipment.id.trim()) {
-      ids.push(shipment.id.trim());
+    const seen = new Set();
+    collectShipmentIdsFromGraphqlValue(res, seen);
+    for (const id of ids) {
+      seen.add(normalizeShipmentIdCandidate(id));
     }
-    recordObservedShipmentGraphqlIds(ids);
+    recordObservedShipmentGraphqlIds([...seen]);
   } catch (_e) {
     /* ignore */
   }

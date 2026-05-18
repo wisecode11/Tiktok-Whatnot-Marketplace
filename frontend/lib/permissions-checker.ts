@@ -69,6 +69,10 @@ export const MODULE_DEFINITIONS: Record<
     label: "View Orders",
     description: "View customer orders",
   },
+  shipment_details: {
+    label: "Shipment Details",
+    description: "View Whatnot shipment labels, tracking, and packaging details",
+  },
   packing: {
     label: "Packing",
     description: "Handle order packing",
