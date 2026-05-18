@@ -1,160 +1,61 @@
 "use client"
 
-import { useState } from "react"
-import { CheckCircle2, Package } from "lucide-react"
+import { useMemo } from "react"
 
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
+import { useStaffShipmentSnapshot } from "@/components/staff/use-staff-shipment-snapshot"
+import { WhatnotShipmentsTableSection } from "@/components/whatnot/whatnot-shipment-details-ui"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Separator } from "@/components/ui/separator"
-import { useToast } from "@/hooks/use-toast"
-import { useSimulatedFetch } from "@/lib/staff/use-simulated-fetch"
-import { listWorkspaceOrders, setWorkspaceOrderStatus } from "@/lib/staff/mock-order-workspace"
-import type { MockOrder } from "@/lib/staff/mock-workspace-data"
-
-const DEFAULT_CHECKLIST = ["Verify pick list", "Bubble wrap fragile SKUs", "Include thank-you insert", "Weigh parcel"]
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
 
 export function PackingPage() {
-  const { toast } = useToast()
-  const fetch = useSimulatedFetch<MockOrder[]>(
-    "staff-packing",
-    () => listWorkspaceOrders().filter((order) => order.status === "packing"),
-    { minDelay: 420, pollInterval: 18_000, refreshDelay: 340 },
-  )
-
-  const [checklistState, setChecklistState] = useState<Record<string, Record<string, boolean>>>({})
-
-  const packingOrders = fetch.data || []
-
-  function getChecks(orderId: string) {
-    const stored = checklistState[orderId] || {}
-    const map: Record<string, boolean> = {}
-    for (const item of DEFAULT_CHECKLIST) {
-      map[item] = Boolean(stored[item])
-    }
-    return map
-  }
-
-  function toggleCheck(orderId: string, item: string, checked: boolean) {
-    setChecklistState((current) => {
-      const previous = current[orderId] || {}
-      return {
-        ...current,
-        [orderId]: {
-          ...previous,
-          [item]: checked,
-        },
-      }
-    })
-  }
-
-  function allChecked(order: MockOrder) {
-    const map = getChecks(order.id)
-    return DEFAULT_CHECKLIST.every((item) => map[item])
-  }
-
-  function handleMarkPacked(order: MockOrder) {
-    if (!allChecked(order)) {
-      toast({
-        title: "Checklist incomplete",
-        description: "Complete all packing checkpoints before marking packed (simulated warehouse rule).",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setWorkspaceOrderStatus(order.id, "label_ready")
-    toast({
-      title: "Packed successfully",
-      description: `${order.orderNumber} moved to Label ready. Open Labelling to generate the shipping label.`,
-    })
-    void fetch.refetch()
-  }
+  const { tableRows, isLoading, isRefreshing, error, lastUpdated, refresh } = useStaffShipmentSnapshot(120)
+  const syncedCount = useMemo(() => tableRows.filter((row) => row.shipment).length, [tableRows])
 
   return (
     <StaffModuleGate
       moduleId="packing"
-      title="Order fulfillment · Packing"
-      description="Guided packing workflow with guardrails so fragile SKUs and inserts are not missed (simulated)."
+      title="Packing"
+      description="Package weight, dimensions, items to pack, and hazmat details from the parent seller's synced Whatnot shipments."
     >
-      <StaffLiveSyncBanner
-        lastUpdated={fetch.lastUpdated}
-        isRefreshing={fetch.isRefreshing}
-        onRefresh={() => void fetch.refetch()}
-      />
+      <StaffLiveSyncBanner lastUpdated={lastUpdated} isRefreshing={isRefreshing} onRefresh={() => refresh()} />
 
-      {fetch.isLoading ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">Loading packing queue…</CardContent>
-        </Card>
-      ) : fetch.error ? (
+      {error ? (
         <Card className="border-destructive/30">
-          <CardContent className="py-8 text-sm text-destructive">{fetch.error}</CardContent>
+          <CardContent className="py-6 text-sm text-destructive">{error}</CardContent>
         </Card>
-      ) : packingOrders.length === 0 ? (
+      ) : null}
+
+      {isLoading ? (
         <Card>
-          <CardHeader>
-            <CardTitle>No orders in packing</CardTitle>
-            <CardDescription>Everything is either upstream (processing) or downstream (labels/shipped).</CardDescription>
-          </CardHeader>
+          <CardContent className="py-10 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-2">
+              <Spinner className="h-4 w-4" />
+              Loading packing details…
+            </span>
+          </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {packingOrders.map((order) => {
-            const map = getChecks(order.id)
-            return (
-              <Card key={order.id}>
-                <CardHeader className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Package className="size-5 text-primary" />
-                      <CardTitle className="text-lg">{order.orderNumber}</CardTitle>
-                    </div>
-                    <Badge variant="outline" className="font-normal">
-                      {order.carrier}
-                    </Badge>
-                  </div>
-                  <CardDescription>{order.customer}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <p className="text-sm font-medium">Pick list</p>
-                    <Separator className="my-2" />
-                    <ul className="space-y-2 text-sm">
-                      {order.lines.map((line) => (
-                        <li key={`${order.id}-${line.sku}`} className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">{line.title}</span>
-                          <span className="tabular-nums font-medium">×{line.qty}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Packing checklist</p>
-                    <div className="mt-3 space-y-3">
-                      {DEFAULT_CHECKLIST.map((item) => (
-                        <label key={item} className="flex items-start gap-3 text-sm">
-                          <Checkbox
-                            checked={Boolean(map[item])}
-                            onCheckedChange={(value) => toggleCheck(order.id, item, value === true)}
-                          />
-                          <span>{item}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <Button type="button" className="w-full" onClick={() => handleMarkPacked(order)}>
-                    <CheckCircle2 className="mr-2 size-4" />
-                    Mark packed → Label ready
-                  </Button>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">Whatnot packing queue</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Weight, box size, line items, and hazmat flags for each shipment.
+              </p>
+            </div>
+            <Badge variant="outline">{syncedCount} shipments</Badge>
+          </CardHeader>
+          <CardContent className="space-y-4 p-5">
+            <WhatnotShipmentsTableSection
+              rows={tableRows}
+              variant="packing"
+              emptyMessage="No shipment snapshots saved yet. Ask the seller to sync shipments from Order Management."
+            />
+          </CardContent>
+        </Card>
       )}
     </StaffModuleGate>
   )

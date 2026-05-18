@@ -2010,6 +2010,16 @@ export async function fetchWhatnotShipmentsTable(
   })
 }
 
+export async function getWhatnotInventoryLive(
+  token: string,
+  status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT" = "ACTIVE",
+) {
+  return request<WhatnotInventoryLiveResponse>(
+    `/api/integrations/whatnot/inventory/live?status=${encodeURIComponent(status)}`,
+    { token },
+  )
+}
+
 export async function syncWhatnotInventoryLive(
   token: string,
   status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",

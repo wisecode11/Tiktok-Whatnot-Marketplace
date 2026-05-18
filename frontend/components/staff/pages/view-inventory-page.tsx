@@ -38,7 +38,7 @@ import {
   createStaffPendingInventory,
   getClerkErrorMessage,
   getWhatnotInventoryCreateFormOptions,
-  syncWhatnotInventoryLive,
+  getWhatnotInventoryLive,
   type WhatnotInventoryLiveResponse,
   waitForSessionToken,
 } from "@/lib/auth"
@@ -190,9 +190,9 @@ export function ViewInventoryPage() {
 
         setError(null)
         const token = await waitForSessionToken(getTokenRef.current)
-        const result = await syncWhatnotInventoryLive(token, "ACTIVE")
+        const result = await getWhatnotInventoryLive(token, "ACTIVE")
         setRows(toInventoryRows(result))
-        setLastUpdated(result.syncedAt ? new Date(result.syncedAt) : new Date())
+        setLastUpdated(result.syncedAt ? new Date(result.syncedAt) : null)
       } catch (loadError) {
         setError(getClerkErrorMessage(loadError))
         setRows([])

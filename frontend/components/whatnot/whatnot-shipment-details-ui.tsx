@@ -275,6 +275,291 @@ function getFirstOrderItemNode(shipment: WhatnotShipmentNode) {
   return items[0]
 }
 
+function getShipmentHeaderMeta(shipment: WhatnotShipmentNode) {
+  const first = getFirstOrderItemNode(shipment)
+  const order = first?.order
+  const shipmentDisplayId = extractGlobalIdTail(shipment.id)
+  const qty =
+    typeof shipment.totalItemQuantity === "number" && Number.isFinite(shipment.totalItemQuantity)
+      ? shipment.totalItemQuantity
+      : null
+  const pretty = typeof order?.prettyStatus === "string" && order.prettyStatus.trim() ? order.prettyStatus.trim() : null
+  const shipStatus = typeof shipment.status === "string" && shipment.status.trim() ? shipment.status.trim() : null
+  const headerBadge = pretty ?? (shipStatus ? humanizeStatus(shipStatus) : null)
+  const subtitleParts: string[] = []
+  if (qty !== null) {
+    subtitleParts.push(`${qty} item${qty === 1 ? "" : "s"}`)
+  }
+  if (shipmentDisplayId) {
+    subtitleParts.push(`#${shipmentDisplayId}`)
+  }
+  return {
+    first,
+    order,
+    listing: first?.listing,
+    orderDisplayId: extractGlobalIdTail(order?.id),
+    shipmentDisplayId,
+    qty,
+    pretty,
+    shipStatus,
+    headerBadge,
+    subtitle: subtitleParts.length > 0 ? subtitleParts.join(" • ") : null,
+    detailDate: formatDetailDateDdMmYyyy(firstOrderItemCreatedAt(shipment)),
+    buyer:
+      shipment.buyer && typeof shipment.buyer.username === "string" && shipment.buyer.username.trim()
+        ? shipment.buyer.username.trim()
+        : null,
+  }
+}
+
+function ShipmentPanelScroll({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="max-h-[min(72vh,640px)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-1 pr-1 [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar]:w-2"
+      role="region"
+    >
+      <div className="space-y-6 pr-2">{children}</div>
+    </div>
+  )
+}
+
+function ShipmentPanelHeader({
+  title,
+  subtitle,
+  headerBadge,
+}: {
+  title: string
+  subtitle: string | null
+  headerBadge: string | null
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-4">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p> : null}
+      </div>
+      {headerBadge ? (
+        <StatusBadge variant="default" className="shrink-0 capitalize">
+          {headerBadge}
+        </StatusBadge>
+      ) : null}
+    </div>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right font-medium">{value}</span>
+    </div>
+  )
+}
+
+export function WhatnotShipmentPackingPanel({ shipment }: { shipment: WhatnotShipmentNode }) {
+  const meta = getShipmentHeaderMeta(shipment)
+  const listingTitle =
+    typeof meta.listing?.title === "string" && meta.listing.title.trim() ? meta.listing.title.trim() : null
+  const imageUrl =
+    Array.isArray(meta.listing?.images) &&
+    meta.listing.images[0] &&
+    typeof meta.listing.images[0]?.url === "string" &&
+    meta.listing.images[0].url.trim()
+      ? meta.listing.images[0].url.trim()
+      : null
+
+  const pkgWeight = formatPackageWeightOzLabel(shipment)
+  const pkgDim = formatPackageDimensionsInLabel(shipment)
+  const sig =
+    typeof shipment.signatureRequired === "boolean" ? (shipment.signatureRequired ? "Yes" : "No") : null
+  const insuranceAdded =
+    Object.prototype.hasOwnProperty.call(shipment, "insuranceInfo")
+      ? hasPositiveInsurance(shipment.insuranceInfo)
+        ? "Yes"
+        : "No"
+      : null
+  const hazardous = hazardousMaterialsYesNo(shipment.hazmatLabelType)
+  const sellerPaid =
+    shipment.sellerPaidShippingCost &&
+    typeof shipment.sellerPaidShippingCost.amount === "number" &&
+    Number.isFinite(shipment.sellerPaidShippingCost.amount)
+      ? formatMoney(shipment.sellerPaidShippingCost)
+      : null
+
+  const orderItems = Array.isArray(shipment.orderItems) ? shipment.orderItems : []
+
+  return (
+    <ShipmentPanelScroll>
+      <ShipmentPanelHeader title="Packing details" subtitle={meta.subtitle} headerBadge={meta.headerBadge} />
+
+      {listingTitle || imageUrl || meta.orderDisplayId ? (
+        <div className="rounded-xl border border-border/70 bg-muted/25 p-4">
+          <div className="flex gap-4">
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt=""
+                className="h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-background object-cover"
+              />
+            ) : null}
+            <div className="min-w-0 flex-1 space-y-2">
+              {listingTitle ? <p className="font-semibold leading-snug text-foreground">{listingTitle}</p> : null}
+              {meta.orderDisplayId ? (
+                <p className="text-sm text-muted-foreground">
+                  Order{" "}
+                  <span className="font-semibold text-primary">#{meta.orderDisplayId}</span>
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {orderItems.length > 0 ? (
+        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+          <h3 className="mb-3 text-sm font-semibold tracking-tight">Items to pack</h3>
+          <ul className="divide-y divide-border/60 text-sm">
+            {orderItems.map((item, index) => {
+              const title =
+                typeof item?.listing?.title === "string" && item.listing.title.trim()
+                  ? item.listing.title.trim()
+                  : "Untitled item"
+              const itemQty = typeof item?.quantity === "number" ? item.quantity : 1
+              return (
+                <li key={`${title}-${index}`} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="font-medium">{title}</span>
+                  <span className="tabular-nums text-muted-foreground">×{itemQty}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+        <h3 className="mb-1 text-sm font-semibold tracking-tight">Package information</h3>
+        <div className="divide-y divide-border/60">
+          {meta.orderDisplayId ? (
+            <DetailRow label="Order" value={`#${meta.orderDisplayId}`} />
+          ) : null}
+          {meta.detailDate ? <DetailRow label="Order date" value={meta.detailDate} /> : null}
+          {meta.buyer ? <DetailRow label="Buyer" value={meta.buyer} /> : null}
+          {pkgWeight ? <DetailRow label="Package weight" value={pkgWeight} /> : null}
+          {pkgDim ? <DetailRow label="Package dimensions" value={pkgDim} /> : null}
+          {sig !== null ? <DetailRow label="Signature required" value={sig} /> : null}
+          {insuranceAdded !== null ? <DetailRow label="Insurance added" value={insuranceAdded} /> : null}
+          {hazardous !== null ? <DetailRow label="Hazardous materials" value={hazardous} /> : null}
+          {sellerPaid ? <DetailRow label="Seller paid shipping" value={sellerPaid} /> : null}
+          {meta.qty !== null ? <DetailRow label="Total items" value={String(meta.qty)} /> : null}
+        </div>
+      </div>
+    </ShipmentPanelScroll>
+  )
+}
+
+export function WhatnotShipmentLabellingPanel({ shipment }: { shipment: WhatnotShipmentNode }) {
+  const meta = getShipmentHeaderMeta(shipment)
+  const shipTo = formatShipToMultiline(shipment)
+  const trackingCode =
+    typeof shipment.trackingCode === "string" && shipment.trackingCode.trim()
+      ? shipment.trackingCode.trim()
+      : null
+  const trackingUrl =
+    typeof shipment.trackingUrl === "string" && shipment.trackingUrl.trim()
+      ? shipment.trackingUrl.trim()
+      : null
+  const methodLine =
+    typeof shipment.method === "string" && shipment.method.trim() ? humanizeMethod(shipment.method) : null
+  const courier =
+    typeof (shipment as { courier?: string }).courier === "string" &&
+    (shipment as { courier?: string }).courier?.trim()
+      ? String((shipment as { courier?: string }).courier).trim()
+      : null
+  const fileUrl = typeof shipment.fileUrl === "string" && shipment.fileUrl.trim() ? shipment.fileUrl.trim() : null
+  const bundledFileUrl =
+    typeof shipment.bundledFileUrl === "string" && shipment.bundledFileUrl.trim()
+      ? shipment.bundledFileUrl.trim()
+      : null
+  const canGenerateLabel =
+    typeof (shipment as { canGenerateLabel?: boolean }).canGenerateLabel === "boolean"
+      ? (shipment as { canGenerateLabel?: boolean }).canGenerateLabel
+      : null
+
+  const labelStatus = meta.pretty ?? (meta.shipStatus ? humanizeStatus(meta.shipStatus) : null)
+
+  return (
+    <ShipmentPanelScroll>
+      <ShipmentPanelHeader title="Labelling details" subtitle={meta.subtitle} headerBadge={labelStatus} />
+
+      <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold tracking-tight">Shipping &amp; label</h3>
+        <div className="divide-y divide-border/60 text-sm">
+          {labelStatus ? <DetailRow label="Label status" value={labelStatus} /> : null}
+          {courier ? <DetailRow label="Carrier" value={courier} /> : null}
+          {methodLine && methodLine !== "—" ? <DetailRow label="Shipping method" value={methodLine} /> : null}
+          {canGenerateLabel !== null ? (
+            <DetailRow label="Can generate label" value={canGenerateLabel ? "Yes" : "No"} />
+          ) : null}
+          {meta.buyer ? <DetailRow label="Buyer" value={meta.buyer} /> : null}
+        </div>
+      </div>
+
+      {shipTo || trackingCode || fileUrl || bundledFileUrl ? (
+        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+          <h3 className="mb-4 text-sm font-semibold tracking-tight">Ship to &amp; tracking</h3>
+          <div className="space-y-4 text-sm">
+            {shipTo ? (
+              <div className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-6">
+                <span className="text-muted-foreground">Ship to</span>
+                <span className="whitespace-pre-line font-medium leading-relaxed text-foreground">{shipTo}</span>
+              </div>
+            ) : null}
+            {trackingCode ? (
+              <div className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-6">
+                <span className="text-muted-foreground">Tracking #</span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  {trackingUrl ? (
+                    <a
+                      href={trackingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-primary underline decoration-primary/60 underline-offset-2"
+                    >
+                      {trackingCode}
+                    </a>
+                  ) : (
+                    <span className="font-semibold">{trackingCode}</span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {fileUrl || bundledFileUrl ? (
+              <div className="flex w-full flex-col gap-2 pt-1">
+                {fileUrl ? (
+                  <Button variant="default" size="lg" className="h-11 w-full gap-2 rounded-xl font-semibold" asChild>
+                    <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+                      <Printer className="h-4 w-4" aria-hidden />
+                      Print shipping label
+                    </a>
+                  </Button>
+                ) : null}
+                {bundledFileUrl ? (
+                  <Button variant="default" size="lg" className="h-11 w-full gap-2 rounded-xl font-semibold" asChild>
+                    <a href={bundledFileUrl} target="_blank" rel="noopener noreferrer">
+                      <Printer className="h-4 w-4" aria-hidden />
+                      Print packing slip
+                    </a>
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </ShipmentPanelScroll>
+  )
+}
+
 function ShipmentDetailsPanel({ shipment }: { shipment: WhatnotShipmentNode }) {
   const first = getFirstOrderItemNode(shipment)
   const order = first?.order
@@ -575,6 +860,13 @@ export type WhatnotShipmentTableRow = {
   error?: string | null
 }
 
+export type WhatnotShipmentsTableVariant = "full" | "packing" | "labelling"
+
+function getLabelStatusForTable(shipment: WhatnotShipmentNode) {
+  const meta = getShipmentHeaderMeta(shipment)
+  return meta.pretty ?? (meta.shipStatus ? humanizeStatus(meta.shipStatus) : "—")
+}
+
 export function WhatnotShipmentDetailsPanel({ shipment }: { shipment: WhatnotShipmentNode }) {
   return <ShipmentDetailsPanel shipment={shipment} />
 }
@@ -582,11 +874,16 @@ export function WhatnotShipmentDetailsPanel({ shipment }: { shipment: WhatnotShi
 export function WhatnotShipmentsTableSection({
   rows,
   emptyMessage = "No shipments found.",
+  variant = "full",
 }: {
   rows: WhatnotShipmentTableRow[]
   emptyMessage?: string
+  variant?: WhatnotShipmentsTableVariant
 }) {
   const [selectedShipment, setSelectedShipment] = useState<WhatnotShipmentNode | null>(null)
+  const columnCount = variant === "full" ? 9 : 8
+  const dialogTitle =
+    variant === "packing" ? "Packing details" : variant === "labelling" ? "Labelling details" : "Shipment details"
 
   if (!rows.length) {
     return <p className="text-sm text-muted-foreground">{emptyMessage}</p>
@@ -602,10 +899,26 @@ export function WhatnotShipmentsTableSection({
               <TableHead className="px-4 py-3">Order date</TableHead>
               <TableHead className="px-4 py-3">Items</TableHead>
               <TableHead className="px-4 py-3">Value</TableHead>
-              <TableHead className="px-4 py-3">Weight</TableHead>
-              <TableHead className="px-4 py-3">Dimensions</TableHead>
-              <TableHead className="px-4 py-3">Status</TableHead>
-              <TableHead className="px-4 py-3">Tracking</TableHead>
+              {variant === "packing" || variant === "full" ? (
+                <>
+                  <TableHead className="px-4 py-3">Weight</TableHead>
+                  <TableHead className="px-4 py-3">Dimensions</TableHead>
+                </>
+              ) : null}
+              {variant === "labelling" ? (
+                <>
+                  <TableHead className="px-4 py-3">Label status</TableHead>
+                  <TableHead className="px-4 py-3">Carrier</TableHead>
+                </>
+              ) : null}
+              {variant === "full" ? (
+                <>
+                  <TableHead className="px-4 py-3">Status</TableHead>
+                  <TableHead className="px-4 py-3">Tracking</TableHead>
+                </>
+              ) : null}
+              {variant === "packing" ? <TableHead className="px-4 py-3">Pack status</TableHead> : null}
+              {variant === "labelling" ? <TableHead className="px-4 py-3">Tracking</TableHead> : null}
               <TableHead className="px-4 py-3 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -614,7 +927,7 @@ export function WhatnotShipmentsTableSection({
               if (row.error || !row.shipment) {
                 return (
                   <TableRow key={row.rowKey}>
-                    <TableCell colSpan={9} className="px-4 py-3 text-sm text-destructive">
+                    <TableCell colSpan={columnCount} className="px-4 py-3 text-sm text-destructive">
                       {row.rowKey}: {row.error || "No data"}
                     </TableCell>
                   </TableRow>
@@ -627,6 +940,13 @@ export function WhatnotShipmentsTableSection({
               const trackingUrl = typeof shipment.trackingUrl === "string" ? shipment.trackingUrl : ""
               const code = typeof shipment.trackingCode === "string" ? shipment.trackingCode : ""
               const shortCode = code.length > 12 ? `${code.slice(0, 5)}…${code.slice(-4)}` : code
+              const courier =
+                typeof (shipment as { courier?: string }).courier === "string" &&
+                (shipment as { courier?: string }).courier?.trim()
+                  ? String((shipment as { courier?: string }).courier).trim()
+                  : "—"
+              const actionLabel =
+                variant === "packing" ? "Packing" : variant === "labelling" ? "Labels" : "Details"
 
               return (
                 <TableRow key={row.rowKey}>
@@ -636,34 +956,79 @@ export function WhatnotShipmentsTableSection({
                     {typeof shipment.totalItemQuantity === "number" ? shipment.totalItemQuantity : "—"}
                   </TableCell>
                   <TableCell className="px-4 py-4">{formatValueFromShipment(shipment)}</TableCell>
-                  <TableCell className="px-4 py-4">{formatWeight(shipment)}</TableCell>
-                  <TableCell className="px-4 py-4">{formatDimensions(shipment)}</TableCell>
-                  <TableCell className="px-4 py-4">
-                    <StatusBadge variant={whatnotShipmentVariant(shipment.status)}>
-                      {humanizeStatus(shipment.status)}
-                    </StatusBadge>
-                  </TableCell>
-                  <TableCell className="px-4 py-4">
-                    <div className="flex flex-col gap-0.5 text-sm">
-                      <span className="text-muted-foreground">{humanizeMethod(shipment.method)}</span>
-                      {trackingUrl && code ? (
-                        <a
-                          href={trackingUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                        >
-                          {shortCode}
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : (
-                        <span>{code || "—"}</span>
-                      )}
-                    </div>
-                  </TableCell>
+                  {variant === "packing" || variant === "full" ? (
+                    <>
+                      <TableCell className="px-4 py-4">{formatWeight(shipment)}</TableCell>
+                      <TableCell className="px-4 py-4">{formatDimensions(shipment)}</TableCell>
+                    </>
+                  ) : null}
+                  {variant === "labelling" ? (
+                    <>
+                      <TableCell className="px-4 py-4">
+                        <StatusBadge variant={whatnotShipmentVariant(shipment.status)} className="capitalize">
+                          {getLabelStatusForTable(shipment)}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell className="px-4 py-4 capitalize">{courier}</TableCell>
+                    </>
+                  ) : null}
+                  {variant === "full" ? (
+                    <>
+                      <TableCell className="px-4 py-4">
+                        <StatusBadge variant={whatnotShipmentVariant(shipment.status)}>
+                          {humanizeStatus(shipment.status)}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell className="px-4 py-4">
+                        <div className="flex flex-col gap-0.5 text-sm">
+                          <span className="text-muted-foreground">{humanizeMethod(shipment.method)}</span>
+                          {trackingUrl && code ? (
+                            <a
+                              href={trackingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-primary hover:underline"
+                            >
+                              {shortCode}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span>{code || "—"}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                    </>
+                  ) : null}
+                  {variant === "packing" ? (
+                    <TableCell className="px-4 py-4">
+                      <StatusBadge variant={whatnotShipmentVariant(shipment.status)} className="capitalize">
+                        {humanizeStatus(shipment.status)}
+                      </StatusBadge>
+                    </TableCell>
+                  ) : null}
+                  {variant === "labelling" ? (
+                    <TableCell className="px-4 py-4">
+                      <div className="flex flex-col gap-0.5 text-sm">
+                        <span className="text-muted-foreground">{humanizeMethod(shipment.method)}</span>
+                        {trackingUrl && code ? (
+                          <a
+                            href={trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            {shortCode}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span>{code || "—"}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                  ) : null}
                   <TableCell className="px-4 py-4 text-right">
                     <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedShipment(shipment)}>
-                      Details
+                      {actionLabel}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -676,11 +1041,17 @@ export function WhatnotShipmentsTableSection({
       <Dialog open={selectedShipment !== null} onOpenChange={(open) => !open && setSelectedShipment(null)}>
         <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden border-border/80 p-0 sm:max-w-[520px]">
           <DialogHeader className="sr-only">
-            <DialogTitle>Shipment details</DialogTitle>
+            <DialogTitle>{dialogTitle}</DialogTitle>
           </DialogHeader>
           {selectedShipment ? (
             <div className="min-h-0 flex-1 px-6 pb-6 pt-5">
-              <WhatnotShipmentDetailsPanel shipment={selectedShipment} />
+              {variant === "packing" ? (
+                <WhatnotShipmentPackingPanel shipment={selectedShipment} />
+              ) : variant === "labelling" ? (
+                <WhatnotShipmentLabellingPanel shipment={selectedShipment} />
+              ) : (
+                <WhatnotShipmentDetailsPanel shipment={selectedShipment} />
+              )}
             </div>
           ) : null}
         </DialogContent>
