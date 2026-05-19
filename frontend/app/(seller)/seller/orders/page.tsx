@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs"
 import { Activity, Info, PackageSearch, RefreshCw, ShoppingBag, Store, Truck, Wallet } from "lucide-react"
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
+import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -544,6 +545,7 @@ function OrdersMetricCard({
 
 export default function SellerOrdersPage() {
   const { getToken, isLoaded } = useAuth()
+  const marketplaceHub = useMarketplaceHub()
   const [orders, setOrders] = useState<WhatnotOrderItem[]>([])
   const [tiktokShop, setTiktokShop] = useState<TikTokShopOrdersSearchResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -556,6 +558,13 @@ export default function SellerOrdersPage() {
   const [tiktokLiveDetailLoading, setTiktokLiveDetailLoading] = useState(false)
   const [tiktokLiveDetailError, setTiktokLiveDetailError] = useState<string | null>(null)
   const [activePlatform, setActivePlatform] = useState<MarketplacePlatform>("whatnot")
+
+  useEffect(() => {
+    const forcedPlatform = marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? marketplaceHub.hub : null
+    if (forcedPlatform) {
+      setActivePlatform(forcedPlatform)
+    }
+  }, [marketplaceHub?.hub])
 
   const loadOrders = async (isManualRefresh = false) => {
     if (!isLoaded) {
@@ -815,6 +824,7 @@ export default function SellerOrdersPage() {
             whatnotLabel="Whatnot Orders"
             tiktokLabel="TikTok Orders"
             idPrefix="orders-platform"
+            className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
           />
         </div>
 

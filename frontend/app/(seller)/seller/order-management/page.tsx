@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs"
 import { Activity, Boxes, ExternalLink, PackageSearch, Printer, RefreshCw, Truck, Wallet } from "lucide-react"
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
+import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -778,6 +779,7 @@ function TikTokOrderManagementDetailBody({ order }: { order: Record<string, unkn
 
 export default function SellerOrderManagementPage() {
   const { getToken, isLoaded } = useAuth()
+  const marketplaceHub = useMarketplaceHub()
   const [activePlatform, setActivePlatform] = useState<"whatnot" | "tiktok">("whatnot")
   const [liveId, setLiveId] = useState("")
   const [statistic, setStatistic] = useState<WhatnotMyLiveStatistic | null>(null)
@@ -800,6 +802,13 @@ export default function SellerOrderManagementPage() {
   const [isTikTokDetailLoading, setIsTikTokDetailLoading] = useState(false)
   /** After auto Live ID from GetShipmentsLivestreams, hide the ID field unless the seller chooses to edit. */
   const [liveIdEditorOpen, setLiveIdEditorOpen] = useState(true)
+
+  useEffect(() => {
+    const forcedPlatform = marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? marketplaceHub.hub : null
+    if (forcedPlatform) {
+      setActivePlatform(forcedPlatform)
+    }
+  }, [marketplaceHub?.hub])
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1189,6 +1198,7 @@ export default function SellerOrderManagementPage() {
                   whatnotLabel="Whatnot Management"
                   tiktokLabel="TikTok Management"
                   idPrefix="order-management-platform"
+                  className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
                 />
         </div>
 

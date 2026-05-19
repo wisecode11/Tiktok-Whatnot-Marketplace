@@ -43,6 +43,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
 import {
   createWhatnotListing,
   getClerkErrorMessage,
@@ -296,6 +297,7 @@ function formatTiktokProductListPrice(product: TikTokGlobalProduct): string {
 
 export default function SellerInventoryManagementPage() {
   const { getToken, isLoaded } = useAuth()
+  const marketplaceHub = useMarketplaceHub()
   const [inventoryPlatformTab, setInventoryPlatformTab] = useState<InventoryPlatformTab>("whatnot")
   const [selectedTab, setSelectedTab] = useState<InventoryStatus>("ACTIVE")
   const [bulkEditEnabled, setBulkEditEnabled] = useState(false)
@@ -350,6 +352,13 @@ export default function SellerInventoryManagementPage() {
   const [tiktokCreateMainImageFile, setTiktokCreateMainImageFile] = useState<File | null>(null)
   const [tiktokCreateMainImagePreviewUrl, setTiktokCreateMainImagePreviewUrl] = useState("")
   const [tiktokCreateImageFieldKey, setTiktokCreateImageFieldKey] = useState(0)
+
+  useEffect(() => {
+    const forcedTab = marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? marketplaceHub.hub : null
+    if (forcedTab) {
+      setInventoryPlatformTab(forcedTab)
+    }
+  }, [marketplaceHub?.hub])
 
   const [tiktokEditOpen, setTiktokEditOpen] = useState(false)
   const [tiktokEditProduct, setTiktokEditProduct] = useState<TikTokGlobalProduct | null>(null)
@@ -1169,6 +1178,7 @@ export default function SellerInventoryManagementPage() {
         whatnotLabel="Whatnot Inventory"
         tiktokLabel="TikTok Inventory"
         idPrefix="inventory-tab"
+        className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
       />
 
       {inventoryPlatformTab === "tiktok" ? (

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react"
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
+import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -147,6 +148,7 @@ function formatUnixSecondsLoose(seconds: unknown) {
 
 export default function FinanceManagementPage() {
   const { getToken, isLoaded } = useAuth()
+  const marketplaceHub = useMarketplaceHub()
   const [activePlatform, setActivePlatform] = useState<FinancePlatform>("whatnot")
   const [page, setPage] = useState(0)
   const [isBalanceLoading, setIsBalanceLoading] = useState(false)
@@ -166,6 +168,13 @@ export default function FinanceManagementPage() {
   const [tiktokWithdrawals, setTiktokWithdrawals] = useState<TikTokFinanceWithdrawalsResponse | null>(null)
   const [tiktokStatementTransactions, setTiktokStatementTransactions] = useState<TikTokFinanceStatementTransactionsResponse | null>(null)
   const [tiktokUnsettledOrders, setTiktokUnsettledOrders] = useState<TikTokFinanceUnsettledOrdersResponse | null>(null)
+
+  useEffect(() => {
+    const forcedPlatform = marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? marketplaceHub.hub : null
+    if (forcedPlatform) {
+      setActivePlatform(forcedPlatform)
+    }
+  }, [marketplaceHub?.hub])
 
   const loadWhatnotBalance = useCallback(async () => {
     if (!isLoaded) {
@@ -446,6 +455,7 @@ export default function FinanceManagementPage() {
         whatnotLabel="Whatnot Finance"
         tiktokLabel="TikTok Finance"
         idPrefix="finance-platform"
+        className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
       />
 
       {activePlatform === "whatnot" && balanceError ? <p className="text-sm text-destructive">{balanceError}</p> : null}
