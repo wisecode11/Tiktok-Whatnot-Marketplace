@@ -13,6 +13,7 @@ export interface StaffMember {
   status: string
   streamerUserId: string | null
   workspaceId: string | null
+  modules?: string[]
   joinedAt: string | null
   createdAt: string | null
 }

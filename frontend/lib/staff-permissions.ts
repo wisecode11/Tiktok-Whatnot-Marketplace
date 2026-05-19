@@ -118,4 +118,9 @@ export const DEFAULT_MODULES = [
     label: "Clock In / Clock Out",
     description: "Clock in and out to record daily attendance",
   },
+  {
+    id: "assigned_shows",
+    label: "Host Shows",
+    description: "View live shows assigned to you as host by the streamer",
+  },
 ]

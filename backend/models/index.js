@@ -11,6 +11,7 @@ module.exports = {
   WhatnotInventorySnapshot: require('./WhatnotInventorySnapshot'),
   WhatnotLiveStatsSnapshot: require('./WhatnotLiveStatsSnapshot'),
   WhatnotShowSnapshot: require('./WhatnotShowSnapshot'),
+  WhatnotShowHostAssignment: require('./WhatnotShowHostAssignment'),
   WhatnotShipmentDetail: require('./WhatnotShipmentDetail'),
   WhatnotCategory: require('./WhatnotCategory'),
   WhatnotSubCategory: require('./WhatnotSubCategory'),

@@ -7,6 +7,7 @@ const {
   getWhatnotExtensionStatusData,
   getWhatnotInventoryCreateFormOptionsData,
   getWhatnotLivestreamCategoryTreeData,
+  getWhatnotReferenceCacheStatusData,
   getWhatnotInventoryLiveData,
   getWhatnotInventorySnapshotData,
   getTikTokCreatorInfoData,
@@ -55,6 +56,7 @@ const {
   fetchWhatnotShowTabData,
   fetchWhatnotPrimaryShowFormatTagsData,
   scheduleWhatnotShowData,
+  syncWhatnotReferenceCacheData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
 } = require("../controllers/integrationController");
@@ -126,6 +128,7 @@ router.get("/whatnot/inventory-snapshot", authenticateRequest, getWhatnotInvento
 router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLiveData);
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.get("/whatnot/livestream-category-tree", authenticateRequest, getWhatnotLivestreamCategoryTreeData);
+router.post("/whatnot/reference-cache/sync", authenticateRequest, syncWhatnotReferenceCacheData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData);
 router.post("/whatnot/show-tab", authenticateRequest, fetchWhatnotShowTabData);
@@ -155,6 +158,7 @@ router.post("/quickbooks/payroll/sync", authenticateRequest, syncQuickBooksPayro
 router.get("/quickbooks/payroll/:payrollRunId/pdf", authenticateRequest, downloadQuickBooksPayrollPdf);
 router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatnotSessionData);
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
+router.get("/whatnot/reference-cache/status", authenticateWhatnotExtension, getWhatnotReferenceCacheStatusData);
 router.post("/whatnot/inventory-edit-categories", authenticateWhatnotExtension, saveWhatnotInventoryEditCategoriesEntry);
 router.post("/whatnot/shipping-profiles", authenticateWhatnotExtension, saveWhatnotShippingProfilesEntry);
 router.post(

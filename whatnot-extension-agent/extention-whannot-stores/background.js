@@ -156,9 +156,10 @@ async function connectWhatnot(tabId, clerkUserId = null) {
     sessionData: sessionResult.data || {},
     tabId: resolvedTabId
   });
-  // As soon as connect is successful and tokens are available,
-  // fetch inventory edit catalog and persist categories in backend.
-  void syncSellerHubInventoryEditCatalog(resolvedTabId);
+  const cacheStatus = await getReferenceCacheStatusFromMarketplace();
+  if (cacheStatus?.success && cacheStatus.needsSync) {
+    void syncSellerHubInventoryEditCatalog(resolvedTabId);
+  }
 
   return { success: true, auth: state.auth, tabId: resolvedTabId };
 }
@@ -209,6 +210,31 @@ async function saveGetSessionApiDataToMarketplace(payload) {
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+}
+
+async function getReferenceCacheStatusFromMarketplace() {
+  const headers = {};
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  try {
+    const response = await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/reference-cache/status`, {
+      method: "GET",
+      headers,
+    });
+    if (!response.ok) {
+      return { success: false, error: `Marketplace cache status failed (${response.status}).` };
+    }
+    const payload = await response.json().catch(() => ({}));
+    return {
+      success: true,
+      needsSync: Boolean(payload?.needsSync),
+      counts: payload?.counts || {},
+    };
+  } catch (error) {
+    return { success: false, error: error?.message || "Marketplace cache status failed." };
   }
 }
 
@@ -330,7 +356,7 @@ async function fetchSellerHubInventoryEditData(tabId) {
     method: "POST",
     headers,
     body: JSON.stringify(requestBody)
-  });
+  }, { suppressRelogin: true });
 }
 
 async function fetchShippingProfilesData(tabId) {
@@ -392,7 +418,7 @@ async function fetchShippingProfilesData(tabId) {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody)
-    });
+    }, { suppressRelogin: true });
 
     if (response?.success && response?.data) {
       return response;
@@ -438,7 +464,7 @@ async function fetchLivestreamTagDirectDescendantsData(tabId) {
     method: "POST",
     headers,
     body: JSON.stringify(requestBody)
-  });
+  }, { suppressRelogin: true });
 }
 
 async function syncSellerHubInventoryEditCatalog(tabId) {
@@ -1024,7 +1050,8 @@ async function fetchOrdersFromCapturedGraphqlTemplate(tabId) {
   return extractOrdersFromGraphqlPayload(graphqlData);
 }
 
-async function executeApi(tabId, options) {
+async function executeApi(tabId, options, behavior = {}) {
+  const suppressRelogin = Boolean(behavior?.suppressRelogin);
   let targetTabId = tabId || state.tabId;
   if (!targetTabId) {
     const connected = await ensureConnectedWhatnotSession();
@@ -1055,7 +1082,9 @@ async function executeApi(tabId, options) {
   if (isAuthFailure(result)) {
     const refreshed = await ensureConnectedWhatnotSession(targetTabId);
     if (!refreshed.success) {
-      sendSocketMessage("relogin_required", { reason: "auth_refresh_failed" });
+      if (!suppressRelogin) {
+        sendSocketMessage("relogin_required", { reason: "auth_refresh_failed" });
+      }
       return { success: false, error: "Auth refresh failed, relogin needed." };
     }
     const retry = await chrome.tabs.sendMessage(targetTabId, {
@@ -1063,7 +1092,9 @@ async function executeApi(tabId, options) {
       options
     });
     if (isAuthFailure(retry)) {
-      sendSocketMessage("relogin_required", { reason: "retry_failed" });
+      if (!suppressRelogin) {
+        sendSocketMessage("relogin_required", { reason: "retry_failed" });
+      }
       return { success: false, error: "Auth failed after one retry, relogin required." };
     }
     return retry;
@@ -1129,6 +1160,13 @@ async function handlePlatformAction(payload) {
       await persistState();
     }
     result = await executeScheduleLiveStreamFromPlatform(payload);
+  } else if (payload?.action === "sync_whatnot_reference_cache") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await syncSellerHubInventoryEditCatalog(payload?.tabId || state.tabId);
   } else if (payload?.action === "fetch_early_payout_balance_data") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -1622,7 +1660,7 @@ async function executeGetSellerHomeDashboardFromPlatform({ sellerId, upcomingSho
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
-  });
+  }, { suppressRelogin: true });
 
   if (apiResult?.success && apiResult?.data) {
     return apiResult;
