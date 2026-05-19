@@ -95,7 +95,7 @@ export function AppSidebar({
   const [moderatorProfile, setModeratorProfile] = useState<ModeratorProfileResponse["profile"] | null>(null)
   const [sellerPlatformNames, setSellerPlatformNames] = useState<string[]>([])
   const logoutRedirectUrl = pathname.startsWith("/admin")
-    ? "/admin-login"
+    ? "/login?role=admin"
     : pathname.startsWith("/staff")
       ? "/login?role=staff"
       : pathname.startsWith("/moderator")
