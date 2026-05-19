@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useClerk, useUser, useAuth } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 import { usePathname } from "next/navigation"
 import { BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
@@ -9,6 +10,14 @@ import { BrandLogo } from "@/components/brand-logo"
 import { useAuthenticatedUser } from "@/components/auth/authenticated-user-context"
 import { signOutAndClearAuth } from "@/lib/auth-session"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -31,26 +40,27 @@ import {
   SidebarMenuItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   ChevronUp,
+  ChevronDown,
   Settings,
   LogOut,
   User,
   LucideIcon,
   Lock,
+  Sparkles,
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { getConnectedAccounts, waitForSessionToken } from "@/lib/auth"
 import { getMyModeratorProfile, type ModeratorProfileResponse } from "@/lib/moderator-profile"
+import {
+  MARKETPLACE_HUB_DESCRIPTIONS,
+  MARKETPLACE_HUB_LABELS,
+  MARKETPLACE_HUB_LANDING_PATHS,
+  MARKETPLACE_HUB_OPTIONS,
+  useMarketplaceHub,
+} from "@/components/dashboard/marketplace-hub-context"
 
 interface NavItem {
   title: string
@@ -89,8 +99,10 @@ export function AppSidebar({
   const { signOut } = useClerk()
   const { user: clerkUser } = useUser()
   const { getToken, isLoaded } = useAuth()
+  const router = useRouter()
   const authenticatedUser = useAuthenticatedUser()
   const subscriptionAccess = useOptionalSellerSubscriptionAccess()
+  const marketplaceHubContext = useMarketplaceHub()
   const [lockedItemTitle, setLockedItemTitle] = useState<string | null>(null)
   const [moderatorProfile, setModeratorProfile] = useState<ModeratorProfileResponse["profile"] | null>(null)
   const [sellerPlatformNames, setSellerPlatformNames] = useState<string[]>([])
@@ -195,13 +207,14 @@ export function AppSidebar({
     : user?.name)
   const displaySubtitle = moderatorProfile?.headline || displayEmail
   const displayAvatar = clerkUser?.imageUrl || user?.avatar
-  const currentPlatformTitle = sellerPlatformNames.length === 0
-    ? "Connect Platforms"
-    : sellerPlatformNames.length === 1
-      ? sellerPlatformNames[0]
-      : sellerPlatformNames.length === 2
-        ? `${sellerPlatformNames[0]} + ${sellerPlatformNames[1]}`
-        : `${sellerPlatformNames[0]} +${sellerPlatformNames.length - 1}`
+  const currentHub = marketplaceHubContext?.hub ?? null
+  const currentHubLabel = currentHub ? MARKETPLACE_HUB_LABELS[currentHub] : BRAND_NAME
+  const currentHubDescription = currentHub
+    ? MARKETPLACE_HUB_DESCRIPTIONS[currentHub]
+    : "Choose the seller workspace you want to use."
+  const connectedPlatformSummary = sellerPlatformNames.length > 0
+    ? `${sellerPlatformNames.length} connected platform${sellerPlatformNames.length === 1 ? "" : "s"}`
+    : "No connected platforms"
 
   return (
     <>
@@ -228,7 +241,54 @@ export function AppSidebar({
 
       <Sidebar className="border-sidebar-border">
         <SidebarHeader className="border-b border-sidebar-border p-4">
-          <BrandLogo href={logo?.href || "/"} text={logo?.name || BRAND_NAME} iconClassName="h-8 w-8 rounded-lg" />
+          {marketplaceHubContext ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/30 px-3 py-3 text-left transition hover:bg-sidebar-accent"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-sidebar-foreground">Marketplace Hub</div>
+                    <div className="truncate text-xs text-muted-foreground">{currentHubLabel}</div>
+                    <div className="truncate text-[11px] text-muted-foreground/80">{connectedPlatformSummary}</div>
+                  </div>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" sideOffset={8} className="w-64">
+                <DropdownMenuItem disabled className="pointer-events-none opacity-100">
+                  <div className="flex flex-col items-start gap-0.5">
+                    <span className="text-sm font-medium">Switch marketplace</span>
+                    <span className="text-xs text-muted-foreground">{currentHubDescription}</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {MARKETPLACE_HUB_OPTIONS.map((hub) => {
+                  const isActive = hub === currentHub
+
+                  return (
+                    <DropdownMenuItem
+                      key={hub}
+                      onSelect={() => {
+                        marketplaceHubContext.setHub(hub)
+                        router.push(MARKETPLACE_HUB_LANDING_PATHS[hub])
+                      }}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span>{MARKETPLACE_HUB_LABELS[hub]}</span>
+                      {isActive ? <span className="text-xs text-primary">Active</span> : null}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <BrandLogo href={logo?.href || "/"} text={logo?.name || BRAND_NAME} iconClassName="h-8 w-8 rounded-lg" />
+          )}
         </SidebarHeader>
 
         <SidebarContent className="px-2">
@@ -244,10 +304,7 @@ export function AppSidebar({
                   {group.items.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
                     const isLocked = Boolean(item.requiresSubscription && !isLoading && !hasActiveSubscription)
-                    const displayTitle = isSeller && item.href === "/seller" ? currentPlatformTitle : item.title
-                    const displayBadge = isSeller && item.href === "/seller" && sellerPlatformNames.length > 0
-                      ? sellerPlatformNames.length
-                      : item.badge
+                    const displayBadge = item.badge
 
                     return (
                       <SidebarMenuItem key={item.href}>
@@ -273,7 +330,7 @@ export function AppSidebar({
                             }}
                           >
                             <item.icon className="h-4 w-4" />
-                            <span>{displayTitle}</span>
+                            <span>{item.title}</span>
                             {isLocked ? <Lock className="ml-auto h-4 w-4 text-muted-foreground" /> : null}
                             {!isLocked && displayBadge !== undefined && (
                               <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/15 px-1.5 text-xs font-medium text-primary">

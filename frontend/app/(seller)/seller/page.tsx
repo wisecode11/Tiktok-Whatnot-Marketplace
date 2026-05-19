@@ -420,7 +420,7 @@ export default function SellerConnectPlatformsPage() {
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      {/* <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <Card className="border-border/50 bg-card/50">
           <CardHeader>
             <CardTitle className="text-lg">TikTok Live Data</CardTitle>
@@ -463,7 +463,7 @@ export default function SellerConnectPlatformsPage() {
             ))}
           </CardContent>
         </Card>
-      </div>
+      </div> */}
 
       {!isLoading && connectedCount === 0 ? (
         <EmptyState
