@@ -935,6 +935,25 @@ export interface WhatnotLivestreamCategoryTreeResponse {
   categories: WhatnotLivestreamMainCategoryItem[]
 }
 
+export interface WhatnotReferenceCacheStatus {
+  needsSync: boolean
+  counts: {
+    categories: number
+    subcategories: number
+    shippingProfiles: number
+    mainCategories: number
+    refinements: number
+  }
+}
+
+export interface WhatnotReferenceCacheSyncResponse {
+  success: boolean
+  synced: boolean
+  steps: Record<string, boolean> | null
+  errors: string[]
+  cacheStatus: WhatnotReferenceCacheStatus
+}
+
 export interface WhatnotLivestreamIdSummary {
   id: string
   title: string | null
@@ -1970,6 +1989,13 @@ export async function fetchWhatnotShowTabData(
 export async function getWhatnotLivestreamCategoryTree(token: string) {
   return request<WhatnotLivestreamCategoryTreeResponse>("/api/integrations/whatnot/livestream-category-tree", {
     token,
+  })
+}
+
+export async function syncWhatnotReferenceCache(token: string) {
+  return request<WhatnotReferenceCacheSyncResponse>("/api/integrations/whatnot/reference-cache/sync", {
+    token,
+    method: "POST",
   })
 }
 

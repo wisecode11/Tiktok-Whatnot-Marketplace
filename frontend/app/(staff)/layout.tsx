@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { BarChart3, Box, ClipboardList, Clock, type LucideIcon, Printer, Rocket, Truck, Warehouse } from "lucide-react"
+import { BarChart3, Box, CalendarDays, ClipboardList, Clock, type LucideIcon, Printer, Rocket, Truck, Warehouse } from "lucide-react"
 
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
@@ -21,6 +21,7 @@ const moduleIcons: Record<string, LucideIcon> = {
   order_status_update: ClipboardList,
   order_management: BarChart3,
   attendance: Clock,
+  assigned_shows: CalendarDays,
 }
 
 const moduleOrder = [
@@ -32,6 +33,7 @@ const moduleOrder = [
   "order_status_update",
   "order_management",
   "attendance",
+  "assigned_shows",
 ] as const
 
 const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
@@ -43,6 +45,7 @@ const moduleTitles: Record<(typeof moduleOrder)[number], string> = {
   order_status_update: "Order Status Update",
   order_management: "Order Management",
   attendance: "Clock In / Clock Out",
+  assigned_shows: "Host Shows",
 }
 
 export default function StaffLayout({

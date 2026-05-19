@@ -26,6 +26,7 @@ const {
   getLatestWhatnotInventorySnapshot,
   getWhatnotInventoryCreateFormOptions,
   getWhatnotLivestreamCategoryTree,
+  getWhatnotReferenceCacheStatus,
   getWhatnotInventorySnapshot,
   getTikTokProfile,
   getTikTokVideoAnalytics,
@@ -48,6 +49,7 @@ const {
   fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotPrimaryShowFormatTagsFromExtension,
   scheduleWhatnotShowFromPlatform,
+  syncWhatnotReferenceCacheFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 } = require("../services/integrationService");
@@ -182,6 +184,15 @@ async function getWhatnotLivestreamCategoryTreeData(_req, res) {
   }
 }
 
+async function getWhatnotReferenceCacheStatusData(_req, res) {
+  try {
+    const result = await getWhatnotReferenceCacheStatus();
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function syncWhatnotInventoryLiveData(req, res) {
   try {
     const result = await syncWhatnotInventoryFromPlatform({
@@ -227,6 +238,17 @@ async function scheduleWhatnotShowData(req, res) {
     const result = await scheduleWhatnotShowFromPlatform({
       clerkUserId: req.auth.userId,
       schedulePayload: body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncWhatnotReferenceCacheData(req, res) {
+  try {
+    const result = await syncWhatnotReferenceCacheFromExtension({
+      clerkUserId: req.auth.userId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -908,6 +930,7 @@ module.exports = {
   getWhatnotInventoryLiveData,
   getWhatnotInventoryCreateFormOptionsData,
   getWhatnotLivestreamCategoryTreeData,
+  getWhatnotReferenceCacheStatusData,
   getWhatnotExtensionStatusData,
   getTikTokCreatorInfoData,
   getTikTokPostStatusData,
@@ -944,6 +967,7 @@ module.exports = {
   fetchWhatnotShowTabData,
   fetchWhatnotPrimaryShowFormatTagsData,
   scheduleWhatnotShowData,
+  syncWhatnotReferenceCacheData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
   syncWhatnotEarlyPayoutBalanceData,

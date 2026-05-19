@@ -1,9 +1,13 @@
 "use client"
 
 import { useAuth } from "@clerk/nextjs"
-import { Loader2, RefreshCw, CalendarDays, CalendarRange, ListFilter } from "lucide-react"
+import { EllipsisVertical, Loader2, RefreshCw, CalendarDays, CalendarRange, ListFilter } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
+import {
+  AssignShowHostDialog,
+  type AssignShowHostEvent,
+} from "@/components/seller/assign-show-host-dialog"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,13 +34,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { listHiredModerators, type HiredModeratorBooking } from "@/lib/booking-payment"
-import { getConnectedAccounts, waitForSessionToken, type ConnectedAccountResponse } from "@/lib/auth"
+import { listShowHostAssignments, type ShowHostAssignment } from "@/lib/show-host"
+import {
+  fetchWhatnotShowTabData,
+  getConnectedAccounts,
+  waitForSessionToken,
+  type ConnectedAccountResponse,
+  type WhatnotLiveShowItem,
+} from "@/lib/auth"
 
 type CalendarView = "calendar" | "list"
 type CalendarScale = "month" | "week"
 type PlatformFilter = "all" | "tiktok" | "whatnot"
-type StatusFilter = "all" | "upcoming" | "live" | "completed"
 type SupportedPlatform = "tiktok" | "whatnot"
 
 type CalendarEventStatus = "upcoming" | "live" | "completed"
@@ -89,51 +104,57 @@ function getEventStatus(startAt: Date, endAt: Date): CalendarEventStatus {
   return "completed"
 }
 
-function getConnectedPlatforms(accounts: ConnectedAccountResponse["accounts"]): SupportedPlatform[] {
-  const connected = accounts
-    .filter((account) => account.connected)
-    .map((account) => account.platform)
-    .filter((platform): platform is SupportedPlatform => platform === "tiktok" || platform === "whatnot")
-
-  if (connected.length > 0) {
-    return connected
+function mapWhatnotShowTypeToStatus(showType: WhatnotLiveShowItem["showType"]): CalendarEventStatus {
+  if (showType === "Live") {
+    return "live"
   }
 
-  return ["tiktok"]
+  if (showType === "Upcoming") {
+    return "upcoming"
+  }
+
+  return "completed"
 }
 
-function normalizeEvents(
-  bookings: HiredModeratorBooking[],
-  connectedPlatforms: SupportedPlatform[],
-): CalendarEvent[] {
+function normalizeEvents(shows: WhatnotLiveShowItem[]): CalendarEvent[] {
   const events: CalendarEvent[] = []
 
-  for (const booking of bookings) {
-    if (!booking.scheduledStartAt || !booking.scheduledEndAt) {
+  for (const show of shows) {
+    if (!show.startTime) {
       continue
     }
 
-    const startAt = new Date(booking.scheduledStartAt)
-    const endAt = new Date(booking.scheduledEndAt)
+    const startAt = new Date(show.startTime)
+    const endAt = show.endTime ? new Date(show.endTime) : new Date(show.startTime + 60 * 60 * 1000)
 
     if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
       continue
     }
 
-    for (const platform of connectedPlatforms) {
-      events.push({
-        id: `${booking.bookingId}:${platform}`,
-        bookingId: booking.bookingId,
-        streamTitle: `${booking.moderatorName || "Moderator"} stream session`,
-        platform,
-        startAt,
-        endAt,
-        status: getEventStatus(startAt, endAt),
-      })
-    }
+    events.push({
+      id: show.id || `${show.title || "whatnot-show"}:${show.startTime}`,
+      bookingId: show.id || "",
+      streamTitle: show.title || "Untitled Whatnot Show",
+      platform: "whatnot",
+      startAt,
+      endAt,
+      status: show.showType ? mapWhatnotShowTypeToStatus(show.showType) : getEventStatus(startAt, endAt),
+    })
   }
 
-  return events.sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+  return events
+    .filter((event) => event.status === "upcoming")
+    .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+}
+
+function toAssignShowHostEvent(event: CalendarEvent): AssignShowHostEvent {
+  return {
+    id: event.id,
+    streamTitle: event.streamTitle,
+    platform: event.platform,
+    startAt: event.startAt,
+    endAt: event.endAt,
+  }
 }
 
 function formatTimeRange(startAt: Date, endAt: Date) {
@@ -177,11 +198,13 @@ export default function SellerCalendarPage() {
   const [scale, setScale] = useState<CalendarScale>("month")
   const [focusDate, setFocusDate] = useState<Date>(new Date())
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [startDateFilter, setStartDateFilter] = useState("")
   const [endDateFilter, setEndDateFilter] = useState("")
 
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [hostAssignments, setHostAssignments] = useState<ShowHostAssignment[]>([])
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false)
+  const [selectedAssignEvent, setSelectedAssignEvent] = useState<AssignShowHostEvent | null>(null)
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccountResponse["accounts"]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -201,19 +224,20 @@ export default function SellerCalendarPage() {
 
     try {
       const token = await waitForSessionToken(getToken)
-      const [accountsResult, bookingsResult] = await Promise.all([
+      const [accountsResult, whatnotShowsResult, assignmentsResult] = await Promise.all([
         getConnectedAccounts(token),
-        listHiredModerators(token),
+        fetchWhatnotShowTabData(token, 0, { forceRefresh: isManualRefresh }),
+        listShowHostAssignments(token).catch(() => ({ assignments: [] as ShowHostAssignment[] })),
       ])
 
-      const activePlatforms = getConnectedPlatforms(accountsResult.accounts)
-      const normalized = normalizeEvents(bookingsResult.bookings || [], activePlatforms)
+      const normalized = normalizeEvents(whatnotShowsResult.shows || [])
 
       setConnectedAccounts(accountsResult.accounts)
       setEvents(normalized)
+      setHostAssignments(assignmentsResult.assignments)
       setLastUpdatedAt(new Date())
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to load calendar events.")
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load Whatnot shows for calendar.")
       setEvents([])
     } finally {
       setIsLoading(false)
@@ -245,10 +269,6 @@ export default function SellerCalendarPage() {
         return false
       }
 
-      if (statusFilter !== "all" && event.status !== statusFilter) {
-        return false
-      }
-
       if (startDateFilter) {
         const startBoundary = new Date(`${startDateFilter}T00:00:00`)
         if (event.startAt < startBoundary) {
@@ -265,7 +285,31 @@ export default function SellerCalendarPage() {
 
       return true
     })
-  }, [endDateFilter, events, platformFilter, startDateFilter, statusFilter])
+  }, [endDateFilter, events, platformFilter, startDateFilter])
+
+  const hostAssignmentsByShowId = useMemo(() => {
+    const map = new Map<string, ShowHostAssignment>()
+    for (const assignment of hostAssignments) {
+      map.set(assignment.showId, assignment)
+    }
+    return map
+  }, [hostAssignments])
+
+  const selectedHostAssignment = selectedAssignEvent
+    ? hostAssignmentsByShowId.get(selectedAssignEvent.id) || null
+    : null
+
+  function openAssignHostDialog(event: CalendarEvent) {
+    setSelectedAssignEvent(toAssignShowHostEvent(event))
+    setAssignDialogOpen(true)
+  }
+
+  function handleHostAssigned(assignment: ShowHostAssignment) {
+    setHostAssignments((current) => {
+      const next = current.filter((item) => item.showId !== assignment.showId)
+      return [...next, assignment]
+    })
+  }
 
   const monthStart = useMemo(() => new Date(focusDate.getFullYear(), focusDate.getMonth(), 1), [focusDate])
   const monthEnd = useMemo(() => new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 0), [focusDate])
@@ -312,7 +356,7 @@ export default function SellerCalendarPage() {
     <div className="space-y-6">
       <PageHeader
         title="Calendar"
-        description="View and schedule your stream bookings across TikTok and Whatnot in calendar or list mode."
+        description="View upcoming Whatnot shows and assign a staff host from calendar or list view."
       />
 
       <Card>
@@ -379,7 +423,7 @@ export default function SellerCalendarPage() {
             </div>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
             <Select value={platformFilter} onValueChange={(value) => setPlatformFilter(value as PlatformFilter)}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Filter by platform" />
@@ -391,23 +435,12 @@ export default function SellerCalendarPage() {
               </SelectContent>
             </Select>
 
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="upcoming">Upcoming</SelectItem>
-                <SelectItem value="live">Live</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Input type="date" value={startDateFilter} onChange={(event) => setStartDateFilter(event.target.value)} />
             <Input type="date" value={endDateFilter} onChange={(event) => setEndDateFilter(event.target.value)} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="secondary">Upcoming shows only</Badge>
             <Badge variant="outline">Connected platforms: {activeConnections.length}</Badge>
             {activeConnections.map((account) => (
               <Badge
@@ -437,7 +470,7 @@ export default function SellerCalendarPage() {
 
           {!isLoading && !errorMessage && filteredEvents.length === 0 ? (
             <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No scheduled events found with the current filters.
+              No upcoming shows found with the current filters.
             </div>
           ) : null}
 
@@ -475,17 +508,30 @@ export default function SellerCalendarPage() {
                         {day.getDate()}
                       </p>
                       <div className="space-y-1">
-                        {dayEvents.slice(0, 3).map((event) => (
-                          <div key={event.id} className="rounded border border-border/70 bg-muted/20 p-1.5 text-[11px]">
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="truncate font-medium">{event.streamTitle}</span>
-                              <Badge variant={getStatusBadgeVariant(event.status)} className="h-5 px-1.5 text-[10px] uppercase">
-                                {event.status}
-                              </Badge>
-                            </div>
-                            <p className="truncate text-muted-foreground">{formatPlatformLabel(event.platform)} • {formatTimeRange(event.startAt, event.endAt)}</p>
-                          </div>
-                        ))}
+                        {dayEvents.slice(0, 3).map((event) => {
+                          const assignedHost = hostAssignmentsByShowId.get(event.id)
+                          return (
+                            <button
+                              key={event.id}
+                              type="button"
+                              onClick={() => openAssignHostDialog(event)}
+                              className="w-full rounded border border-border/70 bg-muted/20 p-1.5 text-left text-[11px] transition-colors hover:border-primary/50 hover:bg-muted/40"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="truncate font-medium">{event.streamTitle}</span>
+                                <Badge variant={getStatusBadgeVariant(event.status)} className="h-5 px-1.5 text-[10px] uppercase">
+                                  {event.status}
+                                </Badge>
+                              </div>
+                              <p className="truncate text-muted-foreground">
+                                {formatPlatformLabel(event.platform)} • {formatTimeRange(event.startAt, event.endAt)}
+                              </p>
+                              {assignedHost?.hostName ? (
+                                <p className="truncate text-[10px] text-primary">Host: {assignedHost.hostName}</p>
+                              ) : null}
+                            </button>
+                          )
+                        })}
                         {dayEvents.length > 3 ? <p className="text-[11px] text-muted-foreground">+{dayEvents.length - 3} more</p> : null}
                       </div>
                     </div>
@@ -523,16 +569,27 @@ export default function SellerCalendarPage() {
                         {dayEvents.length === 0 ? (
                           <p className="text-xs text-muted-foreground">No events</p>
                         ) : (
-                          dayEvents.map((event) => (
-                            <div key={event.id} className="rounded border border-border/70 bg-muted/20 p-2 text-xs">
-                              <p className="font-medium">{event.streamTitle}</p>
-                              <p className="text-muted-foreground">{formatPlatformLabel(event.platform)}</p>
-                              <p className="text-muted-foreground">{formatTimeRange(event.startAt, event.endAt)}</p>
-                              <Badge variant={getStatusBadgeVariant(event.status)} className="mt-1 uppercase">
-                                {event.status}
-                              </Badge>
-                            </div>
-                          ))
+                          dayEvents.map((event) => {
+                            const assignedHost = hostAssignmentsByShowId.get(event.id)
+                            return (
+                              <button
+                                key={event.id}
+                                type="button"
+                                onClick={() => openAssignHostDialog(event)}
+                                className="w-full rounded border border-border/70 bg-muted/20 p-2 text-left text-xs transition-colors hover:border-primary/50 hover:bg-muted/40"
+                              >
+                                <p className="font-medium">{event.streamTitle}</p>
+                                <p className="text-muted-foreground">{formatPlatformLabel(event.platform)}</p>
+                                <p className="text-muted-foreground">{formatTimeRange(event.startAt, event.endAt)}</p>
+                                {assignedHost?.hostName ? (
+                                  <p className="text-[11px] text-primary">Host: {assignedHost.hostName}</p>
+                                ) : null}
+                                <Badge variant={getStatusBadgeVariant(event.status)} className="mt-1 uppercase">
+                                  {event.status}
+                                </Badge>
+                              </button>
+                            )
+                          })
                         )}
                       </div>
                     </div>
@@ -550,32 +607,67 @@ export default function SellerCalendarPage() {
                   <TableHead>Platform</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Time</TableHead>
+                  <TableHead>Host</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredEvents.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell className="font-medium">{event.streamTitle}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={getPlatformBadgeClassName(event.platform)}>
-                        {formatPlatformLabel(event.platform)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{event.startAt.toLocaleDateString()}</TableCell>
-                    <TableCell>{formatTimeRange(event.startAt, event.endAt)}</TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusBadgeVariant(event.status)} className="uppercase">
-                        {event.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {filteredEvents.map((event) => {
+                  const assignedHost = hostAssignmentsByShowId.get(event.id)
+                  return (
+                    <TableRow key={event.id}>
+                      <TableCell className="font-medium">{event.streamTitle}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={getPlatformBadgeClassName(event.platform)}>
+                          {formatPlatformLabel(event.platform)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{event.startAt.toLocaleDateString()}</TableCell>
+                      <TableCell>{formatTimeRange(event.startAt, event.endAt)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {assignedHost?.hostName || "Unassigned"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusBadgeVariant(event.status)} className="uppercase">
+                          {event.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              aria-label={`Open actions for ${event.streamTitle}`}
+                            >
+                              <EllipsisVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => openAssignHostDialog(event)}>
+                              Assign host
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           ) : null}
         </CardContent>
       </Card>
+
+      <AssignShowHostDialog
+        open={assignDialogOpen}
+        onOpenChange={setAssignDialogOpen}
+        event={selectedAssignEvent}
+        currentAssignment={selectedHostAssignment}
+        onAssigned={handleHostAssigned}
+      />
     </div>
   )
 }

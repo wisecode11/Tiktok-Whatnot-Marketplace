@@ -93,4 +93,8 @@ export const MODULE_DEFINITIONS: Record<
     label: "Clock In / Clock Out",
     description: "Clock in and out to record daily attendance",
   },
+  assigned_shows: {
+    label: "Host Shows",
+    description: "View upcoming shows assigned to you as host",
+  },
 }

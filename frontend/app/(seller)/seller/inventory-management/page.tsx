@@ -13,6 +13,7 @@ import {
   Search,
   SlidersHorizontal,
   Pencil,
+  PackageSearch,
   Trash2,
   Sparkles,
 } from "lucide-react"
@@ -54,6 +55,7 @@ import {
   getTikTokGlobalProduct,
   updateTikTokGlobalProduct202509,
   syncWhatnotInventoryLive,
+  syncWhatnotReferenceCache,
   waitForSessionToken,
   type TikTokGlobalProduct,
   type TikTokGlobalProductGetResponse,
@@ -307,6 +309,9 @@ export default function SellerInventoryManagementPage() {
   const [createFormError, setCreateFormError] = useState("")
   const [subcategoryOptions, setSubcategoryOptions] = useState<SubcategoryOption[]>([])
   const [shippingProfileOptions, setShippingProfileOptions] = useState<ShippingProfileOption[]>([])
+  const [referenceCacheSyncing, setReferenceCacheSyncing] = useState(false)
+  const [referenceCacheNotice, setReferenceCacheNotice] = useState("")
+  const [referenceCacheError, setReferenceCacheError] = useState("")
   const [categorySearchValue, setCategorySearchValue] = useState("")
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
@@ -417,6 +422,21 @@ export default function SellerInventoryManagementPage() {
       cancelled = true
     }
   }, [getToken, isLoaded, selectedTab])
+
+  const loadWhatnotCreateFormOptions = useCallback(async () => {
+    const token = await waitForSessionToken(getToken)
+    const result = await getWhatnotInventoryCreateFormOptions(token)
+    setSubcategoryOptions(
+      Array.isArray(result.subcategories)
+        ? result.subcategories.filter((item) => item.id && item.label)
+        : [],
+    )
+    setShippingProfileOptions(
+      Array.isArray(result.shippingProfiles)
+        ? result.shippingProfiles.filter((item) => item.id && item.name)
+        : [],
+    )
+  }, [getToken])
 
   useEffect(() => {
     let cancelled = false
@@ -588,6 +608,30 @@ export default function SellerInventoryManagementPage() {
       setTiktokGlobalError(getClerkErrorMessage(error))
     } finally {
       setTiktokGlobalLoading(false)
+    }
+  }
+
+  async function handleWhatnotReferenceCacheRefresh() {
+    if (!isLoaded || referenceCacheSyncing) return
+
+    try {
+      setReferenceCacheSyncing(true)
+      setReferenceCacheError("")
+      setReferenceCacheNotice("")
+
+      const token = await waitForSessionToken(getToken)
+      const result = await syncWhatnotReferenceCache(token)
+      await loadWhatnotCreateFormOptions()
+
+      if (Array.isArray(result.errors) && result.errors.length) {
+        setReferenceCacheNotice(`Whatnot cache refreshed with warnings: ${result.errors[0]}`)
+      } else {
+        setReferenceCacheNotice("Whatnot cache refreshed from the extension.")
+      }
+    } catch (error) {
+      setReferenceCacheError(getClerkErrorMessage(error))
+    } finally {
+      setReferenceCacheSyncing(false)
     }
   }
 
@@ -1155,12 +1199,31 @@ export default function SellerInventoryManagementPage() {
     <div className="space-y-6">
       <PageHeader title="Inventory" description="Manage your product list and inventory visibility.">
         {inventoryPlatformTab === "whatnot" ? (
-          <Button className="gap-2" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            Create Product
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              onClick={() => void handleWhatnotReferenceCacheRefresh()}
+              disabled={referenceCacheSyncing}
+            >
+              {referenceCacheSyncing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+              Refetch Whatnot Cache
+            </Button>
+            <Button className="gap-2" onClick={openCreateDialog}>
+              <Plus className="h-4 w-4" />
+              Create Product
+            </Button>
+          </div>
         ) : null}
       </PageHeader>
+
+      {inventoryPlatformTab === "whatnot" && referenceCacheNotice ? (
+        <p className="text-sm text-emerald-600">{referenceCacheNotice}</p>
+      ) : null}
+      {inventoryPlatformTab === "whatnot" && referenceCacheError ? (
+        <p className="text-sm text-destructive">{referenceCacheError}</p>
+      ) : null}
 
       <MarketplacePlatformSwitch
         value={inventoryPlatformTab}
