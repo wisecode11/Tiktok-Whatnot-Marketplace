@@ -144,16 +144,17 @@ async function getMyPermissions({ clerkUserId }) {
     throw createHttpError(404, "Staff membership not found.");
   }
 
-  let modules =
-    membership.permissions_json && Array.isArray(membership.permissions_json.modules)
-      ? membership.permissions_json.modules
-      : [];
+  const permissions = membership.permissions_json || {};
 
-  if (modules.length === 0) {
-    modules = [...DEFAULT_MODULES];
+  // Only fall back to defaults when permissions were never configured (legacy records).
+  // An explicit empty array means the seller disabled every module.
+  if (!Array.isArray(permissions.modules)) {
+    return { modules: [...DEFAULT_MODULES] };
   }
 
-  return { modules };
+  return {
+    modules: normalizeModules(permissions.modules),
+  };
 }
 
 module.exports = {

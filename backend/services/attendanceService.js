@@ -63,7 +63,7 @@ function staffHasAttendanceModule(membership) {
 
   const modules = membership.permissions_json.modules;
 
-  if (!Array.isArray(modules) || modules.length === 0) {
+  if (!Array.isArray(modules)) {
     return DEFAULT_MODULES.includes("attendance");
   }
 
