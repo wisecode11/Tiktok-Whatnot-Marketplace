@@ -95,7 +95,7 @@ export function AccessControlModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto max-h-[400px]">
           <div className="grid gap-3">
             {isLoading ? (
               <div className="flex min-h-48 items-center justify-center">
