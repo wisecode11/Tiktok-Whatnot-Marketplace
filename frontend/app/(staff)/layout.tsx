@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import {
   BarChart3,
   Box,
+  CalendarDays,
   ClipboardList,
   Clock,
   type LucideIcon,
@@ -14,7 +15,6 @@ import {
   Truck,
   Warehouse,
 } from "lucide-react"
-import { BarChart3, Box, CalendarDays, ClipboardList, Clock, type LucideIcon, Printer, Rocket, Truck, Warehouse } from "lucide-react"
 
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
