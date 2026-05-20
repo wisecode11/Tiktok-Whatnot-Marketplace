@@ -1,13 +1,14 @@
 "use client"
 
-import { Suspense, useMemo } from "react"
+import { Suspense, useEffect, useMemo } from "react"
 import { TaskChooseOrganization, useUser } from "@clerk/nextjs"
 import { Loader2 } from "lucide-react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 import { buildPath, normalizeRole } from "@/lib/auth"
 
 function ChooseOrganizationContent() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { user, isLoaded } = useUser()
 
@@ -35,7 +36,23 @@ function ChooseOrganizationContent() {
     role: role || undefined,
   })
 
-  if (!isLoaded) {
+  // Organization selection is streamer-only. Staff, moderator, and admin skip this Clerk task.
+  useEffect(() => {
+    if (!isLoaded) {
+      return
+    }
+
+    if (role === "streamer") {
+      router.replace("/seller/select-organization")
+      return
+    }
+
+    if (role) {
+      router.replace(redirectUrlComplete)
+    }
+  }, [isLoaded, redirectUrlComplete, role, router])
+
+  if (!isLoaded || role !== "streamer") {
     return (
       <LoadingFallback>
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -47,7 +64,7 @@ function ChooseOrganizationContent() {
     <div className="w-full max-w-md">
       <h1 className="mb-2 text-center text-2xl font-semibold text-foreground">Choose your workspace</h1>
       <p className="mb-6 text-center text-sm text-muted-foreground">
-        Select the organization your streamer admin added you to, then continue.
+        Select or create your seller organization to continue.
       </p>
       <TaskChooseOrganization redirectUrlComplete={redirectUrlComplete} />
     </div>

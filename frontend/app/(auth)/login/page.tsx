@@ -236,7 +236,7 @@ function LoginContent() {
             <SignIn
               key={`sign-in-${selectedRole}-${isSignedIn ? "signed" : "guest"}`}
               routing="hash"
-              signUpUrl={signUpUrl}
+              signUpUrl={selectedRole === "staff" ? buildPath("/login", { role: "staff" }) : signUpUrl}
               signInFallbackRedirectUrl={completionUrl}
               signInForceRedirectUrl={completionUrl}
               signUpFallbackRedirectUrl={completionUrl}
