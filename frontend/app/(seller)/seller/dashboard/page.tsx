@@ -471,7 +471,7 @@ export default function SellerDashboard() {
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+      {/* <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Card className="border-border/50 bg-card/50">
           <CardHeader>
             <CardTitle className="text-lg">Current Platforms</CardTitle>
@@ -505,32 +505,7 @@ export default function SellerDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader>
-            <CardTitle className="text-lg">API Availability</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2 font-medium text-foreground">
-                  <PlugZap className="h-4 w-4 text-primary" />
-                  Live from current APIs
-                </div>
-                <p className="mt-2">TikTok profile, account identity, followers, following, likes, and public video count. Whatnot inventory now uses the official GraphQL endpoint first.</p>
-              </div>
-              <div className="rounded-2xl border border-border/50 bg-muted/20 p-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2 font-medium text-foreground">
-                  <Radio className="h-4 w-4 text-primary" />
-                  Whatnot fallback policy
-                </div>
-                <p className="mt-2">
-                  Current source: {whatnotSnapshot?.source || "none"}. Fallback to structured mock data is only used for Whatnot access-denied or empty responses. Technical errors fail fast for debugging.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      </div> */}
     </div>
   )
 }

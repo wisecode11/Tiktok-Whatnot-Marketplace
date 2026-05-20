@@ -42,7 +42,6 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Skeleton } from "@/components/ui/skeleton"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { useToast } from "@/hooks/use-toast"
 import { waitForSessionToken } from "@/lib/auth"
@@ -111,23 +110,6 @@ function getSubscriptionVariant(status: string | null | undefined) {
 
 function formatCardLabel(paymentMethod: BillingPaymentMethod) {
   return `${toTitleCase(paymentMethod.brand)} ending in ${paymentMethod.last4 || "----"}`
-}
-
-function LoadingState() {
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Subscription" description="Manage your subscription and billing" />
-      <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        <Skeleton className="h-64 rounded-2xl" />
-        <Skeleton className="h-64 rounded-2xl" />
-      </div>
-      <div className="grid gap-6 md:grid-cols-3">
-        <Skeleton className="h-96 rounded-2xl" />
-        <Skeleton className="h-96 rounded-2xl" />
-        <Skeleton className="h-96 rounded-2xl" />
-      </div>
-    </div>
-  )
 }
 
 function NewPaymentMethodFields({
@@ -501,7 +483,17 @@ export function SellerSubscriptionManager() {
   }
 
   if (isLoading) {
-    return <LoadingState />
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Subscription" description="Manage your subscription and billing" />
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <Loader2 className="size-5 animate-spin" />
+            Loading subscription details...
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (!overview) {
