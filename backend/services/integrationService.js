@@ -2534,6 +2534,40 @@ async function saveWhatnotLivestreamTagDirectDescendants({
   };
 }
 
+async function getWhatnotReferenceCacheStatus() {
+  const [categoryCount, subcategoryCount, shippingProfileCount, mainCategoryCount, refinementCount] = await Promise.all([
+    WhatnotCategory.countDocuments({
+      platform: "whatnot",
+      whatnot_category_id: { $exists: true, $type: "string" },
+    }),
+    WhatnotSubCategory.countDocuments({
+      platform: "whatnot",
+      subcategory_id: { $exists: true, $type: "string" },
+    }),
+    WhatnotProfileShipping.countDocuments({
+      platform: "whatnot",
+      WhatnotProfileShipping_id: { $exists: true, $type: "string" },
+    }),
+    WhatnotLivestreamMainCategory.countDocuments({
+      _id: { $exists: true, $type: "string" },
+    }),
+    WhatnotLivestreamRefinementCategory.countDocuments({
+      _id: { $exists: true, $type: "string" },
+    }),
+  ]);
+
+  return {
+    needsSync: subcategoryCount === 0 || shippingProfileCount === 0 || mainCategoryCount === 0,
+    counts: {
+      categories: categoryCount,
+      subcategories: subcategoryCount,
+      shippingProfiles: shippingProfileCount,
+      mainCategories: mainCategoryCount,
+      refinements: refinementCount,
+    },
+  };
+}
+
 async function getWhatnotInventoryCreateFormOptions() {
   const [subcategories, shippingProfiles] = await Promise.all([
     WhatnotSubCategory.find({
@@ -4204,6 +4238,57 @@ async function scheduleWhatnotShowFromPlatform({ clerkUserId, schedulePayload = 
   };
 }
 
+async function syncWhatnotReferenceCacheFromExtension({ clerkUserId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "sync_whatnot_reference_cache",
+    clerkUserId: normalizedClerkUserId,
+  }, 300000);
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to sync Whatnot reference cache through extension.",
+      actionResult || null,
+    );
+  }
+
+  const cacheStatus = await getWhatnotReferenceCacheStatus();
+
+  return {
+    success: true,
+    synced: true,
+    steps: actionResult.steps || null,
+    errors: Array.isArray(actionResult.errors) ? actionResult.errors : [],
+    cacheStatus,
+  };
+}
+
 /** Whatnot Relay ids sometimes confuse `l` vs `1` when copied (ShipmentNode segment). */
 function normalizeShipmentGraphqlId(id) {
   const s = typeof id === "string" ? id.trim() : "";
@@ -4895,12 +4980,14 @@ module.exports = {
   saveWhatnotLivestreamTagDirectDescendants,
   getWhatnotInventoryCreateFormOptions,
   getWhatnotLivestreamCategoryTree,
+  getWhatnotReferenceCacheStatus,
   getWhatnotOrders,
   syncWhatnotOrdersFromExtension,
   fetchMyLiveStatsFromExtension,
   fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotPrimaryShowFormatTagsFromExtension,
   scheduleWhatnotShowFromPlatform,
+  syncWhatnotReferenceCacheFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
 };

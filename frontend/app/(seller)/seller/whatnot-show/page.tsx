@@ -1,8 +1,8 @@
 "use client"
 
 import { useAuth } from "@clerk/nextjs"
-import { useEffect, useRef, useState } from "react"
-import { ChevronDown, ChevronRight, Clock3, ExternalLink, Radio } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { ChevronDown, ChevronRight, Clock3, ExternalLink, PackageSearch, Radio, RefreshCw } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +32,7 @@ import {
   fetchWhatnotPrimaryShowFormatTags,
   getWhatnotLivestreamCategoryTree,
   scheduleWhatnotShow,
+  syncWhatnotReferenceCache,
   waitForSessionToken,
   type WhatnotLivestreamMainCategoryItem,
   type WhatnotLiveShowItem,
@@ -68,6 +69,9 @@ export default function SellerWhatnotShowPage() {
   const [isPrimaryShowFormatLoading, setIsPrimaryShowFormatLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState("")
   const [scheduleNotice, setScheduleNotice] = useState("")
+  const [referenceCacheSyncing, setReferenceCacheSyncing] = useState(false)
+  const [referenceCacheNotice, setReferenceCacheNotice] = useState("")
+  const [referenceCacheError, setReferenceCacheError] = useState("")
   const primaryShowFormatRequestIdRef = useRef(0)
   const [scheduleForm, setScheduleForm] = useState({
     name: "",
@@ -140,10 +144,16 @@ export default function SellerWhatnotShowPage() {
     }
   }
 
+  const loadCategoryOptions = useCallback(async () => {
+    const token = await waitForSessionToken(getToken)
+    const response = await getWhatnotLivestreamCategoryTree(token)
+    setCategoryOptions(Array.isArray(response.categories) ? response.categories : [])
+  }, [getToken])
+
   useEffect(() => {
     let cancelled = false
 
-    async function loadCategoryOptions() {
+    async function hydrateCategoryOptions() {
       if (!isLoaded) return
       try {
         const token = await waitForSessionToken(getToken)
@@ -157,11 +167,37 @@ export default function SellerWhatnotShowPage() {
       }
     }
 
-    void loadCategoryOptions()
+    void hydrateCategoryOptions()
     return () => {
       cancelled = true
     }
   }, [getToken, isLoaded])
+
+  async function handleReferenceCacheRefresh() {
+    if (!isLoaded || referenceCacheSyncing) return
+
+    try {
+      setReferenceCacheSyncing(true)
+      setReferenceCacheError("")
+      setReferenceCacheNotice("")
+
+      const token = await waitForSessionToken(getToken)
+      const result = await syncWhatnotReferenceCache(token)
+      await loadCategoryOptions()
+
+      if (Array.isArray(result.errors) && result.errors.length) {
+        setReferenceCacheNotice(`Whatnot cache refreshed with warnings: ${result.errors[0]}`)
+      } else {
+        setReferenceCacheNotice("Whatnot cache refreshed from the extension.")
+      }
+    } catch (error) {
+      setReferenceCacheError(
+        error instanceof Error ? error.message : "Could not refresh the Whatnot reference cache.",
+      )
+    } finally {
+      setReferenceCacheSyncing(false)
+    }
+  }
 
   function resetScheduleForm() {
     setScheduleError("")
@@ -367,12 +403,26 @@ export default function SellerWhatnotShowPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Whatnot Show" description="Launch upcoming Whatnot sessions from one place.">
-        <Button className="gap-2" onClick={openScheduleModal}>
-          <Radio className="h-4 w-4" />
-          Schedule a show
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={() => void handleReferenceCacheRefresh()}
+            disabled={referenceCacheSyncing}
+          >
+            {referenceCacheSyncing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+            Refetch Whatnot Cache
+          </Button>
+          <Button className="gap-2" onClick={openScheduleModal}>
+            <Radio className="h-4 w-4" />
+            Schedule a show
+          </Button>
+        </div>
       </PageHeader>
       {scheduleNotice ? <p className="text-sm text-emerald-600">{scheduleNotice}</p> : null}
+      {referenceCacheNotice ? <p className="text-sm text-emerald-600">{referenceCacheNotice}</p> : null}
+      {referenceCacheError ? <p className="text-sm text-destructive">{referenceCacheError}</p> : null}
       {loadError ? <p className="text-sm text-destructive">{loadError}</p> : null}
 
       <Card className="overflow-hidden border-border/60 bg-card">

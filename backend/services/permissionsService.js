@@ -20,6 +20,7 @@ const DEFAULT_MODULES = [
   "order_status_update",
   "order_management",
   "attendance",
+  "assigned_shows",
 ];
 
 async function findAuthenticatedSeller(clerkUserId) {

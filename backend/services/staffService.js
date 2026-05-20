@@ -204,10 +204,13 @@ async function getActiveStaffWithUsers(workspaceId, { revokeOrphanMemberships = 
 }
 
 function serializeStaffMember({ user, membership }) {
+  const permissions = membership && membership.permissions_json ? membership.permissions_json : {};
+  const modules = Array.isArray(permissions.modules) ? permissions.modules : [];
+
   return {
     id: user._id,
     clerkUserId: user.clerk_user_id,
-    username: membership && membership.permissions_json ? membership.permissions_json.username || null : null,
+    username: permissions.username || null,
     email: user.email,
     firstName: user.first_name || "",
     lastName: user.last_name || "",
@@ -215,6 +218,7 @@ function serializeStaffMember({ user, membership }) {
     status: user.status,
     streamerUserId: user.parent_seller_user_id || null,
     workspaceId: membership ? membership.workspace_id : null,
+    modules,
     joinedAt: membership && membership.joined_at ? membership.joined_at : null,
     createdAt: user.created_at || null,
   };
