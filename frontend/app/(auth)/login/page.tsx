@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useState } from "react"
-import { SignIn, useAuth, useClerk, useUser } from "@clerk/nextjs"
+import { SignIn, useAuth, useClerk, useSession, useUser } from "@clerk/nextjs"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Shield, Radio, Users, Loader2, UserCog } from "lucide-react"
@@ -50,41 +50,41 @@ const staffOnlyClerkAppearance = {
 
 type Role = AppRole | null
 
+function hasClerkTaskHash() {
+  if (typeof window === "undefined") {
+    return false
+  }
+
+  const hash = window.location.hash
+  return (
+    hash.includes("choose-organization") ||
+    hash.includes("/tasks/") ||
+    hash.includes("sign_up_force_redirect_url")
+  )
+}
+
 function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { isLoaded, isSignedIn } = useAuth()
+  const { session } = useSession()
   const { signOut } = useClerk()
   const { user } = useUser()
   const initialRole = normalizeRole(searchParams.get("role"))
   const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
 
-  // Keep the browser URL as /login?role=... (no Clerk #/tasks/... hash routes).
+  const hasPendingSessionTask = session?.status === "pending"
+  const shouldShowSignIn = !isSignedIn || hasPendingSessionTask || hasClerkTaskHash()
+
+  // Keep /login?role=... clean, but do not interrupt Clerk session tasks.
   useEffect(() => {
+    if (hasClerkTaskHash() || hasPendingSessionTask) {
+      return
+    }
+
     const targetPath = selectedRole ? buildPath("/login", { role: selectedRole }) : "/login"
     router.replace(targetPath, { scroll: false })
-  }, [router, selectedRole])
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return
-    }
-
-    const hash = window.location.hash
-    if (!hash) {
-      return
-    }
-
-    const isClerkTaskHash =
-      hash.includes("choose-organization") ||
-      hash.includes("/tasks/") ||
-      hash.includes("sign_up_force_redirect_url")
-
-    if (isClerkTaskHash) {
-      const nextUrl = selectedRole ? buildPath("/login", { role: selectedRole }) : "/login"
-      window.history.replaceState(null, "", nextUrl)
-    }
-  }, [selectedRole])
+  }, [hasPendingSessionTask, router, selectedRole])
 
   const signUpUrl = useMemo(() => {
     return buildPath("/signup", { role: selectedRole })
@@ -199,7 +199,7 @@ function LoginContent() {
           </div>
         </div>
 
-        {isLoaded && isSignedIn ? (
+        {isLoaded && isSignedIn && !shouldShowSignIn ? (
           <div className="rounded-[1.15rem] border border-border bg-background/90 p-5 shadow-sm">
             <div className="space-y-2 text-center">
               <h2 className="text-xl font-semibold text-foreground">You are already signed in</h2>

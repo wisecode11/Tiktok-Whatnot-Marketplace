@@ -14,6 +14,10 @@ const {
   createStaffPayrollPaymentIntent,
   confirmStaffPayrollPayment,
 } = require("../services/payrollPaymentService");
+const {
+  formatStaffDisplayName,
+  getActiveStaffWithUsers,
+} = require("../services/staffService");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -93,26 +97,13 @@ async function getStaffRates(req, res) {
       return sendError(res, createHttpError(401, "Unauthorized"));
     }
 
-    const { user, workspace } = await getSellerContext(clerkUserId);
+    const { workspace } = await getSellerContext(clerkUserId);
+    const { staffUserIds, userMap } = await getActiveStaffWithUsers(workspace._id);
 
-    // Get all staff members in workspace
-    const memberships = await WorkspaceMembership.find({
-      workspace_id: workspace._id,
-      role: "staff",
-      status: "active",
-    });
-
-    const staffUserIds = memberships.map((m) => m.user_id);
-
-    // Get compensation for each staff
     const compensations = await EmployeeCompensation.find({
       workspace_id: workspace._id,
       user_id: { $in: staffUserIds },
     });
-
-    // Get user details
-    const users = await User.find({ _id: { $in: staffUserIds } });
-    const userMap = Object.fromEntries(users.map((u) => [asIdString(u._id), u]));
 
     const compensationMap = Object.fromEntries(
       compensations.map((comp) => [asIdString(comp.user_id), comp])
@@ -121,6 +112,7 @@ async function getStaffRates(req, res) {
     const staffRates = staffUserIds.map((staffUserId) => {
       const staffId = asIdString(staffUserId);
       const comp = compensationMap[staffId];
+      const userInfo = userMap[staffId];
 
       const hourlyRateCents = comp?.hourly_rate_cents ?? 1500;
       const deductionFixedCents = comp?.deduction_fixed_cents ?? 0;
@@ -128,8 +120,8 @@ async function getStaffRates(req, res) {
 
       return {
         user_id: staffId,
-        name: userMap[staffId]?.full_name || userMap[staffId]?.email || "Unknown",
-        email: userMap[staffId]?.email,
+        name: formatStaffDisplayName(userInfo),
+        email: userInfo?.email,
         hourly_rate_cents: hourlyRateCents,
         hourly_rate: (hourlyRateCents / 100).toFixed(2),
         deduction_fixed_cents: deductionFixedCents,
@@ -272,13 +264,8 @@ async function generatePayroll(req, res) {
       return sendError(res, createHttpError(400, "period_start must be on or before period_end"));
     }
 
-    const memberships = await WorkspaceMembership.find({
-      workspace_id: workspace._id,
-      role: "staff",
-      status: "active",
-    });
-
-    const staffUserIds = memberships.map((m) => asIdString(m.user_id));
+    const { staffUserIds: rawStaffUserIds } = await getActiveStaffWithUsers(workspace._id);
+    const staffUserIds = rawStaffUserIds.map((id) => asIdString(id));
 
     const { lines, totals, warnings } = await payrollService.calculatePayrollForPeriod(
       workspace._id,
@@ -307,11 +294,11 @@ async function generatePayroll(req, res) {
     const userMap = Object.fromEntries(users.map((u) => [asIdString(u._id), u]));
 
     const staffDetails = lines.map((line) => {
-      const userInfo = userMap[asIdString(line.user_id)] || {};
+      const userInfo = userMap[asIdString(line.user_id)];
       return {
         user_id: asIdString(line.user_id),
-        name: userInfo.full_name || userInfo.email || "Unknown",
-        email: userInfo.email,
+        name: formatStaffDisplayName(userInfo),
+        email: userInfo?.email,
         hours_worked: (line.minutes_worked / 60).toFixed(2),
         regular_hours: (line.regular_minutes / 60).toFixed(2),
         overtime_hours: (line.overtime_minutes / 60).toFixed(2),
@@ -327,7 +314,7 @@ async function generatePayroll(req, res) {
       const u = w.user_id ? userMapForWarnings[asIdString(w.user_id)] : null;
       return {
         ...w,
-        user_name: u ? u.full_name || u.email || null : null,
+        user_name: u ? formatStaffDisplayName(u) : null,
       };
     });
 
@@ -464,11 +451,11 @@ async function getPayrollRunDetails(req, res) {
     const userMap = Object.fromEntries(users.map((u) => [asIdString(u._id), u]));
 
     const staffDetails = payrollRun.lines.map((line) => {
-      const userInfo = userMap[asIdString(line.user_id)] || {};
+      const userInfo = userMap[asIdString(line.user_id)];
       return {
         user_id: asIdString(line.user_id),
-        name: userInfo.full_name || userInfo.email || "Unknown",
-        email: userInfo.email,
+        name: formatStaffDisplayName(userInfo),
+        email: userInfo?.email,
         hours_worked: (line.minutes_worked / 60).toFixed(2),
         regular_hours: (line.regular_minutes / 60).toFixed(2),
         overtime_hours: (line.overtime_minutes / 60).toFixed(2),
@@ -534,12 +521,13 @@ async function getPayrollPreview(req, res) {
       return sendError(res, createHttpError(400, "period_start must be on or before period_end"));
     }
 
-    const memberships = await WorkspaceMembership.find({
-      workspace_id: workspace._id,
-      role: "staff",
-      status: "active",
-    });
-    const staffUserIds = memberships.map((m) => asIdString(m.user_id));
+    const { staffUserIds: rawStaffUserIds, userMap: rawUserMap } = await getActiveStaffWithUsers(
+      workspace._id,
+    );
+    const staffUserIds = rawStaffUserIds.map((id) => asIdString(id));
+    const userMap = Object.fromEntries(
+      Object.entries(rawUserMap).map(([id, user]) => [asIdString(id), user]),
+    );
 
     if (staffUserIds.length === 0) {
       return res.json({
@@ -556,9 +544,6 @@ async function getPayrollPreview(req, res) {
       start,
       end,
     );
-
-    const users = await User.find({ _id: { $in: staffUserIds } });
-    const userMap = Object.fromEntries(users.map((u) => [asIdString(u._id), u]));
 
     const existingRuns = await PayrollRun.find({
       workspace_id: workspace._id,
@@ -590,7 +575,7 @@ async function getPayrollPreview(req, res) {
         deduction_cents: 0,
         net_cents: 0,
       };
-      const userInfo = userMap[staffId] || {};
+      const userInfo = userMap[staffId];
       const run = runByUser[staffId];
       const isSynced = !!(run && run.quickbooks_sync && run.quickbooks_sync.synced_at);
       const stripePayment = run && run.stripe_payment ? run.stripe_payment : null;
@@ -600,8 +585,8 @@ async function getPayrollPreview(req, res) {
 
       return {
         user_id: staffId,
-        name: userInfo.full_name || userInfo.email || "Unknown",
-        email: userInfo.email || null,
+        name: formatStaffDisplayName(userInfo),
+        email: userInfo?.email || null,
         hours_worked: (line.minutes_worked / 60).toFixed(2),
         regular_hours: (line.regular_minutes / 60).toFixed(2),
         overtime_hours: (line.overtime_minutes / 60).toFixed(2),
@@ -793,10 +778,9 @@ async function issueAndDownloadStaffPayroll(req, res) {
       workspace,
     });
 
-    const safeName = (staffUser && (staffUser.full_name || staffUser.email) || "staff")
-      .toString()
+    const safeName = formatStaffDisplayName(staffUser)
       .replace(/[^a-zA-Z0-9._-]+/g, "_")
-      .slice(0, 60);
+      .slice(0, 60) || "staff";
     const startStr = new Date(payrollRun.period_start).toISOString().slice(0, 10);
     const endStr = new Date(payrollRun.period_end).toISOString().slice(0, 10);
     const filename = `payslip-${safeName}-${startStr}-to-${endStr}.pdf`;

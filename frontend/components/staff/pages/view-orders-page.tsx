@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
+import { useStaffModules } from "@/components/staff/staff-modules-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -110,8 +112,16 @@ function resolveDisplayPrice(order: WhatnotOrderItem) {
 }
 
 export function ViewOrdersPage() {
+  const router = useRouter()
+  const { marketplaceHub } = useStaffModules()
   const { getToken, isLoaded } = useAuth()
   const [rows, setRows] = useState<WhatnotOrderItem[]>([])
+
+  useEffect(() => {
+    if (marketplaceHub === "tiktok") {
+      router.replace("/staff/modules/tiktok_orders")
+    }
+  }, [marketplaceHub, router])
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)

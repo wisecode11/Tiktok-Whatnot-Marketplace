@@ -34,7 +34,11 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
-        <ClerkProvider signInUrl="/login" signUpUrl="/signup">
+        <ClerkProvider
+          signInUrl="/login"
+          signUpUrl="/signup"
+          taskUrls={{ "choose-organization": "/session-tasks/choose-organization" }}
+        >
           <ThemeProvider
             attribute="class"
             defaultTheme="system"

@@ -958,6 +958,7 @@ export interface FetchWhatnotShipmentsTableResponse {
   rows: WhatnotShipmentTableRow[]
   requestedIds: string[]
   hint?: string
+  fromCache?: boolean
 }
 
 export interface StaffOrderManagementShipmentRow {
@@ -2001,7 +2002,13 @@ export async function getWhatnotShipmentsLivestreamsCurrentLiveId(token: string)
 
 export async function fetchWhatnotShipmentsTable(
   token: string,
-  body: { liveId?: string; shipmentIds?: string[]; shipmentIdsText?: string; manifestUrls?: string[] },
+  body: {
+    liveId?: string
+    shipmentIds?: string[]
+    shipmentIdsText?: string
+    manifestUrls?: string[]
+    forceRefresh?: boolean
+  },
 ) {
   return request<FetchWhatnotShipmentsTableResponse>("/api/integrations/whatnot/shipments/table", {
     token,

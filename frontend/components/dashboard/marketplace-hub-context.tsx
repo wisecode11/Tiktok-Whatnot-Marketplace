@@ -4,6 +4,15 @@ import { createContext, useContext } from "react"
 
 export type MarketplaceHub = "whatnot" | "tiktok" | "agency" | "launch-pad"
 
+export type StaffMarketplaceHub = Extract<MarketplaceHub, "whatnot" | "tiktok">
+
+export const STAFF_MARKETPLACE_HUB_OPTIONS: StaffMarketplaceHub[] = ["tiktok", "whatnot"]
+
+export const STAFF_MARKETPLACE_HUB_LANDING_PATHS: Record<StaffMarketplaceHub, string> = {
+  tiktok: "/staff/modules/tiktok_inventory",
+  whatnot: "/staff/modules/view_orders",
+}
+
 export const MARKETPLACE_HUB_LABELS: Record<MarketplaceHub, string> = {
   whatnot: "Whatnot",
   tiktok: "TikTok",
@@ -19,8 +28,8 @@ export const MARKETPLACE_HUB_DESCRIPTIONS: Record<MarketplaceHub, string> = {
 }
 
 export const MARKETPLACE_HUB_LANDING_PATHS: Record<MarketplaceHub, string> = {
-  whatnot: "/seller/whatnot-show",
-  tiktok: "/seller/analytics",
+  whatnot: "/seller/inventory-management",
+  tiktok: "/seller/inventory-management",
   agency: "/seller/organization",
   "launch-pad": "/seller",
 }
@@ -30,6 +39,10 @@ export const MARKETPLACE_HUB_OPTIONS: MarketplaceHub[] = ["whatnot", "tiktok", "
 type MarketplaceHubContextValue = {
   hub: MarketplaceHub
   setHub: (hub: MarketplaceHub) => void
+  /** When set (e.g. staff layout), only these hubs appear in the sidebar dropdown. */
+  options?: readonly MarketplaceHub[]
+  /** Override landing routes when switching hub (e.g. staff module paths). */
+  landingPaths?: Partial<Record<MarketplaceHub, string>>
 }
 
 const MarketplaceHubContext = createContext<MarketplaceHubContextValue | null>(null)

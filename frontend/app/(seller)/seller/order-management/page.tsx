@@ -888,9 +888,13 @@ export default function SellerOrderManagementPage() {
 
       try {
         const token = await waitForSessionToken(getToken)
-        await syncWhatnotOrders(token).catch(() => null)
+        if (isManualRefresh) {
+          await syncWhatnotOrders(token).catch(() => null)
+        }
 
-        const body: { liveId?: string; manifestUrls?: string[] } = {}
+        const body: { liveId?: string; manifestUrls?: string[]; forceRefresh?: boolean } = {
+          forceRefresh: isManualRefresh,
+        }
         const fromOverride =
           liveIdOverride !== undefined && liveIdOverride !== null ? String(liveIdOverride).trim() : null
         const trimmedLive =
@@ -912,6 +916,8 @@ export default function SellerOrderManagementPage() {
         setShipmentRows(result.rows || [])
         if (result.hint) {
           setShipmentsHint(result.hint)
+        } else if (!isManualRefresh && result.fromCache) {
+          setShipmentsHint("Showing cached shipments. Click Refresh shipments to fetch latest Whatnot data.")
         }
       } catch (error) {
         const message =
@@ -1026,7 +1032,7 @@ export default function SellerOrderManagementPage() {
   }, [isLoaded, liveId, loadStats, loadShipments])
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!isLoaded || marketplaceHub?.hub === "whatnot" || activePlatform !== "tiktok") {
       return
     }
 
@@ -1037,7 +1043,7 @@ export default function SellerOrderManagementPage() {
     }, 15000)
 
     return () => window.clearInterval(intervalId)
-  }, [isLoaded, loadTikTokOrders])
+  }, [activePlatform, isLoaded, loadTikTokOrders, marketplaceHub?.hub])
 
   const cards = useMemo(() => {
     if (!statistic) {

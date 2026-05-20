@@ -267,15 +267,22 @@ export function AppSidebar({
                   </div>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                {MARKETPLACE_HUB_OPTIONS.map((hub) => {
+                {(marketplaceHubContext.options ?? MARKETPLACE_HUB_OPTIONS).map((hub) => {
                   const isActive = hub === currentHub
+                  const landingPaths = {
+                    ...MARKETPLACE_HUB_LANDING_PATHS,
+                    ...marketplaceHubContext.landingPaths,
+                  }
 
                   return (
                     <DropdownMenuItem
                       key={hub}
                       onSelect={() => {
                         marketplaceHubContext.setHub(hub)
-                        router.push(MARKETPLACE_HUB_LANDING_PATHS[hub])
+                        const landingPath = landingPaths[hub]
+                        if (landingPath) {
+                          router.push(landingPath)
+                        }
                       }}
                       className="flex items-center justify-between gap-3"
                     >

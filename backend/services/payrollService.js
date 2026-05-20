@@ -3,6 +3,7 @@ const AttendanceSegment = require("../models/AttendanceSegment");
 const EmployeeCompensation = require("../models/EmployeeCompensation");
 const PayrollRun = require("../models/PayrollRun");
 const User = require("../models/Users");
+const { formatStaffDisplayName } = require("./staffService");
 
 const DEFAULT_HOURLY_RATE_CENTS = 1500;
 const DEFAULT_OVERTIME_THRESHOLD_MINUTES_PER_WEEK = 40 * 60; // 2400
@@ -284,7 +285,7 @@ async function getPayrollWithUserDetails(payrollRunId) {
       const userInfo = userMap[line.user_id] || {};
       return {
         user_id: line.user_id,
-        name: userInfo.full_name || "Unknown",
+        name: formatStaffDisplayName(userInfo),
         email: userInfo.email,
         hours_worked: line.minutes_worked / 60,
         regular_hours: line.regular_minutes / 60,

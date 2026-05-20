@@ -272,11 +272,13 @@ async function fetchWhatnotShipmentsTableData(req, res) {
     const manifestUrls = Array.isArray(body.manifestUrls)
       ? body.manifestUrls.filter((u) => typeof u === "string" && u.trim())
       : null;
+    const forceRefresh = Boolean(body.forceRefresh);
     const result = await fetchWhatnotShipmentsTable({
       clerkUserId: req.auth.userId,
       liveId: liveId || null,
       shipmentIds: shipmentIds && shipmentIds.length ? shipmentIds : null,
       manifestUrls: manifestUrls && manifestUrls.length ? manifestUrls : null,
+      forceRefresh,
     });
     return res.status(200).json(result);
   } catch (error) {

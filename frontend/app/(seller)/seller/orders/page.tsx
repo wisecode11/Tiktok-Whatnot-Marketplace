@@ -581,18 +581,36 @@ export default function SellerOrdersPage() {
       setErrorMessage(null)
       setTiktokErrorMessage(null)
       const token = await waitForSessionToken(getToken)
-      await syncWhatnotOrders(token).catch(() => null)
+      const isWhatnotHub = marketplaceHub?.hub === "whatnot"
+      const isTikTokHub = marketplaceHub?.hub === "tiktok"
+      const shouldLoadWhatnot = !isTikTokHub
+      const shouldLoadTikTok = !isWhatnotHub
 
-      const whatnotPromise = getWhatnotOrders(token, { limit: 100 }).catch((error) => ({ error }))
-      const tiktokPromise = searchTikTokShopOrders(token, {
-        pageSize: 50,
-        sortOrder: "DESC",
-        sortField: "create_time",
-      }).catch((error) => ({ error }))
+      if (shouldLoadWhatnot) {
+        const syncPromise = syncWhatnotOrders(token).catch(() => null)
+        if (isManualRefresh) {
+          await syncPromise
+        } else {
+          void syncPromise
+        }
+      }
+
+      const whatnotPromise = shouldLoadWhatnot
+        ? getWhatnotOrders(token, { limit: 100 }).catch((error) => ({ error }))
+        : Promise.resolve(null)
+      const tiktokPromise = shouldLoadTikTok
+        ? searchTikTokShopOrders(token, {
+            pageSize: 50,
+            sortOrder: "DESC",
+            sortField: "create_time",
+          }).catch((error) => ({ error }))
+        : Promise.resolve(null)
 
       const [whatnotOutcome, tiktokOutcome] = await Promise.all([whatnotPromise, tiktokPromise])
 
-      if ("error" in whatnotOutcome) {
+      if (!shouldLoadWhatnot) {
+        setOrders([])
+      } else if (whatnotOutcome && "error" in whatnotOutcome) {
         const error = whatnotOutcome.error
         const message =
           error instanceof AuthApiError
@@ -603,10 +621,12 @@ export default function SellerOrdersPage() {
         setErrorMessage(message)
         setOrders([])
       } else {
-        setOrders(whatnotOutcome.orders)
+        setOrders(whatnotOutcome?.orders ?? [])
       }
 
-      if ("error" in tiktokOutcome) {
+      if (!shouldLoadTikTok) {
+        setTiktokShop(null)
+      } else if (tiktokOutcome && "error" in tiktokOutcome) {
         const error = tiktokOutcome.error
         const message =
           error instanceof AuthApiError
@@ -652,7 +672,7 @@ export default function SellerOrdersPage() {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [getToken, isLoaded])
+  }, [getToken, isLoaded, marketplaceHub?.hub])
 
   const orderRows = useMemo(() => orders.map(mapOrderRow), [orders])
   const tiktokRows = useMemo(() => (tiktokShop?.orders ?? []).map(mapTikTokOrderRow), [tiktokShop])
