@@ -19,8 +19,8 @@ export const MARKETPLACE_HUB_DESCRIPTIONS: Record<MarketplaceHub, string> = {
 }
 
 export const MARKETPLACE_HUB_LANDING_PATHS: Record<MarketplaceHub, string> = {
-  whatnot: "/seller/whatnot-show",
-  tiktok: "/seller/analytics",
+  whatnot: "/seller/inventory-management",
+  tiktok: "/seller/inventory-management",
   agency: "/seller/organization",
   "launch-pad": "/seller",
 }

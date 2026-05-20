@@ -34,6 +34,7 @@ async function assignShowHostHandler(req, res) {
       showTitle: body.showTitle,
       scheduledStartAt: body.scheduledStartAt,
       scheduledEndAt: body.scheduledEndAt,
+      showLink: body.showLink,
       platform: body.platform,
     });
     return res.status(200).json(result);

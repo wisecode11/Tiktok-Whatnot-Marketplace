@@ -32,6 +32,7 @@ export interface AssignShowHostEvent {
   platform: string
   startAt: Date
   endAt: Date
+  showLink?: string | null
 }
 
 interface AssignShowHostDialogProps {
@@ -140,6 +141,7 @@ export function AssignShowHostDialog({
         showTitle: event.streamTitle,
         scheduledStartAt: event.startAt.toISOString(),
         scheduledEndAt: event.endAt.toISOString(),
+        showLink: event.showLink || undefined,
         platform: event.platform,
       })
 

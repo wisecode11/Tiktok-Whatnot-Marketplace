@@ -6,16 +6,20 @@ import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useStaffModules } from "@/components/staff/staff-modules-context"
+import { cn } from "@/lib/utils"
 
 export function StaffModuleGate({
   moduleId,
   title,
   description,
+  fullWidth = false,
   children,
 }: {
   moduleId: string
   title: string
   description?: string
+  /** Use full main content width (e.g. wide data tables). Default is max-w-6xl. */
+  fullWidth?: boolean
   children: React.ReactNode
 }) {
   const { modules, loading, permissionError } = useStaffModules()
@@ -64,7 +68,7 @@ export function StaffModuleGate({
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className={cn("mx-auto w-full space-y-6", fullWidth ? "max-w-none" : "max-w-6xl")}>
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}

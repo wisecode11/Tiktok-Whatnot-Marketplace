@@ -9,6 +9,7 @@ const WhatnotShowHostAssignmentSchema = new mongoose.Schema(
     platform: { type: String, default: "whatnot" },
     show_id: { type: String, required: true, index: true },
     show_title: { type: String, default: null },
+    show_link: { type: String, default: null },
     scheduled_start_at: { type: Date, default: null },
     scheduled_end_at: { type: Date, default: null },
     host_staff_user_id: { type: String, ref: "User", required: true, index: true },
