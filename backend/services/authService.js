@@ -494,6 +494,57 @@ function pickPrimaryEmail(clerkUser) {
   return (primaryEmail || clerkUser.emailAddresses[0] || {}).emailAddress || null;
 }
 
+function clerkUserHasStaffInvite(clerkUser) {
+  const parentSellerUserId =
+    (clerkUser.privateMetadata && typeof clerkUser.privateMetadata.parentSellerUserId === "string"
+      ? clerkUser.privateMetadata.parentSellerUserId.trim()
+      : "") ||
+    (clerkUser.unsafeMetadata && typeof clerkUser.unsafeMetadata.parentSellerUserId === "string"
+      ? clerkUser.unsafeMetadata.parentSellerUserId.trim()
+      : "");
+
+  const sellerWorkspaceId =
+    (clerkUser.privateMetadata && typeof clerkUser.privateMetadata.sellerWorkspaceId === "string"
+      ? clerkUser.privateMetadata.sellerWorkspaceId.trim()
+      : "") ||
+    (clerkUser.unsafeMetadata && typeof clerkUser.unsafeMetadata.sellerWorkspaceId === "string"
+      ? clerkUser.unsafeMetadata.sellerWorkspaceId.trim()
+      : "");
+
+  return Boolean(parentSellerUserId || sellerWorkspaceId);
+}
+
+async function resolveStaffParentSellerUserId(clerkUser, user) {
+  if (user && user.parent_seller_user_id) {
+    return user.parent_seller_user_id;
+  }
+
+  const parentFromMetadata =
+    clerkUser.privateMetadata && typeof clerkUser.privateMetadata.parentSellerUserId === "string"
+      ? clerkUser.privateMetadata.parentSellerUserId.trim()
+      : clerkUser.unsafeMetadata && typeof clerkUser.unsafeMetadata.parentSellerUserId === "string"
+        ? clerkUser.unsafeMetadata.parentSellerUserId.trim()
+        : "";
+
+  if (parentFromMetadata) {
+    return parentFromMetadata;
+  }
+
+  const workspaceId =
+    clerkUser.privateMetadata && typeof clerkUser.privateMetadata.sellerWorkspaceId === "string"
+      ? clerkUser.privateMetadata.sellerWorkspaceId.trim()
+      : clerkUser.unsafeMetadata && typeof clerkUser.unsafeMetadata.sellerWorkspaceId === "string"
+        ? clerkUser.unsafeMetadata.sellerWorkspaceId.trim()
+        : "";
+
+  if (!workspaceId) {
+    return null;
+  }
+
+  const workspace = await SellerWorkspace.findById(workspaceId);
+  return workspace && workspace.owner_user_id ? workspace.owner_user_id : null;
+}
+
 function serializeUser(user) {
   const role = FRONTEND_ROLE_MAP[user.user_type];
 
@@ -859,23 +910,41 @@ async function upsertUserFromClerk({ clerkUserId, role }) {
   user.first_name = clerkUser.firstName || user.first_name || "";
   user.last_name = clerkUser.lastName || user.last_name || "";
   user.user_type = userType;
-  user.parent_seller_user_id =
-    userType === "staff"
-      ? (primaryWorkspaceMembership && primaryWorkspaceMembership.workspace
-          ? primaryWorkspaceMembership.workspace.owner_user_id
-          : (clerkUser.privateMetadata && clerkUser.privateMetadata.parentSellerUserId) || user.parent_seller_user_id || null)
-      : null;
+  if (userType === "staff") {
+    user.parent_seller_user_id =
+      (primaryWorkspaceMembership && primaryWorkspaceMembership.workspace
+        ? primaryWorkspaceMembership.workspace.owner_user_id
+        : null) ||
+      (await resolveStaffParentSellerUserId(clerkUser, user)) ||
+      user.parent_seller_user_id ||
+      null;
+  } else {
+    user.parent_seller_user_id = null;
+  }
   user.status = user.status || "active";
   user.updated_at = now;
 
   await user.save();
 
-  if (userType === "staff" && primaryWorkspaceMembership && primaryWorkspaceMembership.workspace) {
-    await ensureWorkspaceMembershipForUser({
-      user,
-      workspace: primaryWorkspaceMembership.workspace,
-      clerkRole: primaryWorkspaceMembership.clerkRole,
-    });
+  if (userType === "staff") {
+    await ensureStaffLinkedToSellerClerkOrganization({ clerkUserId: clerkUser.id, user });
+
+    if (primaryWorkspaceMembership && primaryWorkspaceMembership.workspace) {
+      await ensureWorkspaceMembershipForUser({
+        user,
+        workspace: primaryWorkspaceMembership.workspace,
+        clerkRole: primaryWorkspaceMembership.clerkRole,
+      });
+    } else if (user.parent_seller_user_id) {
+      const sellerWorkspace = await SellerWorkspace.findOne({ owner_user_id: user.parent_seller_user_id });
+      if (sellerWorkspace) {
+        await ensureWorkspaceMembershipForUser({
+          user,
+          workspace: sellerWorkspace,
+          clerkRole: "org:member",
+        });
+      }
+    }
   }
 
   await updateClerkRole(clerkUser, normalizedRole);
@@ -896,18 +965,42 @@ async function loginWithRole({ clerkUserId, role }) {
   let user = await User.findOne({ clerk_user_id: clerkUserId });
 
   if (!user) {
-    if (normalizedRole === "staff") {
-      throw createHttpError(
-        403,
-        "Staff accounts must be created by a streamer. Use the sign-in page with the Staff portal instead.",
-        {
-          redirectTo: "/login?role=staff",
-        },
-      );
+    const clerkUser = await getClerkUser(clerkUserId);
+    const email = pickPrimaryEmail(clerkUser);
+
+    if (email) {
+      const emailMatch = await User.findOne({
+        email: email.toLowerCase(),
+        user_type: "staff",
+      });
+
+      if (emailMatch) {
+        emailMatch.clerk_user_id = clerkUserId;
+        emailMatch.updated_at = new Date();
+        await emailMatch.save();
+        user = emailMatch;
+      }
     }
 
-    await upsertUserFromClerk({ clerkUserId, role: normalizedRole });
-    user = await User.findOne({ clerk_user_id: clerkUserId });
+    if (!user) {
+      if (normalizedRole === "staff") {
+        if (!clerkUserHasStaffInvite(clerkUser)) {
+          throw createHttpError(
+            403,
+            "This staff account was not set up by a streamer. Ask your streamer admin to create your account, then sign in here.",
+            {
+              redirectTo: "/login?role=staff",
+            },
+          );
+        }
+
+        await upsertUserFromClerk({ clerkUserId, role: normalizedRole });
+        user = await User.findOne({ clerk_user_id: clerkUserId });
+      } else {
+        await upsertUserFromClerk({ clerkUserId, role: normalizedRole });
+        user = await User.findOne({ clerk_user_id: clerkUserId });
+      }
+    }
   }
 
   if (!user) {
@@ -951,6 +1044,15 @@ async function loginWithRole({ clerkUserId, role }) {
         workspace: primaryWorkspaceMembership.workspace,
         clerkRole: primaryWorkspaceMembership.clerkRole,
       });
+    } else if (user.parent_seller_user_id) {
+      const sellerWorkspace = await SellerWorkspace.findOne({ owner_user_id: user.parent_seller_user_id });
+      if (sellerWorkspace) {
+        await ensureWorkspaceMembershipForUser({
+          user,
+          workspace: sellerWorkspace,
+          clerkRole: "org:member",
+        });
+      }
     }
   }
 
