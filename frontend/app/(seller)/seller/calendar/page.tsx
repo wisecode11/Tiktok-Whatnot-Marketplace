@@ -58,6 +58,8 @@ interface CalendarEvent {
   startAt: Date
   endAt: Date
   status: CalendarEventStatus
+  showLink: string | null
+  showType: string | null
 }
 
 function toDateKey(value: Date) {
@@ -139,6 +141,8 @@ function normalizeEvents(shows: WhatnotLiveShowItem[]): CalendarEvent[] {
       startAt,
       endAt,
       status: show.showType ? mapWhatnotShowTypeToStatus(show.showType) : getEventStatus(startAt, endAt),
+      showLink: show.link || null,
+      showType: show.showType || null,
     })
   }
 
@@ -154,6 +158,7 @@ function toAssignShowHostEvent(event: CalendarEvent): AssignShowHostEvent {
     platform: event.platform,
     startAt: event.startAt,
     endAt: event.endAt,
+    showLink: event.showLink,
   }
 }
 

@@ -6,6 +6,11 @@ export interface ShowHostAssignment {
   showId: string
   platform: string
   showTitle: string | null
+  showLink: string | null
+  showType: string | null
+  showStatus: string | null
+  whatnotStartTime: number | null
+  whatnotEndTime: number | null
   scheduledStartAt: string | null
   scheduledEndAt: string | null
   hostStaffUserId: string
@@ -24,6 +29,7 @@ export interface AssignShowHostPayload {
   showTitle?: string
   scheduledStartAt?: string
   scheduledEndAt?: string
+  showLink?: string
   platform?: string
 }
 
