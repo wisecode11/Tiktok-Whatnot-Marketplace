@@ -128,6 +128,49 @@ async function findWorkspaceByClerkOrganizationId(clerkOrganizationId) {
   return SellerWorkspace.findOne({ clerk_organization_id: clerkOrganizationId });
 }
 
+async function ensureStaffLinkedToSellerClerkOrganization({ clerkUserId, user }) {
+  if (!user || user.user_type !== "staff" || !user.parent_seller_user_id) {
+    return;
+  }
+
+  const workspace = await SellerWorkspace.findOne({ owner_user_id: user.parent_seller_user_id });
+  const organizationId =
+    workspace && typeof workspace.clerk_organization_id === "string"
+      ? workspace.clerk_organization_id.trim()
+      : "";
+
+  if (!organizationId) {
+    return;
+  }
+
+  const existingMemberships = await getClerkOrganizationMembershipWorkspaces(clerkUserId);
+  const alreadyInOrganization = existingMemberships.some((entry) => entry.organizationId === organizationId);
+
+  if (alreadyInOrganization) {
+    return;
+  }
+
+  const clerkClient = getClerkClient();
+
+  try {
+    await clerkClient.organizations.createOrganizationMembership({
+      organizationId,
+      userId: clerkUserId,
+      role: "org:member",
+    });
+  } catch (error) {
+    const clerkErrors = error && Array.isArray(error.errors) ? error.errors : [];
+    const isAlreadyMember = clerkErrors.some((entry) => {
+      const code = entry && typeof entry.code === "string" ? entry.code : "";
+      return code === "already_a_member_in_organization" || code === "duplicate_record";
+    });
+
+    if (!isAlreadyMember) {
+      throw error;
+    }
+  }
+}
+
 async function getClerkOrganizationMembershipWorkspaces(clerkUserId) {
   const clerkClient = getClerkClient();
   const memberships = await clerkClient.users.getOrganizationMembershipList({
@@ -896,6 +939,8 @@ async function loginWithRole({ clerkUserId, role }) {
   user.updated_at = new Date();
 
   if (user.user_type === "staff") {
+    await ensureStaffLinkedToSellerClerkOrganization({ clerkUserId, user });
+
     const workspaceMemberships = await getClerkOrganizationMembershipWorkspaces(clerkUserId);
     const primaryWorkspaceMembership = workspaceMemberships.length > 0 ? workspaceMemberships[0] : null;
 

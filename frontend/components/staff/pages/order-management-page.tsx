@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 import { ExternalLink, Printer } from "lucide-react"
 
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
+import { useStaffModules } from "@/components/staff/staff-modules-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -169,8 +171,16 @@ function extractGlobalIdTail(value: unknown) {
 }
 
 export function StaffOrderManagementPage() {
+  const router = useRouter()
+  const { marketplaceHub } = useStaffModules()
   const { getToken, isLoaded } = useAuth()
   const [statistic, setStatistic] = useState<WhatnotMyLiveStatistic | null>(null)
+
+  useEffect(() => {
+    if (marketplaceHub === "tiktok") {
+      router.replace("/staff/modules/tiktok_order_management")
+    }
+  }, [marketplaceHub, router])
   const [shipments, setShipments] = useState<StaffOrderManagementShipmentRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)

@@ -229,6 +229,10 @@ function normalizePlatform(platform) {
     return "stripe";
   }
 
+  if (normalized === "quickbooks") {
+    return "quickbooks";
+  }
+
   return null;
 }
 
@@ -4621,11 +4625,77 @@ async function fetchWhatnotShipmentsBatchFromExtension({ clerkUserId, shipmentId
   };
 }
 
+async function mapCachedShipmentRows({ clerkUserId, shipmentIds = null, limit = 30 }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    return [];
+  }
+
+  if (Array.isArray(shipmentIds) && shipmentIds.length) {
+    const dedupedIds = dedupeShipmentIdsPreserveOrder(shipmentIds).slice(0, 30);
+    const keys = dedupedIds.map((id) => shipmentIdDedupeKey(id)).filter(Boolean);
+    if (!keys.length) {
+      return [];
+    }
+
+    const docs = await WhatnotShipmentDetail.find({
+      platform: "whatnot",
+      clerk_user_id: normalizedClerkUserId,
+      shipment_key: { $in: keys },
+    }).sort({ synced_at: -1, updated_at: -1 });
+
+    if (!docs.length) {
+      return [];
+    }
+
+    const byKey = new Map();
+    for (const doc of docs) {
+      const key = typeof doc.shipment_key === "string" ? doc.shipment_key.trim() : "";
+      if (key && !byKey.has(key)) {
+        byKey.set(key, doc);
+      }
+    }
+
+    const rows = [];
+    for (const id of dedupedIds) {
+      const key = shipmentIdDedupeKey(id);
+      const doc = key ? byKey.get(key) : null;
+      if (!doc || !doc.shipment_payload || typeof doc.shipment_payload !== "object") {
+        continue;
+      }
+      rows.push({
+        shipmentId: doc.shipment_id_input || doc.shipment_global_id || key,
+        shipment: doc.shipment_payload,
+        error: null,
+      });
+    }
+
+    return rows;
+  }
+
+  const safeLimit = Number.isFinite(Number(limit)) ? Math.min(100, Math.max(1, Number(limit))) : 30;
+  const docs = await WhatnotShipmentDetail.find({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+  })
+    .sort({ synced_at: -1, updated_at: -1 })
+    .limit(safeLimit);
+
+  return docs
+    .filter((doc) => doc && doc.shipment_payload && typeof doc.shipment_payload === "object")
+    .map((doc) => ({
+      shipmentId: doc.shipment_id_input || doc.shipment_global_id || doc.shipment_key,
+      shipment: doc.shipment_payload,
+      error: null,
+    }));
+}
+
 async function fetchWhatnotShipmentsTable({
   clerkUserId,
   liveId = null,
   shipmentIds = null,
   manifestUrls = null,
+  forceRefresh = false,
 }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -4634,6 +4704,21 @@ async function fetchWhatnotShipmentsTable({
 
   await findLocalUser(normalizedClerkUserId);
   const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
+
+  if (!forceRefresh) {
+    const cachedRows = await mapCachedShipmentRows({
+      clerkUserId: normalizedClerkUserId,
+      shipmentIds: Array.isArray(shipmentIds) ? shipmentIds : null,
+      limit: 30,
+    });
+    if (cachedRows.length) {
+      return {
+        rows: cachedRows,
+        requestedIds: Array.isArray(shipmentIds) ? dedupeShipmentIdsPreserveOrder(shipmentIds).slice(0, 30) : [],
+        fromCache: true,
+      };
+    }
+  }
 
   let ids = Array.isArray(shipmentIds)
     ? dedupeShipmentIdsPreserveOrder(
@@ -4695,12 +4780,36 @@ async function fetchWhatnotShipmentsTable({
   ids = dedupeShipmentIdsPreserveOrder(ids).slice(0, 30);
 
   if (!ids.length) {
+    const cachedRows = await mapCachedShipmentRows({ clerkUserId: normalizedClerkUserId, shipmentIds: null, limit: 30 });
+    if (cachedRows.length) {
+      return {
+        rows: cachedRows,
+        requestedIds: [],
+        fromCache: true,
+        hint: "Showing last cached shipments. Click Refresh shipments to fetch latest data from Whatnot.",
+      };
+    }
     return {
       rows: [],
       requestedIds: [],
       hint:
         "No shipment IDs found yet. Keep the Whatnot extension connected, sync orders on the Orders tab, then refresh shipments. The hub will pull shipment IDs from synced orders and Whatnot shipment pages automatically.",
     };
+  }
+
+  if (!forceRefresh) {
+    const cachedRows = await mapCachedShipmentRows({
+      clerkUserId: normalizedClerkUserId,
+      shipmentIds: ids,
+      limit: 30,
+    });
+    if (cachedRows.length) {
+      return {
+        rows: cachedRows,
+        requestedIds: ids,
+        fromCache: true,
+      };
+    }
   }
 
   const batch = await fetchWhatnotShipmentsBatchFromExtension({
@@ -4711,6 +4820,7 @@ async function fetchWhatnotShipmentsTable({
   return {
     rows: batch.rows,
     requestedIds: batch.requestedIds,
+    fromCache: false,
   };
 }
 

@@ -9,6 +9,7 @@
  * documents like Invoice / SalesReceipt / Bill / Estimate).
  */
 const PDFDocument = require("pdfkit");
+const { formatStaffDisplayName } = require("./staffService");
 
 const COLOR_PRIMARY = "#1f2937"; // slate-800
 const COLOR_MUTED = "#6b7280"; // slate-500
@@ -88,7 +89,7 @@ async function buildStaffPayslipPdf({ payrollRun, user, workspace }) {
 
   const line = payrollRun.lines[0];
 
-  const staffName = (user && (user.full_name || user.email)) || "Staff member";
+  const staffName = user ? formatStaffDisplayName(user) : "Staff member";
   const staffEmail = (user && user.email) || "";
   const businessName = (workspace && workspace.business_name) || "Your business";
 

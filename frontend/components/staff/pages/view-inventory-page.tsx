@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 import { ImagePlus, Loader2, Plus } from "lucide-react"
 
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
+import { useStaffModules } from "@/components/staff/staff-modules-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -148,8 +150,16 @@ function toInventoryRows(payload: WhatnotInventoryLiveResponse | null): Inventor
 }
 
 export function ViewInventoryPage() {
+  const router = useRouter()
+  const { marketplaceHub } = useStaffModules()
   const { getToken, isLoaded } = useAuth()
   const getTokenRef = useRef(getToken)
+
+  useEffect(() => {
+    if (marketplaceHub === "tiktok") {
+      router.replace("/staff/modules/tiktok_inventory")
+    }
+  }, [marketplaceHub, router])
   const hasLoadedInventoryRef = useRef(false)
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -428,7 +438,7 @@ export function ViewInventoryPage() {
       )}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl overflow-y-auto max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>Create Inventory</DialogTitle>
             <DialogDescription>All fields below are required before creating pending inventory.</DialogDescription>

@@ -248,7 +248,11 @@ async function resolveShopCredentials(clerkUserId) {
   if ((!accessToken || !shopCipher) && normalizedClerk) {
     const user = await User.findOne({ clerk_user_id: normalizedClerk });
     if (user) {
-      const account = await ConnectedAccount.findOne({ user_id: user._id, platform: "tiktok" });
+      const credentialUserId =
+        user.user_type === "staff" && user.parent_seller_user_id
+          ? user.parent_seller_user_id
+          : user._id;
+      const account = await ConnectedAccount.findOne({ user_id: credentialUserId, platform: "tiktok" });
       const shop = account?.metadata_json?.tiktok_shop;
       if (shop && typeof shop === "object") {
         if (!accessToken && typeof shop.access_token === "string" && shop.access_token.trim()) {

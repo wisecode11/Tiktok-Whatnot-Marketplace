@@ -75,6 +75,38 @@ function buildLoginUrl() {
   return `${frontendUrl.replace(/\/$/, "")}/login?role=staff`;
 }
 
+async function ensureStaffClerkOrganizationMembership({ clerkClient, clerkUserId, workspace }) {
+  const organizationId =
+    workspace && typeof workspace.clerk_organization_id === "string"
+      ? workspace.clerk_organization_id.trim()
+      : "";
+
+  if (!organizationId) {
+    return false;
+  }
+
+  try {
+    await clerkClient.organizations.createOrganizationMembership({
+      organizationId,
+      userId: clerkUserId,
+      role: "org:member",
+    });
+    return true;
+  } catch (error) {
+    const clerkErrors = error && Array.isArray(error.errors) ? error.errors : [];
+    const isAlreadyMember = clerkErrors.some((entry) => {
+      const code = entry && typeof entry.code === "string" ? entry.code : "";
+      return code === "already_a_member_in_organization" || code === "duplicate_record";
+    });
+
+    if (isAlreadyMember) {
+      return true;
+    }
+
+    throw normalizeClerkError(error, "Unable to add the staff member to the seller organization.");
+  }
+}
+
 function buildStreamerDisplayName(seller) {
   const fullName = [seller.first_name, seller.last_name].filter(Boolean).join(" ").trim();
   if (fullName) {
@@ -119,6 +151,58 @@ async function ensureSellerWorkspace(seller) {
   return workspace;
 }
 
+function formatStaffDisplayName(user) {
+  if (!user) {
+    return "Unknown";
+  }
+
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  return fullName || user.email || "Unknown";
+}
+
+/**
+ * Active staff memberships that have a matching User record (same rule as Manage Staff).
+ * Orphan memberships (no User) are revoked so payroll does not list "Unknown" rows.
+ */
+async function getActiveStaffWithUsers(workspaceId, { revokeOrphanMemberships = true } = {}) {
+  const memberships = await WorkspaceMembership.find({
+    workspace_id: workspaceId,
+    role: "staff",
+    status: "active",
+  });
+
+  const userIds = [...new Set(memberships.map((membership) => membership.user_id).filter(Boolean))];
+  const users = await User.find({ _id: { $in: userIds } });
+  const userById = new Map(users.map((user) => [user._id, user]));
+
+  const staff = [];
+  const orphanMembershipIds = [];
+
+  for (const membership of memberships) {
+    const user = membership.user_id ? userById.get(membership.user_id) : null;
+    if (user) {
+      staff.push({ membership, user });
+    } else if (membership._id) {
+      orphanMembershipIds.push(membership._id);
+    }
+  }
+
+  if (revokeOrphanMemberships && orphanMembershipIds.length > 0) {
+    const now = new Date();
+    await WorkspaceMembership.updateMany(
+      { _id: { $in: orphanMembershipIds } },
+      { $set: { status: "revoked", updated_at: now } },
+    );
+  }
+
+  return {
+    staff,
+    staffUserIds: staff.map((entry) => entry.user._id),
+    userMap: Object.fromEntries(staff.map((entry) => [entry.user._id, entry.user])),
+    revokedOrphanCount: orphanMembershipIds.length,
+  };
+}
+
 function serializeStaffMember({ user, membership }) {
   const permissions = membership && membership.permissions_json ? membership.permissions_json : {};
   const modules = Array.isArray(permissions.modules) ? permissions.modules : [];
@@ -143,6 +227,8 @@ function serializeStaffMember({ user, membership }) {
 async function listStaffMembers({ clerkUserId }) {
   const seller = await findAuthenticatedSeller(clerkUserId);
   const workspace = await ensureSellerWorkspace(seller);
+
+  await getActiveStaffWithUsers(workspace._id, { revokeOrphanMemberships: true });
 
   const memberships = await WorkspaceMembership.find({
     workspace_id: workspace._id,
@@ -289,6 +375,17 @@ async function createStaffMember({ clerkUserId, username, email, password }) {
     throw normalizeClerkError(error, "Unable to create the Clerk staff account.");
   }
 
+  try {
+    await ensureStaffClerkOrganizationMembership({
+      clerkClient,
+      clerkUserId: clerkUser.id,
+      workspace,
+    });
+  } catch (error) {
+    await clerkClient.users.deleteUser(clerkUser.id).catch(() => null);
+    throw error;
+  }
+
   let user = null;
   let membership = null;
 
@@ -379,6 +476,8 @@ async function createStaffMember({ clerkUserId, username, email, password }) {
 
 module.exports = {
   createStaffMember,
+  formatStaffDisplayName,
+  getActiveStaffWithUsers,
   getStaffOrderManagementSnapshot,
   listStaffMembers,
 };
