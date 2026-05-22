@@ -3,6 +3,7 @@
 import { useAuth } from "@clerk/nextjs"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  Check,
   Download,
   ImageIcon,
   ImagePlus,
@@ -183,6 +184,14 @@ function getImageExtension(file: File) {
   return file.name.slice(lastDot + 1).trim().toLowerCase() || "png"
 }
 
+async function imageUrlToFile(imageUrl: string, baseName: string) {
+  const response = await fetch(imageUrl)
+  const blob = await response.blob()
+  const mime = blob.type || "image/png"
+  const extension = mime.split("/")[1]?.replace("jpeg", "jpg") || "png"
+  return new File([blob], `${baseName}.${extension}`, { type: mime })
+}
+
 const HAZARDOUS_MATERIAL_OPTIONS = [
   { label: "No Hazardous Materials", value: "NOT_HAZMAT" },
   { label: "Contains Hazardous Materials", value: "HAZMAT" },
@@ -344,6 +353,7 @@ export default function SellerInventoryManagementPage() {
   const [isGeneratingListingAi, setIsGeneratingListingAi] = useState(false)
   const [aiThumbnailModalOpen, setAiThumbnailModalOpen] = useState(false)
   const [aiThumbnailLoading, setAiThumbnailLoading] = useState(false)
+  const [aiThumbnailApplying, setAiThumbnailApplying] = useState(false)
   const [aiThumbnailImageUrl, setAiThumbnailImageUrl] = useState("")
   const [aiThumbnailError, setAiThumbnailError] = useState("")
   const [createForm, setCreateForm] = useState<CreateInventoryForm>({
@@ -1038,10 +1048,58 @@ export default function SellerInventoryManagementPage() {
     setIsGeneratingListingAi(false)
     setAiThumbnailModalOpen(false)
     setAiThumbnailLoading(false)
+    setAiThumbnailApplying(false)
     setAiThumbnailImageUrl("")
     setAiThumbnailError("")
     setCreateFormError("")
   }
+
+  const uploadCreateInventoryMedia = useCallback(
+    async (file: File) => {
+      if (selectedImagePreviewUrl) {
+        URL.revokeObjectURL(selectedImagePreviewUrl)
+      }
+      setSelectedImage(file)
+      setSelectedImagePreviewUrl(URL.createObjectURL(file))
+      setCreateFormError("")
+      setIsMediaUploaded(false)
+      setUploadedImageId("")
+
+      setIsUploadingMedia(true)
+      try {
+        const token = await waitForSessionToken(getToken)
+        const mediaPayload = [
+          {
+            extension: getImageExtension(file),
+            id: crypto.randomUUID(),
+          },
+        ]
+        const fileBase64 = await readFileAsBase64(file)
+        const mediaResponse = await generateWhatnotMediaUploadUrls(token, mediaPayload, {
+          fileBase64,
+          fileContentType: file.type || "application/octet-stream",
+        })
+        const nextImageId =
+          mediaResponse?.data?.addListingPhoto?.image?.id &&
+          typeof mediaResponse.data.addListingPhoto.image.id === "string"
+            ? mediaResponse.data.addListingPhoto.image.id.trim()
+            : ""
+        if (!nextImageId) {
+          throw new Error("Whatnot did not return image.id from AddListingPhoto.")
+        }
+        setUploadedImageId(nextImageId)
+        setIsMediaUploaded(true)
+      } catch (error) {
+        setIsMediaUploaded(false)
+        setUploadedImageId("")
+        setCreateFormError(getClerkErrorMessage(error))
+        throw error
+      } finally {
+        setIsUploadingMedia(false)
+      }
+    },
+    [getToken, selectedImagePreviewUrl],
+  )
 
   async function handleGenerateAiThumbnail() {
     const title = createForm.title.trim()
@@ -1076,12 +1134,7 @@ export default function SellerInventoryManagementPage() {
       return
     }
 
-    const safeName =
-      createForm.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50) || "ai-thumbnail"
+    const safeName = getAiThumbnailFileName()
 
     if (aiThumbnailImageUrl.startsWith("data:")) {
       const link = document.createElement("a")
@@ -1118,6 +1171,64 @@ export default function SellerInventoryManagementPage() {
 
   function openAiThumbnailModal() {
     void handleGenerateAiThumbnail()
+  }
+
+  function getAiThumbnailFileName() {
+    return (
+      createForm.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50) || "ai-thumbnail"
+    )
+  }
+
+  async function handleApplyAiThumbnail() {
+    if (!aiThumbnailImageUrl || aiThumbnailApplying) {
+      return
+    }
+    const safeName = getAiThumbnailFileName()
+
+    if (aiThumbnailImageUrl.startsWith("data:")) {
+      const link = document.createElement("a")
+      link.href = aiThumbnailImageUrl
+      link.download = `${safeName}-225x225.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      // return
+    }
+
+    setAiThumbnailApplying(true)
+    setCreateFormError("")
+    try {
+      const file = await imageUrlToFile(aiThumbnailImageUrl, getAiThumbnailFileName())
+      await uploadCreateInventoryMedia(file)
+      const response = await fetch(aiThumbnailImageUrl)
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = blobUrl
+      link.download = `${safeName}-225x225.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(blobUrl)
+      setAiThumbnailModalOpen(false)
+    } catch (error) {
+      setCreateFormError(getClerkErrorMessage(error))
+      const link = document.createElement("a")
+      link.href = aiThumbnailImageUrl
+      link.download = `${safeName}-225x225.png`
+      link.target = "_blank"
+      link.rel = "noopener noreferrer"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } finally {
+      setAiThumbnailApplying(false);
+      setAiThumbnailModalOpen(false)
+    }
   }
 
   async function handleAiInventoryListing() {
@@ -2793,51 +2904,19 @@ export default function SellerInventoryManagementPage() {
                   className="hidden"
                   onChange={(event) => {
                     const file = event.target.files?.[0] || null
-                    if (selectedImagePreviewUrl) {
-                      URL.revokeObjectURL(selectedImagePreviewUrl)
-                    }
-                    setSelectedImage(file)
-                    setSelectedImagePreviewUrl(file ? URL.createObjectURL(file) : "")
-                    setCreateFormError("")
-                    setIsMediaUploaded(false)
-                    setUploadedImageId("")
                     if (!file) {
+                      if (selectedImagePreviewUrl) {
+                        URL.revokeObjectURL(selectedImagePreviewUrl)
+                      }
+                      setSelectedImage(null)
+                      setSelectedImagePreviewUrl("")
+                      setCreateFormError("")
+                      setIsMediaUploaded(false)
+                      setUploadedImageId("")
                       return
                     }
 
-                    void (async () => {
-                      try {
-                        setIsUploadingMedia(true)
-                        const token = await waitForSessionToken(getToken)
-                        const mediaPayload = [
-                          {
-                            extension: getImageExtension(file),
-                            id: crypto.randomUUID(),
-                          },
-                        ]
-                        const fileBase64 = await readFileAsBase64(file)
-                        const mediaResponse = await generateWhatnotMediaUploadUrls(token, mediaPayload, {
-                          fileBase64,
-                          fileContentType: file.type || "application/octet-stream",
-                        })
-                        const nextImageId =
-                          mediaResponse?.data?.addListingPhoto?.image?.id &&
-                          typeof mediaResponse.data.addListingPhoto.image.id === "string"
-                            ? mediaResponse.data.addListingPhoto.image.id.trim()
-                            : ""
-                        if (!nextImageId) {
-                          throw new Error("Whatnot did not return image.id from AddListingPhoto.")
-                        }
-                        setUploadedImageId(nextImageId)
-                        setIsMediaUploaded(true)
-                      } catch (error) {
-                        setIsMediaUploaded(false)
-                        setUploadedImageId("")
-                        setCreateFormError(getClerkErrorMessage(error))
-                      } finally {
-                        setIsUploadingMedia(false)
-                      }
-                    })()
+                    void uploadCreateInventoryMedia(file)
                   }}
                 />
               </label>
@@ -3144,7 +3223,7 @@ export default function SellerInventoryManagementPage() {
               >
                 Close
               </Button>
-              <Button
+              {/* <Button
                 type="button"
                 className="gap-2"
                 disabled={!aiThumbnailImageUrl || aiThumbnailLoading}
@@ -3152,6 +3231,19 @@ export default function SellerInventoryManagementPage() {
               >
                 <Download className="h-4 w-4" />
                 Download
+              </Button> */}
+              <Button
+                type="button"
+                className="gap-2"
+                disabled={!aiThumbnailImageUrl || aiThumbnailLoading || aiThumbnailApplying || isUploadingMedia}
+                onClick={() => void handleApplyAiThumbnail()}
+              >
+                {aiThumbnailApplying || isUploadingMedia ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Apply
               </Button>
             </div>
           </DialogFooter>
