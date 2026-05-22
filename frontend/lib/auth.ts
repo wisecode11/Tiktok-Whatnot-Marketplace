@@ -174,6 +174,7 @@ export interface WhatnotInventoryLiveResponse {
           edges?: Array<{
             node?: {
               id?: string | null
+              uuid?: string | null
               title?: string | null
               subtitle?: string | null
               description?: string | null
@@ -2053,15 +2054,28 @@ export async function getWhatnotInventoryLive(
   )
 }
 
+/** Same pattern as fetchWhatnotShowTabData: extension fetch + save to whatnot_inventory_snapshots. */
+export async function fetchWhatnotInventoryTabData(
+  token: string,
+  status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT" = "ACTIVE",
+  options?: { forceRefresh?: boolean },
+) {
+  return request<WhatnotInventoryLiveResponse>("/api/integrations/whatnot/inventory-tab", {
+    token,
+    method: "POST",
+    body: {
+      status,
+      forceRefresh: Boolean(options?.forceRefresh),
+    },
+  })
+}
+
 export async function syncWhatnotInventoryLive(
   token: string,
   status: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT",
+  options?: { forceRefresh?: boolean },
 ) {
-  return request<WhatnotInventoryLiveResponse>("/api/integrations/whatnot/inventory/sync", {
-    token,
-    method: "POST",
-    body: { status },
-  })
+  return fetchWhatnotInventoryTabData(token, status, options)
 }
 
 export async function syncWhatnotEarlyPayoutBalance(token: string) {

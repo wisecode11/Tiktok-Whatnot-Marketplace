@@ -35,11 +35,13 @@ const {
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotInventorySnapshotsEntry,
   saveWhatnotInventoryEditCategoriesEntry,
   saveWhatnotLivestreamTagDirectDescendantsEntry,
   saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
+  fetchWhatnotInventoryTabData,
   syncWhatnotInventoryLiveData,
   syncWhatnotEarlyPayoutBalanceData,
   syncQuickBooksPayrollRun,
@@ -129,6 +131,7 @@ router.get("/whatnot/inventory/live", authenticateRequest, getWhatnotInventoryLi
 router.get("/whatnot/inventory/create-form-options", authenticateRequest, getWhatnotInventoryCreateFormOptionsData);
 router.get("/whatnot/livestream-category-tree", authenticateRequest, getWhatnotLivestreamCategoryTreeData);
 router.post("/whatnot/reference-cache/sync", authenticateRequest, syncWhatnotReferenceCacheData);
+router.post("/whatnot/inventory-tab", authenticateRequest, fetchWhatnotInventoryTabData);
 router.post("/whatnot/inventory/sync", authenticateRequest, syncWhatnotInventoryLiveData);
 router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData);
 router.post("/whatnot/show-tab", authenticateRequest, fetchWhatnotShowTabData);
@@ -159,6 +162,7 @@ router.get("/quickbooks/payroll/:payrollRunId/pdf", authenticateRequest, downloa
 router.post("/whatnot/seller-sessions", authenticateWhatnotExtension, saveWhatnotSessionData);
 router.post("/whatnot/get-session-api-data", authenticateWhatnotExtension, saveGetSessionApiDataEntry);
 router.get("/whatnot/reference-cache/status", authenticateWhatnotExtension, getWhatnotReferenceCacheStatusData);
+router.post("/whatnot/inventory-snapshots", authenticateWhatnotExtension, saveWhatnotInventorySnapshotsEntry);
 router.post("/whatnot/inventory-edit-categories", authenticateWhatnotExtension, saveWhatnotInventoryEditCategoriesEntry);
 router.post("/whatnot/shipping-profiles", authenticateWhatnotExtension, saveWhatnotShippingProfilesEntry);
 router.post(
