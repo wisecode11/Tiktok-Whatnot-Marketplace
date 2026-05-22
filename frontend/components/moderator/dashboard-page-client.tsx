@@ -1,11 +1,17 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
+import { useAuth } from "@clerk/nextjs"
 import { useAuthenticatedUser } from "@/components/auth/authenticated-user-context"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatusBadge } from "@/components/ui/status-badge"
+import {
+  listModeratorBookings,
+  type ModeratorBookingItem,
+} from "@/lib/booking-payment"
 import {
   AlertCircle,
   ArrowRight,
@@ -15,48 +21,132 @@ import {
   Clock3,
   DollarSign,
   BadgeCheck,
+  Loader2,
 } from "lucide-react"
 
-const todayBookings = [
-  {
-    id: "1",
-    streamer: "TechStyle Live",
-    avatar: "",
-    platform: "TikTok Shop",
-    time: "2:00 PM - 5:00 PM",
-    payout: "$75",
-    status: "confirmed",
-  },
-  {
-    id: "2",
-    streamer: "Fashion Forward",
-    avatar: "",
-    platform: "Whatnot",
-    time: "6:30 PM - 8:00 PM",
-    payout: "$45",
-    status: "pending",
-  },
-]
+function isSameCalendarDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
+}
 
-const pendingRequests = [
-  {
-    id: "3",
-    streamer: "Gadget Galaxy",
-    platform: "Amazon Live",
-    requestedFor: "Tomorrow, 6:00 PM - 9:00 PM",
-    payout: "$84",
-  },
-  {
-    id: "4",
-    streamer: "Beauty Boss",
-    platform: "TikTok Shop",
-    requestedFor: "Fri, 1:00 PM - 3:00 PM",
-    payout: "$60",
-  },
-]
+function isScheduledToday(booking: ModeratorBookingItem, now = new Date()): boolean {
+  if (!booking.scheduledStartAt) return false
+  return isSameCalendarDay(new Date(booking.scheduledStartAt), now)
+}
+
+function isPendingRequest(booking: ModeratorBookingItem): boolean {
+  return String(booking.bookingStatus || "").toLowerCase() === "requested"
+}
+
+function isActiveTodaySession(booking: ModeratorBookingItem): boolean {
+  const status = String(booking.bookingStatus || "").toLowerCase()
+  return !["cancelled", "refunded", "disputed", "completed"].includes(status)
+}
+
+function scheduleStatusLabel(booking: ModeratorBookingItem): "confirmed" | "pending" {
+  const status = String(booking.bookingStatus || "").toLowerCase()
+  if (status === "accepted" || status === "in_progress") return "confirmed"
+  return "pending"
+}
+
+function formatPayout(cents: number | null | undefined): string | null {
+  if (cents == null || !Number.isFinite(cents)) return null
+  return `$${(cents / 100).toFixed(0)}`
+}
+
+function formatTimeRange(startAt: string | null, endAt: string | null): string {
+  if (!startAt || !endAt) return "Schedule not set"
+
+  const start = new Date(startAt)
+  const end = new Date(endAt)
+
+  return `${start.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  })} - ${end.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`
+}
+
+function formatRequestedFor(startAt: string | null, endAt: string | null): string {
+  if (!startAt || !endAt) return "Schedule not set"
+
+  const start = new Date(startAt)
+  const end = new Date(endAt)
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  let dayLabel: string
+  if (isSameCalendarDay(start, now)) {
+    dayLabel = "Today"
+  } else if (isSameCalendarDay(start, tomorrow)) {
+    dayLabel = "Tomorrow"
+  } else {
+    dayLabel = start.toLocaleDateString("en-US", { weekday: "short" })
+  }
+
+  return `${dayLabel}, ${formatTimeRange(startAt, endAt)}`
+}
+
+function paymentStatusLabel(paymentStatus: string): string {
+  const normalized = String(paymentStatus || "").toLowerCase()
+  if (!normalized) return "Booking"
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
 
 export default function ModeratorDashboard() {
+  const { getToken } = useAuth()
   const authenticatedUser = useAuthenticatedUser()
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [bookings, setBookings] = useState<ModeratorBookingItem[]>([])
+
+  useEffect(() => {
+    let active = true
+
+    async function load() {
+      try {
+        setIsLoading(true)
+        setError(null)
+
+        const token = await getToken()
+        if (!token) {
+          throw new Error("Authentication required.")
+        }
+
+        const result = await listModeratorBookings(token)
+        if (!active) return
+        setBookings(result.bookings || [])
+      } catch (err) {
+        if (!active) return
+        const message = err instanceof Error ? err.message : "Unable to load bookings."
+        setError(message)
+      } finally {
+        if (active) setIsLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      active = false
+    }
+  }, [getToken])
+
+  const pendingRequests = useMemo(
+    () => bookings.filter(isPendingRequest),
+    [bookings],
+  )
+
+  const todayBookings = useMemo(
+    () => bookings.filter((booking) => isScheduledToday(booking) && isActiveTodaySession(booking)),
+    [bookings],
+  )
+
   const displayName = authenticatedUser
     ? authenticatedUser.firstName || authenticatedUser.lastName
       ? [authenticatedUser.firstName, authenticatedUser.lastName].filter(Boolean).join(" ")
@@ -86,11 +176,19 @@ export default function ModeratorDashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      {error ? (
+        <Card className="border-border/60 bg-card/70">
+          <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card className="border-border/60 bg-card/70">
           <CardContent className="p-4">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Pending Requests</p>
-            <p className="mt-2 text-2xl font-semibold">{pendingRequests.length}</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {isLoading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /> : pendingRequests.length}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">Needs accept or decline</p>
           </CardContent>
         </Card>
@@ -98,16 +196,10 @@ export default function ModeratorDashboard() {
         <Card className="border-border/60 bg-card/70">
           <CardContent className="p-4">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Today Sessions</p>
-            <p className="mt-2 text-2xl font-semibold">{todayBookings.length}</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {isLoading ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /> : todayBookings.length}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">Confirmed and pending</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/60 bg-card/70">
-          <CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">This Week Earnings</p>
-            <p className="mt-2 text-2xl font-semibold">$420</p>
-            <p className="mt-1 text-xs text-muted-foreground">Expected payout</p>
           </CardContent>
         </Card>
       </div>
@@ -128,42 +220,60 @@ export default function ModeratorDashboard() {
           </CardHeader>
 
           <CardContent className="space-y-3">
-            {todayBookings.map((job) => (
-              <div
-                key={job.id}
-                className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/70 p-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={job.avatar} />
-                    <AvatarFallback className="bg-primary/10 text-primary">
-                      {job.streamer.charAt(0)}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{job.streamer}</p>
-                      <StatusBadge variant={job.status === "confirmed" ? "success" : "warning"}>
-                        {job.status}
-                      </StatusBadge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{job.platform}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Clock3 className="h-4 w-4" />
-                    {job.time}
-                  </div>
-                  <div className="flex items-center gap-1.5 font-medium text-primary">
-                    <DollarSign className="h-4 w-4" />
-                    {job.payout}
-                  </div>
-                </div>
+            {isLoading ? (
+              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading schedule...
               </div>
-            ))}
+            ) : todayBookings.length === 0 ? (
+              <p className="rounded-xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
+                No sessions scheduled for today.
+              </p>
+            ) : (
+              todayBookings.map((job) => {
+                const status = scheduleStatusLabel(job)
+                const payout = formatPayout(job.moderatorPayoutCents)
+
+                return (
+                  <div
+                    key={job.bookingId}
+                    className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/70 p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src="" />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          {job.streamerUsername.charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{job.streamerUsername}</p>
+                          <StatusBadge variant={status === "confirmed" ? "success" : "warning"}>
+                            {status}
+                          </StatusBadge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{paymentStatusLabel(job.paymentStatus)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <Clock3 className="h-4 w-4" />
+                        {formatTimeRange(job.scheduledStartAt, job.scheduledEndAt)}
+                      </div>
+                      {payout ? (
+                        <div className="flex items-center gap-1.5 font-medium text-primary">
+                          <DollarSign className="h-4 w-4" />
+                          {payout}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })
+            )}
           </CardContent>
         </Card>
 
@@ -176,28 +286,47 @@ export default function ModeratorDashboard() {
           </CardHeader>
 
           <CardContent className="space-y-3">
-            {pendingRequests.map((request) => (
-              <div key={request.id} className="rounded-xl border border-border/60 bg-background/70 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{request.streamer}</p>
-                    <p className="truncate text-xs text-muted-foreground">{request.platform}</p>
-                  </div>
-                  <span className="text-sm font-semibold text-primary">{request.payout}</span>
-                </div>
-
-                <p className="mt-2 text-xs text-muted-foreground">{request.requestedFor}</p>
-
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1" asChild>
-                    <Link href="/moderator/bookings">Decline</Link>
-                  </Button>
-                  <Button size="sm" className="flex-1" asChild>
-                    <Link href="/moderator/bookings">Accept</Link>
-                  </Button>
-                </div>
+            {isLoading ? (
+              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/70 p-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading requests...
               </div>
-            ))}
+            ) : pendingRequests.length === 0 ? (
+              <p className="rounded-xl border border-border/60 bg-background/70 p-3 text-sm text-muted-foreground">
+                No pending requests right now.
+              </p>
+            ) : (
+              pendingRequests.map((request) => {
+                const payout = formatPayout(request.moderatorPayoutCents)
+
+                return (
+                  <div key={request.bookingId} className="rounded-xl border border-border/60 bg-background/70 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{request.streamerUsername}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {paymentStatusLabel(request.paymentStatus)}
+                        </p>
+                      </div>
+                      {payout ? <span className="text-sm font-semibold text-primary">{payout}</span> : null}
+                    </div>
+
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {formatRequestedFor(request.scheduledStartAt, request.scheduledEndAt)}
+                    </p>
+
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1" asChild>
+                        <Link href="/moderator/bookings">Decline</Link>
+                      </Button>
+                      <Button size="sm" className="flex-1" asChild>
+                        <Link href="/moderator/bookings">Accept</Link>
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
           </CardContent>
         </Card>
       </div>

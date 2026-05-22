@@ -36,6 +36,9 @@ export const MARKETPLACE_HUB_LANDING_PATHS: Record<MarketplaceHub, string> = {
 
 export const MARKETPLACE_HUB_OPTIONS: MarketplaceHub[] = ["whatnot", "tiktok", "agency", "launch-pad"]
 
+/** Seller sidebar dropdown — Launch Pad is reached via /seller, not the hub switcher. */
+export const SELLER_MARKETPLACE_HUB_OPTIONS: MarketplaceHub[] = ["whatnot", "tiktok", "agency"]
+
 type MarketplaceHubContextValue = {
   hub: MarketplaceHub
   setHub: (hub: MarketplaceHub) => void

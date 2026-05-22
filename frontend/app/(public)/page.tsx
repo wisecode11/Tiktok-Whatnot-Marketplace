@@ -1,147 +1,358 @@
+import Image from "next/image"
 import Link from "next/link"
-import { BRAND_NAME } from "@/lib/brand"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import type { LucideIcon } from "lucide-react"
 import {
   ArrowRight,
-  Zap,
-  Users,
   BarChart3,
+  Bot,
+  Box,
+  Calendar,
+  CheckCircle,
+  CreditCard,
+  DollarSign,
+  FileText,
+  Headphones,
+  ImageIcon,
+  Layers,
+  LineChart,
+  Medal,
+  Package,
+  Play,
+  Send,
   Shield,
-  Clock,
-  Globe,
+  Sparkles,
   Star,
-  CheckCircle2,
-  PlayCircle,
+  TrendingUp,
+  UserPlus,
+  Users,
+  Wallet,
+  Zap,
 } from "lucide-react"
 
-const features = [
+import whyChooseImage from "./images/three.png"
+import firefly from "./images/firefly.png"
+import { LandingConfidenceCta } from "@/components/public/landing-confidence-cta"
+import { LandingPricingSection } from "@/components/public/landing-pricing"
+import { PartnerLogos } from "@/components/public/partner-logos"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
+
+const heroStats = [
   {
-    icon: BarChart3,
-    title: "Advanced Analytics",
-    description:
-      "Track your stream performance, engagement metrics, and revenue in real-time with our comprehensive dashboard.",
+    value: "$12,450",
+    label: "Revenue Today",
+    icon: DollarSign,
+    iconBg: "bg-gradient-to-br from-emerald-400 to-teal-500",
   },
   {
+    value: "234",
+    label: "Orders Pending",
+    icon: Package,
+    iconBg: "bg-gradient-to-br from-blue-400 to-blue-600",
+  },
+  {
+    value: "$248K",
+    label: "GMV This Month",
+    icon: TrendingUp,
+    iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
+  },
+  {
+    value: "1,847",
+    label: "Live Viewers",
     icon: Users,
-    title: "Moderator Marketplace",
-    description:
-      "Find and hire verified professional moderators to help manage your live streams and boost engagement.",
-  },
-  {
-    icon: Clock,
-    title: "Smart Scheduling",
-    description:
-      "Plan and schedule your streams across multiple platforms with our intelligent calendar system.",
-  },
-  {
-    icon: Shield,
-    title: "Secure Payments",
-    description:
-      "Built-in payment processing with fraud protection. Get paid fast with weekly payouts.",
-  },
-  {
-    icon: Globe,
-    title: "Multi-Platform Support",
-    description:
-      "Connect TikTok Shop, Whatnot, and more. Manage all your live commerce from one place.",
-  },
-  {
-    icon: Zap,
-    title: "AI-Powered Tools",
-    description:
-      "Leverage AI to optimize your content, generate product descriptions, and analyze trends.",
+    iconBg: "bg-gradient-to-br from-orange-400 to-amber-500",
   },
 ]
 
-const stats = [
-  { value: "50K+", label: "Active Streamers" },
-  { value: "$12M+", label: "Monthly GMV" },
-  { value: "98%", label: "Satisfaction Rate" },
-  { value: "24/7", label: "Support" },
+const features = [
+  {
+    title: "Advanced Analytics",
+    description:
+      "Track your stream performance, engagement metrics, and revenue in real-time with our comprehensive dashboard.",
+    icon: BarChart3,
+    iconBg: "bg-gradient-to-br from-blue-500 to-blue-600",
+    highlight: false,
+  },
+  {
+    title: "Moderator Marketplace",
+    description:
+      "Find and hire verified professional moderators to help manage your live streams and boost engagement.",
+    icon: Users,
+    iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
+    highlight: false,
+  },
+  {
+    title: "Smart Scheduling",
+    description:
+      "Plan and schedule your streams across multiple platforms with our intelligent calendar system.",
+    icon: Calendar,
+    iconBg: "bg-gradient-to-br from-emerald-400 to-teal-500",
+    highlight: false,
+  },
+  {
+    title: "Secure Payments",
+    description:
+      "Built-in payment processing with fraud protection. Get paid fast with weekly payouts.",
+    icon: CreditCard,
+    iconBg: "bg-gradient-to-br from-orange-400 to-orange-500",
+    highlight: true,
+  },
+  {
+    title: "Multi-Platform Support",
+    description:
+      "Connect TikTok Shop, Whatnot, and more. Manage all your live commerce from one place.",
+    icon: Layers,
+    iconBg: "bg-gradient-to-br from-pink-400 to-rose-500",
+    highlight: false,
+  },
+  {
+    title: "AI-Powered Tools",
+    description:
+      "Leverage AI to optimize your content, generate product descriptions, and analyze trends.",
+    icon: Sparkles,
+    iconBg: "bg-gradient-to-br from-sky-400 to-blue-500",
+    highlight: false,
+  },
+  {
+    title: "Inventory Management",
+    description:
+      "Sync inventory across all your stores in real-time. Never oversell again.",
+    icon: Box,
+    iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
+    highlight: false,
+  },
+  {
+    title: "Finance & Payroll",
+    description:
+      "Track expenses, manage staff payments, and integrate with QuickBooks for seamless accounting.",
+    icon: Wallet,
+    iconBg: "bg-gradient-to-br from-teal-400 to-cyan-500",
+    highlight: false,
+  },
+  {
+    title: "Team Collaboration",
+    description:
+      "Invite team members, assign roles, and collaborate seamlessly with real-time activity feeds.",
+    icon: UserPlus,
+    iconBg: "bg-gradient-to-br from-orange-400 to-amber-500",
+    highlight: false,
+  },
+]
+
+const steps = [
+  {
+    step: "01",
+    title: "Create Your Account",
+    description:
+      "Sign up for free and connect your streaming platforms. No credit card required.",
+    icon: UserPlus,
+    iconBg: "bg-gradient-to-br from-blue-500 to-sky-400",
+  },
+  {
+    step: "02",
+    title: "Set Up Your Dashboard",
+    description:
+      "Configure your products, team, and preferences. Import existing inventory easily.",
+    icon: Zap,
+    iconBg: "bg-gradient-to-br from-violet-500 to-purple-400",
+  },
+  {
+    step: "03",
+    title: "Hire Moderators",
+    description:
+      "Browse our verified marketplace and hire professional moderators for your streams.",
+    icon: Users,
+    iconBg: "bg-gradient-to-br from-emerald-500 to-green-400",
+  },
+  {
+    step: "04",
+    title: "Start Streaming",
+    description:
+      "Go live with confidence. Track analytics, manage orders, and grow your audience.",
+    icon: Sparkles,
+    iconBg: "bg-gradient-to-br from-orange-500 to-yellow-400",
+  },
+]
+
+const whyChooseFeatures = [
+  "Sync products, track orders, and analyze stream",
+  "Manage live auctions, inventory, and payouts automatically",
+  "Connect payroll, expenses, and accounting with zero manual entry",
+  "See revenue, orders, and growth metrics across ALL platforms",
+]
+
+const aiFeatures = [
+  {
+    title: "AI Thumbnail Generation",
+    description:
+      "Create eye-catching thumbnails that drive clicks and engagement.",
+    icon: ImageIcon,
+    iconBg: "bg-gradient-to-br from-pink-500 to-rose-500",
+  },
+  {
+    title: "Trend Analysis",
+    description:
+      "Get AI-powered insights on trending products and optimal stream times.",
+    icon: LineChart,
+    iconBg: "bg-gradient-to-br from-sky-400 to-blue-500",
+  },
+  {
+    title: "Smart Descriptions",
+    description:
+      "Generate compelling product descriptions that convert viewers to buyers.",
+    icon: FileText,
+    iconBg: "bg-gradient-to-br from-amber-400 to-orange-500",
+  },
+  {
+    title: "AI Assistant",
+    description:
+      "Your personal business advisor, available 24/7 to answer questions.",
+    icon: Bot,
+    iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
+  },
 ]
 
 const testimonials = [
   {
+    badge: "+300% Revenue",
+    badgeClass: "bg-gradient-to-r from-emerald-400 to-green-500",
     quote:
-      `${BRAND_NAME} transformed how I manage my live commerce business. The moderator marketplace alone saved me hours every week.`,
+      "Marketplace Hub transformed my business. I went from managing spreadsheets to a unified dashboard that handles everything. My revenue increased 300% in 6 months.",
     author: "Sarah Chen",
-    role: "Top TikTok Seller",
-    rating: 5,
+    role: "TikTok Shop Seller",
+    avatar: "SC",
+    avatarBg: "bg-gradient-to-br from-rose-400 to-pink-500",
   },
   {
+    badge: "10K+ Followers",
+    badgeClass: "bg-gradient-to-r from-sky-400 to-blue-600",
     quote:
-      "The analytics are incredible. I can see exactly what products perform best and when my audience is most engaged.",
-    author: "Marcus Williams",
-    role: "Whatnot Power Seller",
-    rating: 5,
+      "The moderator marketplace is a game-changer. Finding reliable mods used to take days. Now I can hire verified professionals in minutes.",
+    author: "Marcus Johnson",
+    role: "Whatnot Streamer",
+    avatar: "MJ",
+    avatarBg: "bg-gradient-to-br from-blue-400 to-indigo-500",
   },
   {
+    badge: "Zero Oversells",
+    badgeClass: "bg-gradient-to-r from-violet-400 to-purple-600",
     quote:
-      "As a moderator, this platform has been a game-changer. Consistent bookings, reliable payments, and great clients.",
-    author: "Jordan Martinez",
-    role: "Professional Moderator",
-    rating: 5,
+      "Managing inventory across TikTok Shop and Whatnot was a nightmare before. Now everything syncs automatically. I haven't had an oversell in months.",
+    author: "Emily Rodriguez",
+    role: "Multi-Platform Seller",
+    avatar: "ER",
+    avatarBg: "bg-gradient-to-br from-amber-400 to-orange-500",
   },
 ]
 
+const benefits = [
+  {
+    title: "99.9% Uptime Guarantee",
+    description:
+      "Enterprise-grade infrastructure ensures your business never misses a beat.",
+    icon: Shield,
+    iconBg: "bg-gradient-to-br from-emerald-400 to-teal-500",
+  },
+  {
+    title: "24/7 Priority Support",
+    description:
+      "Our expert team is always ready to help you succeed, day or night.",
+    icon: Headphones,
+    iconBg: "bg-gradient-to-br from-blue-400 to-blue-600",
+  },
+  {
+    title: "Bank-Grade Security",
+    description:
+      "Your data is protected with industry-leading encryption and security protocols.",
+    icon: Medal,
+    iconBg: "bg-gradient-to-br from-violet-400 to-purple-600",
+  },
+  {
+    title: "Same-Day Onboarding",
+    description:
+      "Get up and running in hours, not days. We make setup effortless.",
+    icon: Zap,
+    iconBg: "bg-gradient-to-br from-orange-400 to-amber-500",
+  },
+]
+
+function FeatureIcon({
+  icon: Icon,
+  className,
+}: {
+  icon: LucideIcon
+  className: string
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-11 w-11 items-center justify-center rounded-xl text-white shadow-sm",
+        className,
+      )}
+    >
+      <Icon className="h-5 w-5" />
+    </div>
+  )
+}
+
 export default function HomePage() {
   return (
-    <div className="flex flex-col">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden py-20 md:py-32">
-        {/* Background gradient */}
-        <div className="absolute inset-0 -z-10">
-          <div className="absolute left-1/2 top-0 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-primary/20 blur-3xl" />
-          <div className="absolute right-1/4 top-1/4 h-[400px] w-[400px] rounded-full bg-accent/15 blur-3xl" />
-        </div>
-
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-3xl text-center">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm text-primary">
-              <Zap className="h-4 w-4" />
-              <span>The Future of Live Commerce</span>
+    <div className="flex flex-col bg-background text-foreground overflow-x-hidden">
+      {/* Hero — white + check/grid lines (hero-checker-bg in globals.css) */}
+      <section className="hero-checker-bg relative overflow-hidden py-16 md:py-24">
+        <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-4xl text-center">
+            <div className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Sparkles className="h-4 w-4 text-primary" />
+              The Future of Live Commerce
             </div>
-            <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-              Scale Your{" "}
-              <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Live Commerce
-              </span>{" "}
-              Business
+            <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground sm:text-5xl md:text-6xl lg:text-7xl">
+              Scale Your Live{" "}
+              <span className="text-[#6d11e8]">Commerce</span>
+              <br />
+              <span className="text-[#6d11e8]">Business</span>
             </h1>
-            <p className="mt-6 text-pretty text-lg text-muted-foreground md:text-xl">
-              The all-in-one platform for live commerce streamers. Manage your
-              streams, hire professional moderators, and grow your business with
-              powerful analytics.
+            <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg text-muted-foreground md:text-xl">
+              The all-in-one platform for TikTok Shop and Whatnot sellers.
+              Manage your streams, hire professional moderators, and grow your
+              business with powerful analytics.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button size="lg" asChild className="gap-2">
+              <Button size="lg" asChild className="h-12 gap-2 rounded-full px-8 text-base">
                 <Link href="/get-started">
                   Start Free Trial
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" asChild className="gap-2">
+              <Button
+                size="lg"
+                variant="outline"
+                asChild
+                className="h-12 gap-2 rounded-full bg-card px-8 text-base"
+              >
                 <Link href="/how-it-works">
-                  <PlayCircle className="h-4 w-4" />
+                  <Play className="h-4 w-4 fill-current" />
                   Watch Demo
                 </Link>
               </Button>
             </div>
           </div>
-        </div>
-      </section>
 
-      {/* Stats Section */}
-      <section className="border-y border-border bg-muted/30 py-12">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-            {stats.map((stat) => (
-              <div key={stat.label} className="text-center">
-                <div className="text-3xl font-bold tracking-tight text-primary md:text-4xl">
+          <div className="mx-auto mt-16 grid max-w-4xl grid-cols-2 gap-6 md:grid-cols-4 md:gap-8">
+            {heroStats.map((stat) => (
+              <div key={stat.label} className="flex flex-col items-center text-center">
+                <div
+                  className={cn(
+                    "mb-3 flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-sm",
+                    stat.iconBg,
+                  )}
+                >
+                  <stat.icon className="h-5 w-5" />
+                </div>
+                <div className="text-xl font-bold text-foreground md:text-2xl">
                   {stat.value}
                 </div>
-                <div className="mt-1 text-sm text-muted-foreground">
+                <div className="mt-1 text-xs text-muted-foreground md:text-sm">
                   {stat.label}
                 </div>
               </div>
@@ -150,80 +361,167 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-20 md:py-32">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+
+
+
+
+
+
+      <section className="relative py-16 md:py-24 overflow-hidden">
+        {/* Background gradient */}
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-pink-100/50 via-purple-100/30 to-transparent dark:from-pink-950/20 dark:via-purple-950/10 dark:to-transparent" />
+
+        <div className="container mx-auto px-4 md:px-6 relative z-10">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+            {/* Left content */}
+            <div className="space-y-6 mx-auto max-w-2xl lg:mx-0 lg:max-w-2xl">
+              {/* Badge */}
+              <span className="inline-block px-4 py-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-950/50 rounded-full">
+                Why Choose Us
+              </span>
+
+              {/* Heading */}
+              <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground leading-tight">
+                Scale Your Live Commerce Empire Across TikTok, Whatnot & QuickBooks
+              </h2>
+
+              {/* Description */}
+              <p className="text-lg text-muted-foreground leading-relaxed">
+                One dashboard for TikTok, Whatnot & QuickBooks. Stop switching. Start scaling.
+
+                —{" "}
+                <strong className="text-foreground font-semibold">
+                  engaging your audience and growing your business.
+                </strong>
+              </p>
+
+              {/* Features list */}
+              <ul className="space-y-4 pt-2">
+                {whyChooseFeatures.map((feature, index) => (
+                  <li key={index} className="flex items-start gap-3">
+                    <CheckCircle className="w-6 h-6 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                    <span className="text-foreground">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {/* CTA Button */}
+              <div className="pt-4">
+                <Button asChild size="lg" className="text-white px-6">
+                  <Link href="/how-it-works">
+                    Learn More
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+
+            {/* Right image */}
+            <div className="relative">
+              <div className="relative rounded-2xl overflow-hidden shadow-2xl">
+                <Image
+                  src={whyChooseImage}
+                  alt="Live commerce streaming setup"
+                  width={700}
+                  height={500}
+                  priority
+                  className="w-full h-auto md:max-h-[26rem] lg:max-h-[34rem] rounded-3xl object-cover shadow-2xl ring-1 ring-white/10 dark:ring-white/20"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <PartnerLogos />
+
+      <LandingConfidenceCta />
+
+      <section className="relative py-16 md:py-24 overflow-hidden">
+        {/* Background gradient */}
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-pink-100/50 via-purple-100/30 to-transparent dark:from-pink-950/20 dark:via-purple-950/10 dark:to-transparent" />
+
+        <div className="container mx-auto px-4 md:px-6 relative z-10">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+            {/* Left content */}
+            <div className="space-y-6 mx-auto max-w-2xl lg:mx-0 lg:max-w-2xl">
+              <h2 className="font-display text-balance text-3xl font-extrabold leading-[1.12] tracking-[-0.03em] text-foreground md:text-4xl lg:text-5xl">
+                One Dashboard to Power Your Entire{" "}
+                <span className="text-[#6d11e8]">Live Commerce</span> Operation
+              </h2>
+              <p className="font-body text-lg leading-relaxed tracking-[0.01em] text-muted-foreground md:text-xl md:leading-relaxed">
+                Manage your products, orders, inventory, and global shipping from one
+                intelligent dashboard. Let AI handle the heavy lifting — while you focus on
+                growing your live{" "}
+                <span className="font-semibold text-[#6d11e8]">commerce</span>{" "}
+                <span className="font-semibold text-[#6d11e8]">business</span>.
+              </p>
+
+              <div className="pt-2">
+                <Button asChild size="lg" className="text-white px-6">
+                  <Link href="/how-it-works">
+                    Learn More
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+
+            {/* Right image */}
+            <div className="relative">
+              <div className="relative rounded-2xl overflow-hidden shadow-2xl">
+                <Image
+                  src={firefly}
+                  alt="Live commerce streaming setup"
+                  width={700}
+                  height={500}
+                  priority
+                  className="w-full h-auto md:max-h-[26rem] lg:max-h-[34rem] rounded-3xl object-cover shadow-2xl ring-1 ring-white/10 dark:ring-white/20"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+
+
+      {/* Features */}
+      <section id="features" className="relative py-20 md:py-28">
+        <div className="pointer-events-none absolute -left-32 top-0 h-96 w-96 rounded-full bg-primary/15 blur-3xl dark:bg-primary/10" />
+        <div className="pointer-events-none absolute -right-32 bottom-0 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/5" />
+
+        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-              Everything You Need to Succeed
+            <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl md:text-5xl">
+              Everything You Need to{" "}
+              <span className="bg-gradient-to-r from-primary to-sky-400 bg-clip-text text-transparent">
+                Succeed
+              </span>
             </h2>
             <p className="mt-4 text-muted-foreground">
               Powerful tools designed for live commerce professionals
             </p>
           </div>
 
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {features.map((feature) => (
-              <Card
+              <div
                 key={feature.title}
-                className="group relative overflow-hidden border-border/50 bg-card/50 transition-all hover:border-primary/50 hover:bg-card"
+                className={cn(
+                  "rounded-2xl p-6 transition-shadow",
+                  feature.highlight
+                    ? "bg-primary/10 dark:bg-primary/15"
+                    : "bg-transparent hover:bg-card/80",
+                )}
               >
-                <CardContent className="p-6">
-                  <div className="mb-4 inline-flex rounded-xl bg-primary/10 p-3">
-                    <feature.icon className="h-6 w-6 text-primary" />
-                  </div>
-                  <h3 className="mb-2 text-lg font-semibold">{feature.title}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {feature.description}
-                  </p>
-                </CardContent>
-                <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section className="border-y border-border bg-muted/30 py-20 md:py-32">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-              Get Started in Minutes
-            </h2>
-            <p className="mt-4 text-muted-foreground">
-              Simple steps to launch your live commerce journey
-            </p>
-          </div>
-
-          <div className="mt-16 grid gap-8 md:grid-cols-3">
-            {[
-              {
-                step: "01",
-                title: "Create Your Account",
-                description:
-                  "Sign up for free and connect your streaming platforms. No credit card required.",
-              },
-              {
-                step: "02",
-                title: "Set Up Your Dashboard",
-                description:
-                  "Configure your products, team, and preferences. Import existing inventory easily.",
-              },
-              {
-                step: "03",
-                title: "Start Streaming",
-                description:
-                  "Go live with confidence. Track analytics, hire moderators, and grow your audience.",
-              },
-            ].map((item) => (
-              <div key={item.step} className="relative pl-16">
-                <div className="absolute left-0 top-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-lg font-bold text-primary-foreground">
-                  {item.step}
-                </div>
-                <h3 className="mb-2 text-lg font-semibold">{item.title}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {item.description}
+                <FeatureIcon icon={feature.icon} className={feature.iconBg} />
+                <h3 className="mt-4 text-lg font-semibold text-foreground">
+                  {feature.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {feature.description}
                 </p>
               </div>
             ))}
@@ -231,86 +529,249 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Testimonials Section 
-      <section className="py-20 md:py-32">
+      {/* How it works */}
+      <section id="how-it-works" className="bg-card/30 py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-              Loved by Streamers Worldwide
+            <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              Get Started in Minutes
             </h2>
             <p className="mt-4 text-muted-foreground">
-              See what our community has to say
+              Simple steps to launch your live commerce journey
             </p>
           </div>
 
-          <div className="mt-16 grid gap-6 md:grid-cols-3">
-            {testimonials.map((testimonial) => (
-              <Card
-                key={testimonial.author}
-                className="border-border/50 bg-card/50"
+          <div className="relative mt-16">
+            <div className="absolute left-0 right-0 top-6 hidden h-px bg-border md:block md:top-8" />
+            <div className="grid gap-10 md:grid-cols-4">
+              {steps.map((item) => (
+                <div key={item.step} className="relative flex flex-col items-center text-center">
+                  <div
+                    className={cn(
+                      "relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-md",
+                      item.iconBg,
+                    )}
+                  >
+                    <item.icon className="h-6 w-6" />
+                  </div>
+                  <p className="mt-6 text-xs font-bold tracking-wider text-muted-foreground">
+                    STEP {item.step}
+                  </p>
+                  <h3 className="mt-2 text-lg font-semibold text-foreground">
+                    {item.title}
+                  </h3>
+                  <p className="mt-2 max-w-[220px] text-sm leading-relaxed text-muted-foreground">
+                    {item.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="mt-14 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Powered by AI
+          </p>
+        </div>
+      </section>
+
+      {/* AI section */}
+      <section className="relative overflow-hidden py-20 md:py-28">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_70%_60%_at_50%_50%,color-mix(in_oklch,var(--primary)_18%,transparent),transparent)] dark:bg-[radial-gradient(ellipse_70%_60%_at_50%_50%,color-mix(in_oklch,var(--primary)_10%,transparent),transparent)]" />
+
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-2xl text-center">
+            <p className="text-sm font-medium text-primary">✨ Powered by AI</p>
+            <h2 className="mt-2 text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              Supercharge Your Business with AI
+            </h2>
+            <p className="mt-4 text-muted-foreground">
+              Leverage cutting-edge AI to optimize your content and boost sales
+            </p>
+          </div>
+
+          <div className="mt-14 grid items-center gap-12 lg:grid-cols-2">
+            <div className="grid gap-8 sm:grid-cols-2">
+              {aiFeatures.map((feature) => (
+                <div key={feature.title}>
+                  <FeatureIcon icon={feature.icon} className={feature.iconBg} />
+                  <h3 className="mt-3 font-semibold text-foreground">
+                    {feature.title}
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {feature.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-6 shadow-lg shadow-primary/5">
+              <div className="flex items-center gap-3 border-b border-border pb-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                  <Bot className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">AI Assistant</p>
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    Online
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-4">
+                <div className="ml-auto max-w-[90%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm text-primary-foreground">
+                  Generate a catchy title for my vintage sneaker collection
+                  stream
+                </div>
+                <div className="rounded-2xl rounded-tl-sm border border-border bg-muted/50 px-4 py-4 text-sm text-muted-foreground">
+                  <p>Here are 3 title suggestions for your vintage sneaker stream:</p>
+                  <ol className="mt-3 list-decimal space-y-2 pl-4">
+                    <li>Rare Kicks Alert: 90s Sneaker Treasures Live!</li>
+                    <li>
+                      Vintage Heat Drop - Limited Grails You Won&apos;t Find
+                      Anywhere
+                    </li>
+                    <li>
+                      Throwback Sneaker Vault - Iconic Pairs from the Golden Era
+                    </li>
+                  </ol>
+                </div>
+              </div>
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  placeholder="Ask AI anything..."
+                  className="flex-1 rounded-xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground outline-none placeholder:text-muted-foreground"
+                />
+                <button
+                  type="button"
+                  aria-label="Send message"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <LandingPricingSection />
+
+      {/* Testimonials */}
+      <section id="testimonials" className="relative py-20 md:py-28">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_50%_at_50%_100%,color-mix(in_oklch,var(--primary)_12%,transparent),transparent)] dark:bg-[radial-gradient(ellipse_80%_50%_at_50%_100%,color-mix(in_oklch,var(--primary)_8%,transparent),transparent)]" />
+
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              Loved by Sellers <span className="text-primary">Worldwide</span>
+            </h2>
+            <p className="mt-4 text-muted-foreground">
+              Join thousands of successful sellers who trust Marketplace Hub to
+              grow their business
+            </p>
+          </div>
+
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {testimonials.map((item) => (
+              <div
+                key={item.author}
+                className="relative rounded-2xl border border-border bg-card p-6 shadow-sm"
               >
-                <CardContent className="p-6">
-                  <div className="mb-4 flex gap-1">
-                    {Array.from({ length: testimonial.rating }).map((_, i) => (
-                      <Star
-                        key={i}
-                        className="h-4 w-4 fill-primary text-primary"
-                      />
-                    ))}
+                <span
+                  className={cn(
+                    "absolute right-4 top-4 rounded-full px-3 py-1 text-xs font-semibold text-white",
+                    item.badgeClass,
+                  )}
+                >
+                  {item.badge}
+                </span>
+                <span className="text-4xl font-serif leading-none text-border">
+                  &ldquo;
+                </span>
+                <div className="mt-2 flex gap-0.5">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star
+                      key={i}
+                      className="h-4 w-4 fill-amber-400 text-amber-400"
+                    />
+                  ))}
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                  {item.quote}
+                </p>
+                <div className="mt-6 flex items-center gap-3 border-t border-border pt-6">
+                  <div
+                    className={cn(
+                      "flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-white",
+                      item.avatarBg,
+                    )}
+                  >
+                    {item.avatar}
                   </div>
-                  <blockquote className="text-sm leading-relaxed">
-                    &ldquo;{testimonial.quote}&rdquo;
-                  </blockquote>
-                  <div className="mt-4 border-t border-border pt-4">
-                    <div className="font-medium">{testimonial.author}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {testimonial.role}
-                    </div>
+                  <div>
+                    <p className="font-semibold text-foreground">{item.author}</p>
+                    <p className="text-sm text-muted-foreground">{item.role}</p>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             ))}
           </div>
         </div>
       </section>
-*/}
-      {/* CTA Section */}
-      <section className="border-t border-border bg-gradient-to-b from-muted/30 to-background py-20 md:py-32">
+
+      {/* Benefits */}
+      <section className="border-t border-border bg-card/30 py-16 md:py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary/20 via-primary/10 to-accent/10 p-8 md:p-16">
-            <div className="relative z-10 mx-auto max-w-2xl text-center">
-              <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-                Ready to Transform Your Streams?
-              </h2>
-              <p className="mt-4 text-muted-foreground">
-                Join thousands of successful streamers using {BRAND_NAME} to grow
-                their live commerce business.
-              </p>
-              <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-                <Button size="lg" asChild className="gap-2">
-                  <Link href="/get-started">
-                    Get Started Free
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-                <Button size="lg" variant="outline" asChild>
-                  <Link href="/contact">Talk to Sales</Link>
-                </Button>
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
+            {benefits.map((item) => (
+              <div key={item.title} className="flex flex-col items-center text-center">
+                <FeatureIcon icon={item.icon} className={item.iconBg} />
+                <h3 className="mt-4 font-semibold text-foreground">{item.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
               </div>
-              <div className="mt-6 flex items-center justify-center gap-6 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  Free 14-day trial
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  No credit card required
-                </span>
-              </div>
-            </div>
-            {/* Decorative elements */}
-            <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-primary/10 blur-3xl" />
-            <div className="absolute -bottom-20 -left-20 h-80 w-80 rounded-full bg-accent/10 blur-3xl" />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="relative overflow-hidden py-20 md:py-28">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,color-mix(in_oklch,var(--primary)_15%,transparent),transparent)] dark:bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,color-mix(in_oklch,var(--primary)_8%,transparent),transparent)]" />
+
+        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
+          <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+            Ready to Transform Your Live Commerce Business?
+          </h2>
+          <p className="mt-4 text-muted-foreground">
+            Join thousands of successful sellers using Marketplace Hub to grow
+            their business. Start your free trial today.
+          </p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Button size="lg" asChild className="h-12 gap-2 rounded-xl px-8">
+              <Link href="/get-started">
+                Get Started Free
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              asChild
+              className="h-12 rounded-xl bg-card px-8"
+            >
+              <Link href="/contact">Book a Demo</Link>
+            </Button>
+          </div>
+          <p className="mt-6 text-sm text-muted-foreground">
+            Free 14-day trial | No credit card required | Cancel anytime
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+            <span>99.9% Uptime</span>
+            <span>24/7 Support</span>
+            <span>Same-Day Setup</span>
           </div>
         </div>
       </section>

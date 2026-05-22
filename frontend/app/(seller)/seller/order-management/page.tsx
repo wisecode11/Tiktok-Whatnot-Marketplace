@@ -34,8 +34,69 @@ import {
   type WhatnotShipmentTableRow,
   waitForSessionToken,
 } from "@/lib/auth"
+import { cn } from "@/lib/utils"
 
 const LIVE_ID_STORAGE_KEY = "seller_order_management_live_id"
+
+const OM_TABLE_HEAD_CLASS =
+  "h-11 px-4 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+
+const OM_TABLE_ROW_CLASS = "border-t border-border/40 transition-colors hover:bg-muted/25"
+
+const OM_STAT_METRIC_STYLES: Record<
+  string,
+  { icon: typeof Wallet; iconClassName: string }
+> = {
+  Sales: { icon: Wallet, iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  "Estimated earnings": {
+    icon: Activity,
+    iconClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  },
+  "Completed earnings": {
+    icon: Wallet,
+    iconClassName: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+  "Shipping spend": {
+    icon: Truck,
+    iconClassName: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  "Items sold": { icon: Boxes, iconClassName: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
+  "Pending delivery": {
+    icon: PackageSearch,
+    iconClassName: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  },
+  "Total delivered": {
+    icon: Truck,
+    iconClassName: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+  },
+}
+
+function LiveStatMetricCard({ label, value }: { label: string; value: string }) {
+  const style = OM_STAT_METRIC_STYLES[label] ?? {
+    icon: Activity,
+    iconClassName: "bg-muted text-muted-foreground",
+  }
+  const Icon = style.icon
+
+  return (
+    <div className="flex min-w-[10.5rem] flex-1 shrink-0 flex-col rounded-xl border border-border/60 bg-gradient-to-b from-card to-muted/20 p-4 shadow-sm">
+      <div className="flex items-start gap-2.5">
+        <div
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+            style.iconClassName,
+          )}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+        </div>
+        <p className="pt-0.5 text-[10px] font-semibold uppercase leading-snug tracking-wider text-muted-foreground">
+          {label}
+        </p>
+      </div>
+      <p className="mt-3 text-xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
+    </div>
+  )
+}
 
 type ShipmentNode = Record<string, unknown> & {
   id?: string
@@ -801,7 +862,6 @@ export default function SellerOrderManagementPage() {
   const [selectedTikTokOrderDetail, setSelectedTikTokOrderDetail] = useState<Record<string, unknown> | null>(null)
   const [isTikTokDetailLoading, setIsTikTokDetailLoading] = useState(false)
   /** After auto Live ID from GetShipmentsLivestreams, hide the ID field unless the seller chooses to edit. */
-  const [liveIdEditorOpen, setLiveIdEditorOpen] = useState(true)
 
   useEffect(() => {
     const forcedPlatform = marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? marketplaceHub.hub : null
@@ -994,9 +1054,6 @@ export default function SellerOrderManagementPage() {
           window.sessionStorage.setItem(LIVE_ID_STORAGE_KEY, id)
         }
         const statsOutcome = await loadStats(false, id)
-        if (!cancelled) {
-          setLiveIdEditorOpen(false)
-        }
         const manifestUrls =
           statsOutcome?.statistic && Array.isArray(statsOutcome.statistic.manifestUrls)
             ? statsOutcome.statistic.manifestUrls
@@ -1191,114 +1248,95 @@ export default function SellerOrderManagementPage() {
         </div>
       </PageHeader>
 
-            <div className="space-y-5">
-        <div className="space-y-3">
-          <div>
-            <h3 className="text-lg font-semibold tracking-tight">Platform workspaces</h3>
-                  <p className="text-sm text-muted-foreground">Use the same marketplace switch from inventory management to focus this workspace on Whatnot or TikTok.</p>
+      <div className="space-y-6">
+        <div className="rounded-xl border border-border/60 bg-muted/20 p-4 md:p-5">
+          <h3 className="text-lg font-semibold tracking-tight text-foreground">Platform workspaces</h3>
+          <div className="mt-4">
+            <MarketplacePlatformSwitch
+              value={activePlatform}
+              onValueChange={(value: MarketplacePlatform) => setActivePlatform(value as "whatnot" | "tiktok")}
+              ariaLabel="Order management platform"
+              whatnotLabel="Whatnot Management"
+              tiktokLabel="TikTok Management"
+              idPrefix="order-management-platform"
+              className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
+            />
           </div>
-                <MarketplacePlatformSwitch
-                  value={activePlatform}
-                  onValueChange={(value: MarketplacePlatform) => setActivePlatform(value as "whatnot" | "tiktok")}
-                  ariaLabel="Order management platform"
-                  whatnotLabel="Whatnot Management"
-                  tiktokLabel="TikTok Management"
-                  idPrefix="order-management-platform"
-                  className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
-                />
         </div>
 
-              {activePlatform === "whatnot" ? (
-                <div className="space-y-5">
-          <Card className="border-border/60 shadow-sm">
-            <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-lg">Whatnot live show context</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">This section powers shipment operations using extension-fed live stats and shipment payloads.</p>
-              </div>
-              <Badge variant="secondary" className="w-fit bg-sky-100 text-sky-900 hover:bg-sky-100">Extension workflow</Badge>
-            </CardHeader>
-            <CardContent className="space-y-4 p-5">
-              {!liveIdEditorOpen && liveId.trim() ? (
-                <div className="rounded-2xl border border-border/60 bg-muted/20 p-4">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Resolved live id</p>
-                  <p className="mt-2 font-mono text-sm text-foreground">{liveId}</p>
-                  <p className="mt-2 text-sm text-muted-foreground">Filled automatically from the Whatnot extension and reused for stats and shipment matching.</p>
+        {activePlatform === "whatnot" ? (
+          <div className="space-y-6">
+            <Card className="overflow-hidden border-border/60 shadow-sm">
+              <CardContent className="space-y-4 p-4 md:p-5">
+                {errorMessage ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    {errorMessage}
+                  </div>
+                ) : null}
+
+                {isLoading && !statistic ? (
+                  <div className="flex min-h-[12vh] flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+                    <Spinner className="h-5 w-5 text-primary" />
+                    Loading Whatnot live stats…
+                  </div>
+                ) : null}
+
+                {cards.length > 0 ? (
+                  <div className="flex flex-nowrap items-stretch gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:thin] 2xl:grid 2xl:grid-cols-7 2xl:overflow-visible">
+                    {cards.map((card) => (
+                      <LiveStatMetricCard key={card.label} label={card.label} value={card.value} />
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="overflow-hidden border-border/60 shadow-sm">
+              <CardHeader className="border-b border-border/60 bg-muted/20 pb-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <CardTitle className="text-lg">Whatnot shipments</CardTitle>
+                  <Badge variant="outline" className="w-fit font-medium">
+                    Shipment table
+                  </Badge>
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-4 text-sm text-muted-foreground">
-                  When the extension is connected, the Live ID is resolved automatically. If it is unavailable, you can re-enable the manual input flow later without changing this dashboard layout.
-                </div>
-              )}
+              </CardHeader>
+              <CardContent className="space-y-4 p-4 md:p-5">
+                {isShipmentsLoading && shipmentRows.length === 0 ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner className="h-4 w-4 text-primary" />
+                    Loading shipments…
+                  </div>
+                ) : null}
 
-              {errorMessage ? (
-                <Card className="border-destructive/30 bg-destructive/10">
-                  <CardContent className="p-4 text-sm text-destructive">{errorMessage}</CardContent>
-                </Card>
-              ) : null}
+                {shipmentsError ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    {shipmentsError}
+                  </div>
+                ) : null}
+                {shipmentsHint ? (
+                  <p className="rounded-lg border border-border/50 bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
+                    {shipmentsHint}
+                  </p>
+                ) : null}
 
-              {isLoading && !statistic ? (
-                <div className="flex min-h-[16vh] items-center justify-center text-sm text-muted-foreground">
-                  <Spinner className="mr-2 h-4 w-4" />
-                  Loading Whatnot live stats…
-                </div>
-              ) : null}
-
-              {cards.length > 0 ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {cards.map((card) => (
-                    <Card key={card.label} className="border-border/60 shadow-none">
-                      <CardContent className="p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">{card.label}</p>
-                        <p className="mt-3 text-2xl font-semibold tracking-tight">{card.value}</p>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/60 shadow-sm">
-            <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-lg">Whatnot shipments</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">Packaging, labels, and tracking information aligned to the current live show.</p>
-              </div>
-              <Badge variant="outline">Shipment table</Badge>
-            </CardHeader>
-            <CardContent className="space-y-4 p-5">
-              <p className="text-sm text-muted-foreground">
-                Shipments sync automatically from synced orders and Whatnot shipment data via the extension. Use refresh shipments to pull the latest snapshot.
-              </p>
-
-              {isShipmentsLoading && shipmentRows.length === 0 ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner className="h-4 w-4" />
-                  Loading shipments…
-                </div>
-              ) : null}
-
-              {shipmentsError ? <p className="text-sm text-destructive">{shipmentsError}</p> : null}
-              {shipmentsHint ? <p className="text-sm text-muted-foreground">{shipmentsHint}</p> : null}
-
-              {shipmentRows.length > 0 ? (
-                <div className="overflow-x-auto rounded-2xl border border-border/60">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/40 hover:bg-muted/40">
-                        <TableHead className="px-4 py-3">Recipient</TableHead>
-                        <TableHead className="px-4 py-3">Order date</TableHead>
-                        <TableHead className="px-4 py-3">Items</TableHead>
-                        <TableHead className="px-4 py-3">Value</TableHead>
-                        <TableHead className="px-4 py-3">Weight</TableHead>
-                        <TableHead className="px-4 py-3">Dimensions</TableHead>
-                        <TableHead className="px-4 py-3">Status</TableHead>
-                        <TableHead className="px-4 py-3">Tracking</TableHead>
-                        <TableHead className="px-4 py-3 text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                {shipmentRows.length > 0 ? (
+                  <div className="overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-b border-border/60 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Recipient</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Order date</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Items</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Value</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Weight</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Dimensions</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Status</TableHead>
+                            <TableHead className={OM_TABLE_HEAD_CLASS}>Tracking</TableHead>
+                            <TableHead className={cn(OM_TABLE_HEAD_CLASS, "text-right")}>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
                       {shipmentRows.map((row) => {
                         if (row.error || !row.shipment) {
                           return (
@@ -1317,41 +1355,62 @@ export default function SellerOrderManagementPage() {
                         const shortCode = code.length > 12 ? `${code.slice(0, 5)}…${code.slice(-4)}` : code
 
                         return (
-                          <TableRow key={row.shipmentId}>
-                            <TableCell className="px-4 py-4 font-medium">{username}</TableCell>
-                            <TableCell className="px-4 py-4">{formatShipmentTableDate(firstOrderItemCreatedAt(shipment))}</TableCell>
-                            <TableCell className="px-4 py-4">{typeof shipment.totalItemQuantity === "number" ? shipment.totalItemQuantity : "—"}</TableCell>
-                            <TableCell className="px-4 py-4">{formatValueFromShipment(shipment)}</TableCell>
-                            <TableCell className="px-4 py-4">{formatWeight(shipment)}</TableCell>
-                            <TableCell className="px-4 py-4">{formatDimensions(shipment)}</TableCell>
+                          <TableRow key={row.shipmentId} className={OM_TABLE_ROW_CLASS}>
+                            <TableCell className="px-4 py-4 font-semibold text-foreground">{username}</TableCell>
+                            <TableCell className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                              {formatShipmentTableDate(firstOrderItemCreatedAt(shipment))}
+                            </TableCell>
                             <TableCell className="px-4 py-4">
-                              <StatusBadge variant={whatnotShipmentVariant(shipment.status)}>{humanizeStatus(shipment.status)}</StatusBadge>
+                              <span className="inline-flex min-w-[2rem] justify-center rounded-md bg-muted/60 px-2.5 py-1 text-sm font-medium tabular-nums">
+                                {typeof shipment.totalItemQuantity === "number" ? shipment.totalItemQuantity : "—"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="px-4 py-4 text-sm font-semibold tabular-nums">
+                              {formatValueFromShipment(shipment)}
+                            </TableCell>
+                            <TableCell className="px-4 py-4 text-sm text-foreground/90">{formatWeight(shipment)}</TableCell>
+                            <TableCell className="px-4 py-4 text-sm text-muted-foreground">{formatDimensions(shipment)}</TableCell>
+                            <TableCell className="px-4 py-4">
+                              <StatusBadge variant={whatnotShipmentVariant(shipment.status)}>
+                                {humanizeStatus(shipment.status)}
+                              </StatusBadge>
                             </TableCell>
                             <TableCell className="px-4 py-4">
                               <div className="flex flex-col gap-0.5 text-sm">
-                                <span className="text-muted-foreground">{humanizeMethod(shipment.method)}</span>
+                                <span className="text-xs text-muted-foreground">{humanizeMethod(shipment.method)}</span>
                                 {trackingUrl && code ? (
-                                  <a href={trackingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                                  <a
+                                    href={trackingUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                                  >
                                     {shortCode}
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
                                 ) : (
-                                  <span>{code || "—"}</span>
+                                  <span className="text-muted-foreground">{code || "—"}</span>
                                 )}
                               </div>
                             </TableCell>
                             <TableCell className="px-4 py-4 text-right">
-                              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedShipment(shipment)}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-lg px-3"
+                                onClick={() => setSelectedShipment(shipment)}
+                              >
                                 Details
                               </Button>
                             </TableCell>
                           </TableRow>
                         )
                       })}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : null}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : null}
 
               {!isLoading && !errorMessage && liveId.trim() && !statistic ? (
                 <p className="text-sm text-muted-foreground">No statistic returned for this liveId.</p>

@@ -146,3 +146,28 @@
     background-attachment: fixed;
   }
 }
+
+/* Landing hero: white + visible graph-paper grid (sample reference) */
+.hero-checker-bg {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.dark .hero-checker-bg {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+
+/* Purple CTA banner with + pattern (screenshot reference) */
+.landing-confidence-cta {
+  background-color: #6d11e8;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath fill='rgba(255,255,255,0.14)' d='M13 11h2v6h-2zm-6 6h6v2H7z'/%3E%3C/svg%3E"),
+    linear-gradient(105deg, #5a0dc8 0%, #6d11e8 42%, #8b3ff8 100%);
+  background-size: 28px 28px, 100% 100%;
+}

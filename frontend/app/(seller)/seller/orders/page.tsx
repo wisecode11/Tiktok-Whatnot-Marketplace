@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAuth } from "@clerk/nextjs"
-import { Activity, Info, PackageSearch, RefreshCw, ShoppingBag, Store, Truck, Wallet } from "lucide-react"
+import {
+  Activity,
+  Info,
+  PackageSearch,
+  RefreshCw,
+  ShoppingBag,
+  Store,
+  Truck,
+  Users,
+  Wallet,
+} from "lucide-react"
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
@@ -30,6 +40,7 @@ import {
   type WhatnotOrderItem,
   waitForSessionToken,
 } from "@/lib/auth"
+import { cn } from "@/lib/utils"
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -502,6 +513,45 @@ function whatnotStatusVariant(status: string) {
   return "default" as const
 }
 
+const ORDERS_TABLE_HEAD_CLASS =
+  "h-11 px-4 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+
+const ORDERS_TABLE_ROW_CLASS = "border-t border-border/40 align-top transition-colors hover:bg-muted/25"
+
+function OrderStatCard({
+  label,
+  value,
+  description,
+  icon: Icon,
+  iconClassName,
+}: {
+  label: string
+  value: ReactNode
+  description: string
+  icon: typeof ShoppingBag
+  iconClassName: string
+}) {
+  return (
+    <Card className="overflow-hidden border-border/60 shadow-sm">
+      <CardContent className="flex items-start gap-4 p-5">
+        <div
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+            iconClassName,
+          )}
+        >
+          <Icon className="h-5 w-5" aria-hidden />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-foreground">{value}</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function tiktokStatusVariant(status: string) {
   const normalized = status.trim().toLowerCase()
   if (normalized.includes("deliver") || normalized.includes("completed")) {
@@ -782,11 +832,9 @@ export default function SellerOrdersPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="h-4 w-4" />
-          Loading orders…
-        </div>
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
+        <Spinner className="h-6 w-6 text-primary" />
+        <p className="text-sm text-muted-foreground">Loading orders…</p>
       </div>
     )
   }
@@ -831,47 +879,49 @@ export default function SellerOrdersPage() {
         </div>
       )}
 
-      <div className="space-y-5">
-        <div className="space-y-3">
-          <div>
-            <h3 className="text-lg font-semibold tracking-tight">Platform order streams</h3>
-            <p className="text-sm text-muted-foreground">Use the same marketplace switch from inventory management to move between Whatnot and TikTok orders.</p>
+      <div className="space-y-6">
+        <div className="rounded-xl border border-border/60 bg-muted/20 p-4 md:p-5">
+          <h3 className="text-lg font-semibold tracking-tight text-foreground">Platform order streams</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            Use the same marketplace switch from inventory management to move between Whatnot and TikTok orders.
+          </p>
+          <div className="mt-4">
+            <MarketplacePlatformSwitch
+              value={activePlatform}
+              onValueChange={setActivePlatform}
+              ariaLabel="Order platform"
+              whatnotLabel="Whatnot Orders"
+              tiktokLabel="TikTok Orders"
+              idPrefix="orders-platform"
+              className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
+            />
           </div>
-          <MarketplacePlatformSwitch
-            value={activePlatform}
-            onValueChange={setActivePlatform}
-            ariaLabel="Order platform"
-            whatnotLabel="Whatnot Orders"
-            tiktokLabel="TikTok Orders"
-            idPrefix="orders-platform"
-            className={marketplaceHub?.hub === "whatnot" || marketplaceHub?.hub === "tiktok" ? "hidden" : undefined}
-          />
         </div>
 
         {activePlatform === "whatnot" ? (
-          <div className="space-y-5">
+          <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-3">
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Synced orders</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">{orderRows.length}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Recent Whatnot orders available to seller tools.</p>
-              </CardContent>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Customers</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">{uniqueWhatnotCustomers}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Distinct buyers in the current sync snapshot.</p>
-              </CardContent>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revenue</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">${totalWhatnotSales.toFixed(2)}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Subtotal value across visible Whatnot rows.</p>
-              </CardContent>
-            </Card>
+            <OrderStatCard
+              label="Synced orders"
+              value={orderRows.length}
+              description="Recent Whatnot orders available to seller tools."
+              icon={ShoppingBag}
+              iconClassName="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+            />
+            <OrderStatCard
+              label="Customers"
+              value={uniqueWhatnotCustomers}
+              description="Distinct buyers in the current sync snapshot."
+              icon={Users}
+              iconClassName="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+            />
+            <OrderStatCard
+              label="Revenue"
+              value={`$${totalWhatnotSales.toFixed(2)}`}
+              description="Subtotal value across visible Whatnot rows."
+              icon={Wallet}
+              iconClassName="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            />
           </div>
 
           {orderRows.length === 0 ? (
@@ -881,52 +931,78 @@ export default function SellerOrdersPage() {
               description="Orders sync when this tab opens. Keep the Whatnot extension connected to your seller session."
             />
           ) : (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle className="text-lg">Whatnot order stream</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">The latest extension-synced orders, laid out for fast scanning and detail drill-in.</p>
+            <Card className="overflow-hidden border-border/60 shadow-sm">
+              <CardHeader className="border-b border-border/60 bg-muted/20 pb-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="text-lg">Whatnot order stream</CardTitle>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      The latest extension-synced orders, laid out for fast scanning and detail drill-in.
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="w-fit shrink-0 border-amber-500/30 bg-amber-500/10 font-medium text-amber-800 hover:bg-amber-500/10 dark:text-amber-300"
+                  >
+                    Extension powered
+                  </Badge>
                 </div>
-                <Badge variant="secondary" className="w-fit bg-amber-100 text-amber-900 hover:bg-amber-100">
-                  Extension powered
-                </Badge>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
-                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3 font-medium">Order</th>
-                        <th className="px-4 py-3 font-medium">Placed</th>
-                        <th className="px-4 py-3 font-medium">Buyer</th>
-                        <th className="px-4 py-3 font-medium">Items</th>
-                        <th className="px-4 py-3 font-medium">Channel</th>
-                        <th className="px-4 py-3 font-medium">Value</th>
-                        <th className="px-4 py-3 font-medium">Status</th>
-                        <th className="px-4 py-3 font-medium">Earnings</th>
-                        <th className="px-4 py-3 text-right font-medium">Action</th>
+                    <thead>
+                      <tr className="border-b border-border/60 bg-muted/40">
+                        <th className={cn(ORDERS_TABLE_HEAD_CLASS, "w-[22%]")}>Order</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Placed</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Buyer</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Items</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Channel</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Value</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Status</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Earnings</th>
+                        <th className={cn(ORDERS_TABLE_HEAD_CLASS, "text-right")}>Action</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="bg-background">
                       {orderRows.map((order) => (
-                        <tr key={order.id} className="border-t border-border/60 align-top transition-colors hover:bg-muted/30">
+                        <tr key={order.id} className={ORDERS_TABLE_ROW_CLASS}>
                           <td className="px-4 py-4">
                             <div className="space-y-1">
-                              <div className="font-medium text-foreground">{order.title}</div>
-                              <div className="text-xs text-muted-foreground">{order.id}</div>
+                              <p className="font-semibold leading-snug text-foreground">{order.title}</p>
+                              <p className="max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={order.id}>
+                                {order.id}
+                              </p>
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-muted-foreground">{formatDate(order.createdAt)}</td>
-                          <td className="px-4 py-4">{order.customer}</td>
-                          <td className="px-4 py-4">{order.quantity}</td>
-                          <td className="px-4 py-4">{order.salesChannel}</td>
-                          <td className="px-4 py-4 font-medium">{toCurrency(order.subtotalAmount, order.subtotalCurrency)}</td>
+                          <td className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                            {formatDate(order.createdAt)}
+                          </td>
+                          <td className="px-4 py-4 font-medium text-foreground">{order.customer}</td>
+                          <td className="px-4 py-4">
+                            <span className="inline-flex min-w-[2rem] justify-center rounded-md bg-muted/60 px-2.5 py-1 text-sm font-medium tabular-nums">
+                              {order.quantity}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <Badge variant="outline" className="text-[10px] font-normal uppercase tracking-wide">
+                              {order.salesChannel}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-4 text-sm font-semibold tabular-nums">
+                            {toCurrency(order.subtotalAmount, order.subtotalCurrency)}
+                          </td>
                           <td className="px-4 py-4">
                             <StatusBadge variant={whatnotStatusVariant(order.prettyStatus)}>{order.prettyStatus}</StatusBadge>
                           </td>
-                          <td className="px-4 py-4">{order.earningStatus}</td>
+                          <td className="px-4 py-4 text-sm text-muted-foreground">{order.earningStatus}</td>
                           <td className="px-4 py-4 text-right">
-                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedOrder(order)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg px-3"
+                              onClick={() => setSelectedOrder(order)}
+                            >
                               View detail
                             </Button>
                           </td>
@@ -942,29 +1018,29 @@ export default function SellerOrdersPage() {
         ) : null}
 
         {activePlatform === "tiktok" ? (
-          <div className="space-y-5">
+          <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-3">
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Query matches</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokShop != null ? tiktokShop.totalCount : "-"}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Total count returned by the active Partner API search.</p>
-              </CardContent>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Active queue</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokAwaitingCount}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Orders awaiting shipment or fulfillment on this page.</p>
-              </CardContent>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-sm">
-              <CardContent className="p-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Buyers</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight">{tiktokBuyerCount}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Distinct buyers represented in the visible result page.</p>
-              </CardContent>
-            </Card>
+            <OrderStatCard
+              label="Query matches"
+              value={tiktokShop != null ? tiktokShop.totalCount : "—"}
+              description="Total count returned by the active Partner API search."
+              icon={Activity}
+              iconClassName="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+            />
+            <OrderStatCard
+              label="Active queue"
+              value={tiktokAwaitingCount}
+              description="Orders awaiting shipment or fulfillment on this page."
+              icon={Truck}
+              iconClassName="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            />
+            <OrderStatCard
+              label="Buyers"
+              value={tiktokBuyerCount}
+              description="Distinct buyers represented in the visible result page."
+              icon={Users}
+              iconClassName="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+            />
           </div>
 
           {/* {tiktokDemoMode && !tiktokErrorMessage ? (
@@ -986,50 +1062,77 @@ export default function SellerOrdersPage() {
           ) : null}
 
           {!tiktokErrorMessage && tiktokShop != null && tiktokRows.length > 0 ? (
-            <Card className="border-border/60 shadow-sm">
-              <CardHeader className="flex flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle className="text-lg">{tiktokDemoMode ? "Demo TikTok Shop order queue" : "TikTok Shop order queue"}</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">A cleaner operational view over Partner API order search responses, with live detail available per row.</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">Partner API</Badge>
-                  <Badge variant={tiktokDemoMode ? "secondary" : "default"}>
-                    {tiktokDemoMode ? "Mock Data" : "Live shop"}
-                  </Badge>
+            <Card className="overflow-hidden border-border/60 shadow-sm">
+              <CardHeader className="border-b border-border/60 bg-muted/20 pb-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="text-lg">
+                      {tiktokDemoMode ? "Demo TikTok Shop order queue" : "TikTok Shop order queue"}
+                    </CardTitle>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      A cleaner operational view over Partner API order search responses, with live detail available per row.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="font-medium">
+                      Partner API
+                    </Badge>
+                    <Badge variant={tiktokDemoMode ? "secondary" : "default"}>
+                      {tiktokDemoMode ? "Mock Data" : "Live shop"}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
-                    <thead className="bg-muted/40 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3 font-medium">Order ID</th>
-                        <th className="px-4 py-3 font-medium">Created</th>
-                        <th className="px-4 py-3 font-medium">Buyer</th>
-                        <th className="px-4 py-3 font-medium">Items</th>
-                        <th className="px-4 py-3 font-medium">Summary</th>
-                        <th className="px-4 py-3 font-medium">Total</th>
-                        <th className="px-4 py-3 font-medium">Status</th>
-                        <th className="px-4 py-3 font-medium">Fulfillment</th>
-                        <th className="px-4 py-3 text-right font-medium">Action</th>
+                    <thead>
+                      <tr className="border-b border-border/60 bg-muted/40">
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Order ID</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Created</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Buyer</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Items</th>
+                        <th className={cn(ORDERS_TABLE_HEAD_CLASS, "w-[18%]")}>Summary</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Total</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Status</th>
+                        <th className={ORDERS_TABLE_HEAD_CLASS}>Fulfillment</th>
+                        <th className={cn(ORDERS_TABLE_HEAD_CLASS, "text-right")}>Action</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="bg-background">
                       {tiktokRows.map((order) => (
-                        <tr key={order.id} className="border-t border-border/60 align-top transition-colors hover:bg-muted/30">
-                          <td className="px-4 py-4 font-mono text-xs text-foreground">{order.id}</td>
-                          <td className="px-4 py-4 text-muted-foreground">{order.createdAtLabel}</td>
-                          <td className="px-4 py-4">{order.buyer}</td>
-                          <td className="px-4 py-4">{order.lineCount}</td>
-                          <td className="max-w-[240px] truncate px-4 py-4" title={order.itemSummary}>{order.itemSummary}</td>
-                          <td className="px-4 py-4 font-medium">{order.totalLabel}</td>
+                        <tr key={order.id} className={ORDERS_TABLE_ROW_CLASS}>
+                          <td className="px-4 py-4">
+                            <span className="font-mono text-xs font-medium text-foreground">{order.id}</span>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                            {order.createdAtLabel}
+                          </td>
+                          <td className="px-4 py-4 font-medium text-foreground">{order.buyer}</td>
+                          <td className="px-4 py-4">
+                            <span className="inline-flex min-w-[2rem] justify-center rounded-md bg-muted/60 px-2.5 py-1 text-sm font-medium tabular-nums">
+                              {order.lineCount}
+                            </span>
+                          </td>
+                          <td className="max-w-[240px] truncate px-4 py-4 text-sm text-muted-foreground" title={order.itemSummary}>
+                            {order.itemSummary}
+                          </td>
+                          <td className="px-4 py-4 text-sm font-semibold tabular-nums">{order.totalLabel}</td>
                           <td className="px-4 py-4">
                             <StatusBadge variant={tiktokStatusVariant(order.status)}>{order.status}</StatusBadge>
                           </td>
-                          <td className="px-4 py-4 text-xs uppercase tracking-wide text-muted-foreground">{order.fulfillment}</td>
+                          <td className="px-4 py-4">
+                            <Badge variant="outline" className="text-[10px] font-normal uppercase tracking-wide">
+                              {order.fulfillment}
+                            </Badge>
+                          </td>
                           <td className="px-4 py-4 text-right">
-                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setSelectedTikTokOrder(order)}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg px-3"
+                              onClick={() => setSelectedTikTokOrder(order)}
+                            >
                               View detail
                             </Button>
                           </td>

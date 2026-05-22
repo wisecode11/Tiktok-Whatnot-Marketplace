@@ -931,6 +931,7 @@ async function listModeratorBookings({ clerkUserId }) {
       decisionAt: booking.decision_at ? booking.decision_at.toISOString() : null,
       scheduledStartAt: booking.scheduled_start_at ? booking.scheduled_start_at.toISOString() : null,
       scheduledEndAt: booking.scheduled_end_at ? booking.scheduled_end_at.toISOString() : null,
+      moderatorPayoutCents: booking.moderator_payout_cents ?? null,
       createdAt: booking.created_at ? booking.created_at.toISOString() : null,
     };
   });

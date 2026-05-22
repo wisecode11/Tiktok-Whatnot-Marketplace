@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react"
 import { usePathname } from "next/navigation"
 import { RoleGate } from "@/components/auth/role-gate"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
-import { MarketplaceHubContext, type MarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
+import {
+  MarketplaceHubContext,
+  SELLER_MARKETPLACE_HUB_OPTIONS,
+  type MarketplaceHub,
+} from "@/components/dashboard/marketplace-hub-context"
 import { SellerSubscriptionAccessProvider } from "@/components/dashboard/seller-subscription-access"
 import { Topbar } from "@/components/dashboard/topbar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -51,8 +55,8 @@ function isMarketplaceHub(value: string | null): value is MarketplaceHub {
 }
 
 function inferHubFromPathname(pathname: string): MarketplaceHub | null {
-  if (pathname === "/seller" || pathname.startsWith("/seller/launch-pad")) {
-    return "launch-pad"
+  if (pathname === "/seller") {
+    return "agency"
   }
 
   if (pathname.startsWith("/seller/publish") || pathname.startsWith("/seller/fulfillment") || pathname.startsWith("/seller/analytics")) {
@@ -133,6 +137,7 @@ function getSellerNavigation(hub: MarketplaceHub): NavGroup[] {
           { title: "Organization", href: "/seller/organization", icon: Building2 },
           { title: "Manage Staff", href: "/seller/manage-staff", icon: UserPlus },
           { title: "Agency Controls", href: "/seller/settings", icon: Settings },
+          { title: "Launch Pad", href: "/seller", icon: Rocket },
         ],
       },
       ...sharedNavigation,
@@ -156,7 +161,7 @@ export default function SellerLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const [hub, setHub] = useState<MarketplaceHub>(() => inferHubFromPathname(pathname) ?? "launch-pad")
+  const [hub, setHub] = useState<MarketplaceHub>(() => inferHubFromPathname(pathname) ?? "agency")
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -188,7 +193,7 @@ export default function SellerLayout({
   return (
     <RoleGate allowedRoles={["streamer"]} unauthenticatedPath="/login">
       <SellerSubscriptionAccessProvider>
-        <MarketplaceHubContext.Provider value={{ hub, setHub }}>
+        <MarketplaceHubContext.Provider value={{ hub, setHub, options: SELLER_MARKETPLACE_HUB_OPTIONS }}>
           <SidebarProvider>
             <AppSidebar
               navigation={sellerNavigation}

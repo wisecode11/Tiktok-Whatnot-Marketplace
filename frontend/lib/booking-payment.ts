@@ -124,6 +124,7 @@ export interface ModeratorBookingItem {
   decisionAt: string | null
   scheduledStartAt: string | null
   scheduledEndAt: string | null
+  moderatorPayoutCents: number | null
   createdAt: string | null
 }
 
