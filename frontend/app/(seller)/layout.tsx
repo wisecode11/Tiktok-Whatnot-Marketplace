@@ -136,7 +136,7 @@ function getSellerNavigation(hub: MarketplaceHub): NavGroup[] {
         items: [
           { title: "Organization", href: "/seller/organization", icon: Building2 },
           { title: "Manage Staff", href: "/seller/manage-staff", icon: UserPlus },
-          { title: "Agency Controls", href: "/seller/settings", icon: Settings },
+          // { title: "Agency Controls", href: "/seller/settings", icon: Settings },
           { title: "Launch Pad", href: "/seller", icon: Rocket },
         ],
       },
