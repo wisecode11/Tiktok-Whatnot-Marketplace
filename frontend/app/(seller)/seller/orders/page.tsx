@@ -483,9 +483,9 @@ function mapTikTokOrderRow(order: Record<string, unknown>): TikTokOrderRow {
 
 function tiktokConnectHint(reason: string | null) {
   if (reason === "missing_partner_app") {
-    return "Set TIKTOK_SHOP_APP_KEY and TIKTOK_SHOP_APP_SECRET on the backend for your Partner application."
+    return "Set TIKTOK_SHOP_APP_KEY, TIKTOK_SHOP_APP_SECRET, and TIKTOK_SHOP_SERVICE_ID on the backend (Partner Center app credentials)."
   }
-  return "Add TIKTOK_SHOP_ACCESS_TOKEN and TIKTOK_SHOP_SHOP_CIPHER from TikTok Shop Partner authorization, or set metadata_json.tiktok_shop (access_token, shop_cipher) on the seller’s TikTok ConnectedAccount record."
+  return "Connect TikTok Shop from Launch Pad, or set TIKTOK_SHOP_ACCESS_TOKEN and TIKTOK_SHOP_SHOP_CIPHER for local testing."
 }
 
 function whatnotStatusVariant(status: string) {

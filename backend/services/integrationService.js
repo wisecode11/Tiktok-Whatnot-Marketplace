@@ -19,6 +19,12 @@ const StripeConnectAccount = require("../models/StripeConnectAccount");
 const PlatformSetting = require("../models/PlatformSetting");
 const User = require("../models/Users");
 const { getWhatnotExtensionBridgeState, requestWhatnotAction } = require("../socket/whatnotExtensionBridge");
+const {
+  exchangeTikTokShopAuthCode,
+  fetchTikTokShopAuthorizedShops,
+  getTikTokShopOAuthConfig,
+  persistTikTokShopTokens,
+} = require("./tiktokShopService");
 const { decryptText, encryptText } = require("../utils/crypto");
 
 const TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
@@ -1365,28 +1371,32 @@ async function createConnectionSession({ clerkUserId, role, platform }) {
     throw createHttpError(400, "Only TikTok, Whatnot, and Stripe connections are implemented right now.");
   }
 
+  return createTikTokShopConnectionSession({ clerkUserId, role });
+}
+
+async function createTikTokShopConnectionSession({ clerkUserId, role }) {
   await findLocalUser(clerkUserId);
 
-  const { clientKey, redirectUri, scopes } = getTikTokConfig();
-  const pkce = createPkcePair();
-  const state = signOAuthState({
-    clerkUserId,
-    role,
-    platform: normalizedPlatform,
-    codeVerifier: pkce.verifier,
-    nonce: crypto.randomBytes(12).toString("hex"),
-    timestamp: Date.now(),
-  }, getTikTokConfig().stateSecret);
+  const { appKey, serviceId, redirectUri, stateSecret } = getTikTokShopOAuthConfig();
+  const state = signOAuthState(
+    {
+      clerkUserId,
+      role,
+      platform: "tiktok",
+      oauthProvider: "tiktok_shop",
+      nonce: crypto.randomBytes(12).toString("hex"),
+      timestamp: Date.now(),
+    },
+    stateSecret,
+  );
 
-  const authorizationUrl = new URL(TIKTOK_AUTHORIZE_URL);
-  authorizationUrl.searchParams.set("client_key", clientKey);
-  authorizationUrl.searchParams.set("response_type", "code");
-  authorizationUrl.searchParams.set("scope", scopes);
-  authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+  const authorizationUrl = new URL(
+    process.env.TIKTOK_SHOP_AUTHORIZE_URL || "https://services.tiktokshop.com/open/authorize",
+  );
+  authorizationUrl.searchParams.set("app_key", appKey);
+  authorizationUrl.searchParams.set("service_id", serviceId);
   authorizationUrl.searchParams.set("state", state);
-  authorizationUrl.searchParams.set("code_challenge", pkce.challenge);
-  authorizationUrl.searchParams.set("code_challenge_method", "S256");
-  authorizationUrl.searchParams.set("disable_auto_auth", "0");
+  authorizationUrl.searchParams.set("redirect_uri", redirectUri);
 
   return {
     authorizationUrl: authorizationUrl.toString(),
@@ -1583,8 +1593,8 @@ async function handleTikTokCallback({ code, state, error, errorDescription }) {
 
   try {
     payload = parseOAuthState(state, {
-      stateSecret: getTikTokConfig().stateSecret,
-      requireCodeVerifier: true,
+      stateSecret: getTikTokShopOAuthConfig().stateSecret,
+      requireCodeVerifier: false,
     });
   } catch (stateError) {
     return {
@@ -1614,46 +1624,52 @@ async function handleTikTokCallback({ code, state, error, errorDescription }) {
         role: payload.role,
         platform: payload.platform,
         status: "error",
-        message: "Missing TikTok authorization code.",
+        message: "Missing TikTok Shop authorization code.",
       }),
     };
   }
 
   try {
     const user = await findLocalUser(payload.clerkUserId);
-    const { clientKey, clientSecret, redirectUri } = getTikTokConfig();
-    const tokenPayload = await fetchTikTokToken({
-      client_key: clientKey,
-      client_secret: clientSecret,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: redirectUri,
-      code_verifier: payload.codeVerifier,
-    });
+    const tokenData = await exchangeTikTokShopAuthCode(code);
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      throw createHttpError(502, "TikTok Shop did not return an access token.");
+    }
+
+    const shops = await fetchTikTokShopAuthorizedShops(accessToken);
+    const primaryShop = shops[0];
+
+    if (!primaryShop || !primaryShop.cipher) {
+      throw createHttpError(
+        400,
+        "No authorized TikTok Shop was returned for this seller. Complete seller authorization in Partner Center.",
+      );
+    }
+
+    const shopMeta = {
+      shop_cipher: primaryShop.cipher,
+      shop_id: primaryShop.id || null,
+      shop_code: primaryShop.code || null,
+      shop_name: primaryShop.name || null,
+      region: primaryShop.region || null,
+      seller_type: primaryShop.seller_type || null,
+      shops,
+    };
 
     const now = new Date();
     const account =
       (await ConnectedAccount.findOne({ user_id: user._id, platform: payload.platform })) ||
       new ConnectedAccount({ user_id: user._id, platform: payload.platform, created_at: now });
 
-    account.account_external_id = tokenPayload.open_id;
-    account.account_name = tokenPayload.open_id ? `@${tokenPayload.open_id}` : `@${payload.platform}`;
-    account.access_token_encrypted = encryptText(tokenPayload.access_token);
-    account.refresh_token_encrypted = encryptText(tokenPayload.refresh_token);
-    account.token_expires_at = new Date(Date.now() + Number(tokenPayload.expires_in || 0) * 1000);
+    account.account_external_id = primaryShop.id || tokenData.open_id || null;
+    account.account_name = primaryShop.name || tokenData.seller_name || "TikTok Shop";
     account.scopes_json = {
-      scope: tokenPayload.scope,
-      token_type: tokenPayload.token_type,
+      granted_scopes: Array.isArray(tokenData.granted_scopes) ? tokenData.granted_scopes : [],
     };
-    account.status = "connected";
-    account.metadata_json = {
-      open_id: tokenPayload.open_id,
-      refresh_expires_in: tokenPayload.refresh_expires_in,
-      connected_at: now.toISOString(),
-    };
-    account.updated_at = now;
 
-    await account.save();
+    await persistTikTokShopTokens(account, tokenData, shopMeta);
 
     return {
       redirectUrl: buildFrontendRedirect({
@@ -1821,7 +1837,15 @@ async function disconnectPlatform({ clerkUserId, platform }) {
     return { success: true };
   }
 
-  if (normalizedPlatform === "tiktok" && account.access_token_encrypted) {
+  const isTikTokShopAccount = account?.metadata_json?.oauth_provider === "tiktok_shop";
+
+  if (
+    normalizedPlatform === "tiktok"
+    && account.access_token_encrypted
+    && !isTikTokShopAccount
+    && process.env.TIKTOK_CLIENT_KEY
+    && process.env.TIKTOK_CLIENT_SECRET
+  ) {
     const { clientKey, clientSecret } = getTikTokConfig();
     const token = decryptText(account.access_token_encrypted);
 

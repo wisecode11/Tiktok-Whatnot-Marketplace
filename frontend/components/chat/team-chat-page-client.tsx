@@ -190,14 +190,24 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
       try {
         const token = await waitForSessionToken(getToken)
         const socket = io(SOCKET_BASE_URL, {
-          transports: ["websocket"],
+          transports: ["polling", "websocket"],
           auth: { token },
+          reconnection: true,
+          reconnectionAttempts: 5,
         })
 
         socketRef.current = socket
 
+        socket.on("connect", () => {
+          setErrorMessage(null)
+        })
+
         socket.on("connect_error", (error) => {
-          setErrorMessage(error instanceof Error ? error.message : "Unable to connect live chat.")
+          const message = error instanceof Error ? error.message : "Unable to connect live chat."
+          const friendlyMessage = message === "websocket error"
+            ? "Live chat connection failed. Check that the backend is running and NEXT_PUBLIC_BACKEND_URL is correct."
+            : message
+          setErrorMessage(friendlyMessage)
         })
 
         socket.on("chat:message", (payload) => {

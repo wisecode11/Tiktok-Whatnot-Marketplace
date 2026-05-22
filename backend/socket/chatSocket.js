@@ -27,11 +27,33 @@ function extractBearerToken(socket) {
   return "";
 }
 
+function buildAllowedSocketOrigins(configuredOrigins) {
+  const origins = new Set(configuredOrigins);
+
+  for (const origin of [...configuredOrigins]) {
+    try {
+      const parsed = new URL(origin);
+      if (parsed.hostname === "localhost") {
+        origins.add(`http://127.0.0.1:${parsed.port || "3000"}`);
+      }
+      if (parsed.hostname === "127.0.0.1") {
+        origins.add(`http://localhost:${parsed.port || "3000"}`);
+      }
+    } catch (_error) {
+      // Ignore malformed origin entries.
+    }
+  }
+
+  return origins;
+}
+
 function initializeChatSocket({ server, allowedOrigins }) {
+  const socketOrigins = buildAllowedSocketOrigins(allowedOrigins);
+
   const io = new Server(server, {
     cors: {
       origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || socketOrigins.has(origin)) {
           return callback(null, true);
         }
 
@@ -50,6 +72,7 @@ function initializeChatSocket({ server, allowedOrigins }) {
     try {
       const payload = await verifyToken(token, {
         secretKey: process.env.CLERK_SECRET_KEY,
+        clockSkewInMs: 15000,
       });
 
       socket.data = {

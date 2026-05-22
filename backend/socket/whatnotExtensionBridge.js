@@ -68,10 +68,24 @@ function rejectAllPending(error) {
   }
 }
 
+const EXTENSION_WS_PATH = "/ws/whatnot-extension";
+
 function initializeWhatnotExtensionBridge({ server }) {
-  const wss = new WebSocketServer({
-    server,
-    path: "/ws/whatnot-extension",
+  // Use noServer so we only handle extension upgrades. Attaching `server` + `path`
+  // makes the ws package reject other upgrade paths (e.g. /socket.io/) with 404,
+  // which breaks team chat Socket.IO when the client uses the websocket transport.
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    const pathname = request.url ? request.url.split("?")[0] : "";
+
+    if (pathname !== EXTENSION_WS_PATH) {
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
   });
 
   wss.on("connection", (socket) => {

@@ -2,6 +2,7 @@ const crypto = require("crypto");
 
 const ConnectedAccount = require("../models/ConnectedAccount");
 const User = require("../models/Users");
+const { decryptText, encryptText } = require("../utils/crypto");
 const { buildMockOrdersSearch, findMockOrderById } = require("../data/tiktokShopOrderMocks");
 const { buildMockGlobalProductsSearch } = require("../data/tiktokGlobalProductsSearchMock");
 const { buildMockGlobalProductsCreateResponse } = require("../data/tiktokGlobalProductsCreateMock");
@@ -12,6 +13,12 @@ const TIKTOK_SHOP_API_BASE = (process.env.TIKTOK_SHOP_API_BASE || "https://open-
   /\/$/,
   "",
 );
+const TIKTOK_SHOP_AUTHORIZE_URL =
+  process.env.TIKTOK_SHOP_AUTHORIZE_URL || "https://services.tiktokshop.com/open/authorize";
+const TIKTOK_SHOP_TOKEN_URL = process.env.TIKTOK_SHOP_TOKEN_URL || "https://auth.tiktok-shops.com/api/v2/token/get";
+const TIKTOK_SHOP_TOKEN_REFRESH_URL =
+  process.env.TIKTOK_SHOP_TOKEN_REFRESH_URL || "https://auth.tiktok-shops.com/api/v2/token/refresh";
+const AUTHORIZED_SHOPS_PATH = "/authorization/202309/shops";
 const ORDER_SEARCH_PATH = "/order/202309/orders/search";
 /** Global product search (Partner API 202309) — same path the live Open Platform uses. */
 const GLOBAL_PRODUCT_SEARCH_PATH = "/product/202309/global_products/search";
@@ -175,6 +182,184 @@ function createHttpError(status, message, details) {
   return error;
 }
 
+function getBackendUrl() {
+  return process.env.BACKEND_URL || "http://localhost:5000";
+}
+
+function getTikTokShopOAuthConfig() {
+  const appKey = (process.env.TIKTOK_SHOP_APP_KEY || "").trim();
+  const appSecret = (process.env.TIKTOK_SHOP_APP_SECRET || "").trim();
+  const serviceId = (process.env.TIKTOK_SHOP_SERVICE_ID || "").trim();
+  const redirectUri =
+    (process.env.TIKTOK_SHOP_REDIRECT_URI || `${getBackendUrl()}/api/integrations/tiktok/callback`).trim();
+  const stateSecret = process.env.TIKTOK_STATE_SECRET || process.env.APP_ENCRYPTION_KEY;
+
+  if (!appKey || !appSecret) {
+    throw createHttpError(
+      500,
+      "TikTok Shop integration is not configured. Set TIKTOK_SHOP_APP_KEY and TIKTOK_SHOP_APP_SECRET.",
+    );
+  }
+
+  if (!serviceId) {
+    throw createHttpError(
+      500,
+      "TikTok Shop integration is not configured. Set TIKTOK_SHOP_SERVICE_ID from Partner Center (App & Service → Authorization).",
+    );
+  }
+
+  if (!stateSecret) {
+    throw createHttpError(500, "TIKTOK_STATE_SECRET or APP_ENCRYPTION_KEY is required.");
+  }
+
+  return { appKey, appSecret, serviceId, redirectUri, stateSecret };
+}
+
+function shopTokenExpiresAt(expireValue) {
+  const numeric = Number(expireValue);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  // Partner tokens return a Unix timestamp (seconds), not a TTL.
+  if (numeric > 1e12) {
+    return new Date(numeric);
+  }
+
+  return new Date(numeric * 1000);
+}
+
+async function postTikTokShopAuthToken(url, bodyObject) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify(bodyObject),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw createHttpError(
+      502,
+      payload.message || payload.error || "TikTok Shop token request failed.",
+      payload,
+    );
+  }
+
+  if (payload.code !== 0 || !payload.data) {
+    throw createHttpError(502, payload.message || "TikTok Shop token exchange failed.", payload);
+  }
+
+  return payload.data;
+}
+
+async function exchangeTikTokShopAuthCode(authCode) {
+  const { appKey, appSecret } = getTikTokShopOAuthConfig();
+  return postTikTokShopAuthToken(TIKTOK_SHOP_TOKEN_URL, {
+    app_key: appKey,
+    app_secret: appSecret,
+    auth_code: authCode,
+    grant_type: "authorized_code",
+  });
+}
+
+async function refreshTikTokShopAccessToken(refreshToken) {
+  const { appKey, appSecret } = getTikTokShopOAuthConfig();
+  return postTikTokShopAuthToken(TIKTOK_SHOP_TOKEN_REFRESH_URL, {
+    app_key: appKey,
+    app_secret: appSecret,
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  });
+}
+
+async function fetchTikTokShopAuthorizedShops(accessToken) {
+  const { appKey, appSecret } = getTikTokShopOAuthConfig();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const queryForSign = {
+    app_key: appKey,
+    timestamp: String(timestamp),
+    version: "202309",
+  };
+  const sign = signTiktokShopRequest(appSecret, AUTHORIZED_SHOPS_PATH, queryForSign, "");
+
+  const url = new URL(`${TIKTOK_SHOP_API_BASE}${AUTHORIZED_SHOPS_PATH}`);
+  for (const [key, value] of Object.entries({ ...queryForSign, sign })) {
+    url.searchParams.set(key, String(value));
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      "x-tts-access-token": accessToken,
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw createHttpError(
+      response.status,
+      payload.message || `TikTok Shop authorized shops request failed (HTTP ${response.status}).`,
+      payload,
+    );
+  }
+
+  if (payload.code !== 0) {
+    throw createHttpError(502, payload.message || "TikTok Shop authorized shops request failed.", payload);
+  }
+
+  const shops = Array.isArray(payload.data?.shops) ? payload.data.shops : [];
+  return shops;
+}
+
+async function persistTikTokShopTokens(account, tokenData, shopMeta) {
+  const now = new Date();
+  account.access_token_encrypted = encryptText(tokenData.access_token);
+  account.refresh_token_encrypted = tokenData.refresh_token
+    ? encryptText(tokenData.refresh_token)
+    : account.refresh_token_encrypted;
+  account.token_expires_at = shopTokenExpiresAt(tokenData.access_token_expire_in);
+  account.status = "connected";
+  account.metadata_json = {
+    ...(account.metadata_json || {}),
+    oauth_provider: "tiktok_shop",
+    open_id: tokenData.open_id || null,
+    seller_name: tokenData.seller_name || null,
+    seller_base_region: tokenData.seller_base_region || null,
+    granted_scopes: Array.isArray(tokenData.granted_scopes) ? tokenData.granted_scopes : [],
+    tiktok_shop: shopMeta,
+    connected_at: now.toISOString(),
+    refresh_token_expire_in: tokenData.refresh_token_expire_in || null,
+  };
+  account.updated_at = now;
+  await account.save();
+  return account;
+}
+
+async function refreshTikTokShopAccountTokens(account) {
+  if (!account?.refresh_token_encrypted) {
+    return null;
+  }
+
+  const refreshToken = decryptText(account.refresh_token_encrypted);
+  if (!refreshToken) {
+    return null;
+  }
+
+  const tokenData = await refreshTikTokShopAccessToken(refreshToken);
+  const shopMeta = account.metadata_json?.tiktok_shop;
+  if (!shopMeta || typeof shopMeta !== "object") {
+    throw createHttpError(400, "TikTok Shop account is missing shop metadata.");
+  }
+
+  await persistTikTokShopTokens(account, tokenData, shopMeta);
+  return decryptText(account.access_token_encrypted);
+}
+
 /**
  * TikTok Shop Open Platform request signature (HMAC-SHA256, hex).
  * @see https://partner.tiktokshop.com/docv2/page/sign-your-api-request
@@ -254,10 +439,27 @@ async function resolveShopCredentials(clerkUserId) {
           : user._id;
       const account = await ConnectedAccount.findOne({ user_id: credentialUserId, platform: "tiktok" });
       const shop = account?.metadata_json?.tiktok_shop;
-      if (shop && typeof shop === "object") {
-        if (!accessToken && typeof shop.access_token === "string" && shop.access_token.trim()) {
-          accessToken = shop.access_token.trim();
+
+      if (account?.access_token_encrypted) {
+        const decrypted = decryptText(account.access_token_encrypted);
+        if (decrypted) {
+          accessToken = decrypted;
         }
+
+        if (
+          account.token_expires_at
+          && new Date(account.token_expires_at).getTime() < Date.now() + 60 * 1000
+          && account.refresh_token_encrypted
+        ) {
+          try {
+            accessToken = (await refreshTikTokShopAccountTokens(account)) || accessToken;
+          } catch (_refreshError) {
+            // Fall through; caller will surface missing_shop_token / API errors.
+          }
+        }
+      }
+
+      if (shop && typeof shop === "object") {
         if (!shopCipher && typeof shop.shop_cipher === "string" && shop.shop_cipher.trim()) {
           shopCipher = shop.shop_cipher.trim();
         }
@@ -1581,4 +1783,8 @@ module.exports = {
   getTiktokFinanceStatementTransactions,
   getTiktokFinanceUnsettledOrders,
   resolveShopCredentials,
+  getTikTokShopOAuthConfig,
+  exchangeTikTokShopAuthCode,
+  fetchTikTokShopAuthorizedShops,
+  persistTikTokShopTokens,
 };
