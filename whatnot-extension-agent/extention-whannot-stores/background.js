@@ -262,6 +262,52 @@ async function saveInventoryEditCategoriesToMarketplace(payload) {
   }
 }
 
+async function sendInventorySnapshotsToMarketplace({
+  responsePayload,
+  status = "ACTIVE",
+  requestPayload = {},
+  tabId = null,
+}) {
+  if (!state.clerkUserId) {
+    return { success: false, error: "Missing Clerk user id on extension." };
+  }
+
+  const headers = {
+    "content-type": "application/json"
+  };
+  if (WHATNOT_EXTENSION_API_KEY) {
+    headers["x-whatnot-extension-key"] = WHATNOT_EXTENSION_API_KEY;
+  }
+
+  try {
+    const response = await fetch(`${MARKETPLACE_API_BASE}/api/integrations/whatnot/inventory-snapshots`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        source: "whatnot-extension",
+        clerkUserId: state.clerkUserId,
+        status,
+        tabId: tabId ?? state.tabId ?? null,
+        responsePayload: responsePayload || {},
+        requestPayload: requestPayload || {},
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.error || "Failed to save inventory snapshots to marketplace.");
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    return {
+      success: true,
+      savedCount: Number.isFinite(Number(payload?.savedCount)) ? Number(payload.savedCount) : null,
+    };
+  } catch (error) {
+    return { success: false, error: error?.message || "Failed to save inventory snapshots to marketplace." };
+  }
+}
+
 async function saveShippingProfilesToMarketplace(payload) {
   const headers = {
     "content-type": "application/json"
@@ -1291,12 +1337,26 @@ async function executeSellerHubInventoryFromPlatform(payload) {
   }
   const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
 
-  return executeApi(state.tabId, {
+  const result = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=SellerHubInventory&ssr=0",
     method: "POST",
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody)
   });
+
+  if (result?.success && result?.data && typeof result.data === "object") {
+    const saveResult = await sendInventorySnapshotsToMarketplace({
+      responsePayload: result.data,
+      status: requestedStatus,
+      requestPayload,
+      tabId: state.tabId,
+    });
+    if (!saveResult?.success) {
+      console.warn("[Whatnot Inventory] Marketplace snapshot save failed:", saveResult?.error || "unknown");
+    }
+  }
+
+  return result;
 }
 
 async function executeMyLiveStatsFromPlatform(payload) {
@@ -2852,11 +2912,53 @@ function ingestShipmentIdsFromObservedApiPayload(payload) {
   }
 }
 
+function getObservedGraphqlOperationName(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const requestBody = payload.requestBody && typeof payload.requestBody === "object"
+    ? payload.requestBody
+    : null;
+  if (requestBody && typeof requestBody.operationName === "string" && requestBody.operationName.trim()) {
+    return requestBody.operationName.trim();
+  }
+  if (typeof payload.url === "string") {
+    try {
+      return new URL(payload.url).searchParams.get("operationName") || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+  return "";
+}
+
 async function onObservedApi(payload) {
   state.lastObservedApi = payload;
   captureGraphqlTemplate(payload);
   resolveObservedGraphqlWaiters(payload);
   ingestShipmentIdsFromObservedApiPayload(payload);
+
+  const operationName = getObservedGraphqlOperationName(payload);
+  if (
+    operationName === "SellerHubInventory"
+    && Number(payload?.status) >= 200
+    && Number(payload?.status) < 300
+    && payload?.responseBody
+    && typeof payload.responseBody === "object"
+    && state.clerkUserId
+  ) {
+    const requestPayload = payload.requestBody && typeof payload.requestBody === "object"
+      ? payload.requestBody.variables || {}
+      : {};
+    const statuses = Array.isArray(requestPayload?.statuses) ? requestPayload.statuses : [];
+    const observedStatus = statuses.length ? String(statuses[0]).trim().toUpperCase() : "ACTIVE";
+    void sendInventorySnapshotsToMarketplace({
+      responsePayload: payload.responseBody,
+      status: observedStatus,
+      requestPayload,
+      tabId: state.tabId,
+    });
+  }
 
   // Do not settle fetch_whatnot_show_tab via observed GetSellerHomeDashboard — it races the
   // programmatic bootstrap in handlePlatformAction and can return myLives:null before sellerId is set.

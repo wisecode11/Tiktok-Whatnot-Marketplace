@@ -50,6 +50,7 @@ import {
   getClerkErrorMessage,
   generateWhatnotMediaUploadUrls,
   getWhatnotInventoryCreateFormOptions,
+  getWhatnotInventoryLive,
   searchTikTokGlobalProducts,
   createTikTokGlobalProduct,
   deleteTikTokGlobalProducts,
@@ -58,6 +59,7 @@ import {
   syncWhatnotInventoryLive,
   syncWhatnotReferenceCache,
   waitForSessionToken,
+  type WhatnotInventoryLiveResponse,
   type TikTokGlobalProduct,
   type TikTokGlobalProductGetResponse,
   type TikTokGlobalProductsCreateResponse,
@@ -297,6 +299,30 @@ function formatTiktokProductListPrice(product: TikTokGlobalProduct): string {
   return unique.length <= 2 ? unique.join(" · ") : `${unique[0]} · +${unique.length - 1} more`
 }
 
+function hasWhatnotInventorySnapshotInDb(result: WhatnotInventoryLiveResponse | null): boolean {
+  return Boolean(result?.syncedAt)
+}
+
+function mapWhatnotInventoryResponse(result: WhatnotInventoryLiveResponse | null): InventoryItem[] {
+  const edges = result?.responsePayload?.data?.me?.inventory?.edges || []
+
+  return edges
+    .map((edge) => edge?.node)
+    .filter((node): node is NonNullable<typeof node> => Boolean(node?.id || node?.uuid))
+    .map((node) => ({
+      id: String(node.id || node.uuid),
+      name: node.title || "Untitled listing",
+      subtitle: node.subtitle || node.description || "-",
+      category: node.product?.category?.label || "-",
+      quantity: typeof node.quantity === "number" ? node.quantity : null,
+      price: mapAmountToPrice(node.price?.amount, node.price?.currency),
+      format: node.transactionType || "N/A",
+      condition: node.publicStatus || node.status || "-",
+      featuredIn: "-",
+      status: node.publicStatus || node.status || "-",
+    }))
+}
+
 const INVENTORY_TAB_TRIGGER_CLASS =
   "h-9 shrink-0 rounded-lg px-4 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
 
@@ -325,6 +351,8 @@ export default function SellerInventoryManagementPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshingInventory, setIsRefreshingInventory] = useState(false)
+  const [inventoryLastSyncedAt, setInventoryLastSyncedAt] = useState<Date | null>(null)
   const [errorMessage, setErrorMessage] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createFormError, setCreateFormError] = useState("")
@@ -405,34 +433,25 @@ export default function SellerInventoryManagementPage() {
   useEffect(() => {
     let cancelled = false
 
-    async function syncInventory() {
-      if (!isLoaded) return
+    async function loadInventoryFromDatabase() {
+      if (!isLoaded || inventoryPlatformTab !== "whatnot") return
       try {
         setIsLoading(true)
         setErrorMessage("")
         const token = await waitForSessionToken(getToken)
-        const result = await syncWhatnotInventoryLive(token, selectedTab)
+        const cached = await getWhatnotInventoryLive(token, selectedTab)
+        if (cancelled) return
 
-        const edges = result?.responsePayload?.data?.me?.inventory?.edges || []
-        const mapped: InventoryItem[] = edges
-          .map((edge) => edge?.node)
-          .filter((node): node is NonNullable<typeof node> => Boolean(node?.id))
-          .map((node) => ({
-            id: String(node.id), // row id from node.id
-            name: node.title || "Untitled listing",
-            subtitle: node.subtitle || node.description || "-",
-            category: node.product?.category?.label || "-",
-            quantity: typeof node.quantity === "number" ? node.quantity : null,
-            price: mapAmountToPrice(node.price?.amount, node.price?.currency),
-            format: node.transactionType || "N/A",
-            condition: node.publicStatus || node.status || "-",
-            featuredIn: "-",
-            status: node.publicStatus || node.status || "-",
-          }))
-
-        if (!cancelled) {
-          setInventoryItems(mapped)
+        if (hasWhatnotInventorySnapshotInDb(cached)) {
+          setInventoryItems(mapWhatnotInventoryResponse(cached))
+          setInventoryLastSyncedAt(cached.syncedAt ? new Date(cached.syncedAt) : null)
+          return
         }
+
+        const synced = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+        if (cancelled) return
+        setInventoryItems(mapWhatnotInventoryResponse(synced))
+        setInventoryLastSyncedAt(synced.syncedAt ? new Date(synced.syncedAt) : null)
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(getClerkErrorMessage(error))
@@ -445,11 +464,27 @@ export default function SellerInventoryManagementPage() {
       }
     }
 
-    void syncInventory()
+    void loadInventoryFromDatabase()
     return () => {
       cancelled = true
     }
-  }, [getToken, isLoaded, selectedTab])
+  }, [getToken, isLoaded, inventoryPlatformTab, selectedTab])
+
+  async function handleWhatnotInventoryRefresh() {
+    if (!isLoaded || isRefreshingInventory) return
+    try {
+      setIsRefreshingInventory(true)
+      setErrorMessage("")
+      const token = await waitForSessionToken(getToken)
+      const synced = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+      setInventoryItems(mapWhatnotInventoryResponse(synced))
+      setInventoryLastSyncedAt(synced.syncedAt ? new Date(synced.syncedAt) : null)
+    } catch (error) {
+      setErrorMessage(getClerkErrorMessage(error))
+    } finally {
+      setIsRefreshingInventory(false)
+    }
+  }
 
   const loadWhatnotCreateFormOptions = useCallback(async () => {
     const token = await waitForSessionToken(getToken)
@@ -1195,25 +1230,9 @@ export default function SellerInventoryManagementPage() {
         imageId: uploadedImageId.trim(),
       })
 
-      const refreshed = await syncWhatnotInventoryLive(token, selectedTab)
-      const edges = refreshed?.responsePayload?.data?.me?.inventory?.edges || []
-      const mapped: InventoryItem[] = edges
-        .map((edge) => edge?.node)
-        .filter((node): node is NonNullable<typeof node> => Boolean(node?.id))
-        .map((node) => ({
-          id: String(node.id),
-          name: node.title || "Untitled listing",
-          subtitle: node.subtitle || node.description || "-",
-          category: node.product?.category?.label || "-",
-          quantity: typeof node.quantity === "number" ? node.quantity : null,
-          price: mapAmountToPrice(node.price?.amount, node.price?.currency),
-          format: node.transactionType || "N/A",
-          condition: node.publicStatus || node.status || "-",
-          featuredIn: "-",
-          status: node.publicStatus || node.status || "-",
-        }))
-
-      setInventoryItems(mapped)
+      const refreshed = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+      setInventoryItems(mapWhatnotInventoryResponse(refreshed))
+      setInventoryLastSyncedAt(refreshed.syncedAt ? new Date(refreshed.syncedAt) : null)
       setCreateDialogOpen(false)
       resetCreateForm()
     } catch (error) {
@@ -1224,10 +1243,24 @@ export default function SellerInventoryManagementPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 ">
       <PageHeader title="Inventory" description="Manage your product list and inventory visibility.">
         {inventoryPlatformTab === "whatnot" ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              onClick={() => void handleWhatnotInventoryRefresh()}
+              disabled={isRefreshingInventory || isLoading}
+            >
+              {isRefreshingInventory ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Refetch inventory
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -2607,6 +2640,11 @@ export default function SellerInventoryManagementPage() {
               </TabsList>
             </Tabs>
             {errorMessage ? <p className="mt-3 text-sm text-destructive">{errorMessage}</p> : null}
+            {inventoryLastSyncedAt ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Loaded from database · last synced {inventoryLastSyncedAt.toLocaleString()}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-4 p-4 md:p-6">
@@ -2671,7 +2709,9 @@ export default function SellerInventoryManagementPage() {
                       <TableCell colSpan={7} className="py-16 text-center">
                         <span className="inline-flex flex-col items-center gap-3 text-sm text-muted-foreground">
                           <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                          Loading live Whatnot inventory...
+                          {isRefreshingInventory
+                            ? "Fetching latest inventory from Whatnot..."
+                            : "Loading inventory..."}
                         </span>
                       </TableCell>
                     </TableRow>

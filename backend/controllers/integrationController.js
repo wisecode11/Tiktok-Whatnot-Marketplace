@@ -35,11 +35,13 @@ const {
   handleWhatnotCallback,
   handleTikTokCallback,
   saveGetSessionApiData,
+  saveWhatnotInventorySnapshotsFromExtension,
   saveWhatnotInventoryEditCategories,
   saveWhatnotLivestreamTagDirectDescendants,
   saveWhatnotShippingProfiles,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
+  fetchWhatnotInventoryTabDataFromExtension,
   syncWhatnotInventoryFromPlatform,
   syncWhatnotEarlyPayoutBalanceFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
@@ -193,13 +195,56 @@ async function getWhatnotReferenceCacheStatusData(_req, res) {
   }
 }
 
-async function syncWhatnotInventoryLiveData(req, res) {
+async function fetchWhatnotInventoryTabData(req, res) {
   try {
-    const result = await syncWhatnotInventoryFromPlatform({
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await fetchWhatnotInventoryTabDataFromExtension({
       clerkUserId: req.auth.userId,
-      status: req.body && req.body.status ? req.body.status : "ACTIVE",
+      status: body.status ? body.status : "ACTIVE",
+      forceRefresh: Boolean(body.forceRefresh),
     });
     return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function syncWhatnotInventoryLiveData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const forceRefresh = body.forceRefresh !== false;
+    const result = await fetchWhatnotInventoryTabDataFromExtension({
+      clerkUserId: req.auth.userId,
+      status: body.status ? body.status : "ACTIVE",
+      forceRefresh,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function saveWhatnotInventorySnapshotsEntry(req, res) {
+  try {
+    const bodyClerkUserId = req.body && typeof req.body.clerkUserId === "string"
+      ? req.body.clerkUserId.trim()
+      : null;
+    const result = await saveWhatnotInventorySnapshotsFromExtension({
+      clerkUserId: bodyClerkUserId || (req.auth && req.auth.userId ? req.auth.userId : null),
+      status: req.body && req.body.status ? req.body.status : "ACTIVE",
+      responsePayload: req.body && req.body.responsePayload ? req.body.responsePayload : {},
+      requestPayload: req.body && req.body.requestPayload ? req.body.requestPayload : {},
+      tabId: req.body && req.body.tabId != null ? req.body.tabId : null,
+      source: req.body && req.body.source ? req.body.source : "whatnot-extension",
+    });
+
+    return res.status(200).json({
+      success: true,
+      savedCount: result.savedCount,
+      receivedCount: result.receivedCount,
+      status: result.status,
+      syncedAt: result.syncedAt,
+    });
   } catch (error) {
     return sendError(res, error);
   }
@@ -959,11 +1004,13 @@ module.exports = {
   listConnections,
   removeConnection,
   saveGetSessionApiDataEntry,
+  saveWhatnotInventorySnapshotsEntry,
   saveWhatnotInventoryEditCategoriesEntry,
   saveWhatnotLivestreamTagDirectDescendantsEntry,
   saveWhatnotShippingProfilesEntry,
   saveWhatnotOrdersEntry,
   saveWhatnotSessionData,
+  fetchWhatnotInventoryTabData,
   syncWhatnotInventoryLiveData,
   fetchMyLiveStatsData,
   fetchWhatnotShowTabData,

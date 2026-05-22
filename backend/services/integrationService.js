@@ -88,6 +88,122 @@ function normalizeInventoryStatus(status) {
   return normalized;
 }
 
+function resolveInventoryListingId(node) {
+  if (!node || typeof node !== "object") {
+    return "";
+  }
+  if (node.id) {
+    return String(node.id).trim();
+  }
+  if (node.uuid) {
+    return String(node.uuid).trim();
+  }
+  return "";
+}
+
+function extractInventoryEdgesFromGraphqlBody(body) {
+  if (!body || typeof body !== "object") {
+    return [];
+  }
+  const edges = body.data && body.data.me && body.data.me.inventory && body.data.me.inventory.edges;
+  return Array.isArray(edges) ? edges : [];
+}
+
+function extractInventoryStatusFilterFromRequestPayload(requestPayload) {
+  const statuses = requestPayload && Array.isArray(requestPayload.statuses) ? requestPayload.statuses : [];
+  if (statuses.length) {
+    const first = String(statuses[0]).trim().toUpperCase();
+    if (WHATNOT_INVENTORY_STATUSES.has(first)) {
+      return first;
+    }
+  }
+  return "ACTIVE";
+}
+
+function buildWhatnotInventoryResponsePayloadFromRecords(records) {
+  const latestRecords = Array.isArray(records) ? records : [];
+  return {
+    data: {
+      me: {
+        inventory: {
+          edges: latestRecords.map((record) => ({
+            node: record.response_payload || {},
+          })),
+        },
+      },
+    },
+  };
+}
+
+async function saveWhatnotInventorySnapshots({
+  clerkUserId,
+  statusFilter = "ACTIVE",
+  edges = [],
+  requestPayload = {},
+  source = "whatnot-extension",
+  extensionTabId = null,
+}) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+  const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
+  const normalizedStatus = normalizeInventoryStatus(statusFilter);
+  const now = new Date();
+  const tabId = Number.isFinite(Number(extensionTabId)) ? Number(extensionTabId) : null;
+  let savedCount = 0;
+
+  for (const edge of edges) {
+    const node = edge && typeof edge === "object" ? edge.node : null;
+    const inventoryId = resolveInventoryListingId(node);
+
+    if (!inventoryId) {
+      continue;
+    }
+
+    await WhatnotInventorySnapshot.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        clerk_user_id: ownerClerkUserId,
+        status_filter: normalizedStatus,
+        inventory_id: inventoryId,
+      },
+      {
+        $set: {
+          source,
+          request_payload: requestPayload,
+          response_payload: node || {},
+          extension_tab_id: tabId,
+          synced_at: now,
+          updated_at: now,
+        },
+        $setOnInsert: {
+          created_at: now,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
+    );
+    savedCount += 1;
+  }
+
+  console.log(
+    `[Whatnot Inventory] Snapshot saved for ${ownerClerkUserId} (${normalizedStatus}): ${savedCount} listing(s).`,
+  );
+
+  return {
+    savedCount,
+    status: normalizedStatus,
+    syncedAt: now,
+    ownerClerkUserId,
+  };
+}
+
 function getFrontendUrl() {
   return process.env.FRONTEND_URL || "http://localhost:3000";
 }
@@ -3201,12 +3317,111 @@ async function createWhatnotListingFromPlatform({
   return body;
 }
 
-async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE" }) {
+async function saveWhatnotInventorySnapshotsFromExtension({
+  clerkUserId = null,
+  status = "ACTIVE",
+  responsePayload = {},
+  requestPayload = {},
+  tabId = null,
+  source = "whatnot-extension",
+}) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  const payload = responsePayload && typeof responsePayload === "object" ? responsePayload : {};
+  const normalizedStatus = normalizeInventoryStatus(
+    status || extractInventoryStatusFilterFromRequestPayload(requestPayload),
+  );
+  const edges = extractInventoryEdgesFromGraphqlBody(payload);
+
+  const saveResult = await saveWhatnotInventorySnapshots({
+    clerkUserId: normalizedClerkUserId,
+    statusFilter: normalizedStatus,
+    edges,
+    requestPayload,
+    source,
+    extensionTabId: tabId,
+  });
+
+  const ownerClerkUserId = saveResult.ownerClerkUserId;
+  const latestRecords = await WhatnotInventorySnapshot.find({
+    platform: "whatnot",
+    clerk_user_id: ownerClerkUserId,
+    status_filter: normalizedStatus,
+  }).sort({ synced_at: -1, updated_at: -1 });
+
+  const latestSyncedAt = saveResult.syncedAt ? new Date(saveResult.syncedAt).getTime() : null;
+  const latestSnapshots = latestSyncedAt == null
+    ? latestRecords
+    : latestRecords.filter((record) => {
+      const recordSyncedAt = record.synced_at ? new Date(record.synced_at).getTime() : null;
+      return recordSyncedAt === latestSyncedAt;
+    });
+
+  return {
+    savedCount: saveResult.savedCount,
+    receivedCount: edges.length,
+    status: normalizedStatus,
+    syncedAt: saveResult.syncedAt,
+    responsePayload: buildWhatnotInventoryResponsePayloadFromRecords(latestSnapshots),
+  };
+}
+
+function whatnotInventorySnapshotHasStoredItems(snapshotPayload) {
+  return extractInventoryEdgesFromGraphqlBody(snapshotPayload).length > 0;
+}
+
+async function fetchWhatnotInventoryTabDataFromExtension({ clerkUserId, status = "ACTIVE", forceRefresh = false }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
     throw createHttpError(400, "Missing Clerk user id.");
   }
   const normalizedStatus = normalizeInventoryStatus(status);
+
+  if (!forceRefresh) {
+    const cached = await getLatestWhatnotInventorySnapshot({
+      clerkUserId: normalizedClerkUserId,
+      status: normalizedStatus,
+    });
+    if (whatnotInventorySnapshotHasStoredItems(cached.responsePayload)) {
+      const cachedEdges = extractInventoryEdgesFromGraphqlBody(cached.responsePayload);
+      console.log(
+        `[Whatnot Inventory Tab] Loaded ${cachedEdges.length} listing(s) from whatnot_inventory_snapshots (${normalizedStatus}).`,
+      );
+      return {
+        status: normalizedStatus,
+        syncedAt: cached.syncedAt,
+        snapshotId: cached.snapshotId,
+        syncedProducts: cachedEdges.length,
+        savedToDatabase: true,
+        responsePayload: cached.responsePayload,
+        fromCache: true,
+      };
+    }
+  }
+
+  console.log(`[Whatnot Inventory Tab] Fetching live inventory (${normalizedStatus}) via extension.`);
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
 
   const requestPayload = {
     after: null,
@@ -3243,82 +3458,52 @@ async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE"
     throw createHttpError(502, firstError, body);
   }
 
-  const now = new Date();
-  const edges =
-    body &&
-    body.data &&
-    body.data.me &&
-    body.data.me.inventory &&
-    Array.isArray(body.data.me.inventory.edges)
-      ? body.data.me.inventory.edges
-      : [];
-  const tabId = actionResult.tabId ?? null;
-  let upsertedCount = 0;
+  const edges = extractInventoryEdgesFromGraphqlBody(body);
+  const saveResult = await saveWhatnotInventorySnapshots({
+    clerkUserId: normalizedClerkUserId,
+    statusFilter: normalizedStatus,
+    edges,
+    requestPayload,
+    source: "whatnot-extension-live",
+    extensionTabId: actionResult.tabId ?? null,
+  });
 
-  for (const edge of edges) {
-    const node = edge && typeof edge === "object" ? edge.node : null;
-    const inventoryId = node && node.id ? String(node.id).trim() : "";
-
-    if (!inventoryId) {
-      continue;
-    }
-
-    await WhatnotInventorySnapshot.findOneAndUpdate(
-      {
-        platform: "whatnot",
-        clerk_user_id: normalizedClerkUserId,
-        status_filter: normalizedStatus,
-        inventory_id: inventoryId,
-      },
-      {
-        $set: {
-          source: "whatnot-extension-live",
-          request_payload: requestPayload,
-          response_payload: node || {},
-          extension_tab_id: tabId,
-          synced_at: now,
-          updated_at: now,
-        },
-        $setOnInsert: {
-          created_at: now,
-        },
-      },
-      {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true,
-      },
-    );
-    upsertedCount += 1;
-  }
-
+  const ownerClerkUserId = saveResult.ownerClerkUserId;
   const latestRecords = await WhatnotInventorySnapshot.find({
     platform: "whatnot",
-    clerk_user_id: normalizedClerkUserId,
+    clerk_user_id: ownerClerkUserId,
     status_filter: normalizedStatus,
-  })
-    .sort({ synced_at: -1, updated_at: -1 })
-    .limit(Math.max(1, edges.length || 1));
+  }).sort({ synced_at: -1, updated_at: -1 });
 
-  const responsePayload = {
-    data: {
-      me: {
-        inventory: {
-          edges: latestRecords.map((record) => ({
-            node: record.response_payload || {},
-          })),
-        },
-      },
-    },
-  };
+  const latestSyncedAt = saveResult.syncedAt ? new Date(saveResult.syncedAt).getTime() : null;
+  const latestSnapshots = latestSyncedAt == null
+    ? latestRecords
+    : latestRecords.filter((record) => {
+      const recordSyncedAt = record.synced_at ? new Date(record.synced_at).getTime() : null;
+      return recordSyncedAt === latestSyncedAt;
+    });
+
+  console.log(
+    `[Whatnot Inventory Tab] Saved ${saveResult.savedCount} listing(s) to whatnot_inventory_snapshots (${normalizedStatus}).`,
+  );
 
   return {
     status: normalizedStatus,
-    syncedAt: now,
-    snapshotId: latestRecords.length ? latestRecords[0]._id : null,
-    syncedProducts: upsertedCount,
-    responsePayload,
+    syncedAt: saveResult.syncedAt,
+    snapshotId: latestSnapshots.length ? latestSnapshots[0]._id : null,
+    syncedProducts: saveResult.savedCount,
+    savedToDatabase: saveResult.savedCount > 0,
+    responsePayload: buildWhatnotInventoryResponsePayloadFromRecords(latestSnapshots),
+    fromCache: false,
   };
+}
+
+async function syncWhatnotInventoryFromPlatform({ clerkUserId, status = "ACTIVE", forceRefresh = true }) {
+  return fetchWhatnotInventoryTabDataFromExtension({
+    clerkUserId,
+    status,
+    forceRefresh,
+  });
 }
 
 async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
@@ -4882,17 +5067,7 @@ async function getLatestWhatnotInventorySnapshot({ clerkUserId, status = "ACTIVE
     status: normalizedStatus,
     syncedAt: snapshots[0].synced_at || null,
     snapshotId: snapshots[0]._id || null,
-    responsePayload: {
-      data: {
-        me: {
-          inventory: {
-            edges: latestSnapshots.map((record) => ({
-              node: record.response_payload || {},
-            })),
-          },
-        },
-      },
-    },
+    responsePayload: buildWhatnotInventoryResponsePayloadFromRecords(latestSnapshots),
   };
 }
 
@@ -4987,6 +5162,7 @@ module.exports = {
   getWhatnotExtensionConnectionStatus,
   getLatestWhatnotInventorySnapshot,
   getWhatnotInventorySnapshot,
+  fetchWhatnotInventoryTabDataFromExtension,
   syncWhatnotInventoryFromPlatform,
   syncWhatnotEarlyPayoutBalanceFromPlatform,
   getTikTokProfile,
@@ -4999,6 +5175,8 @@ module.exports = {
   saveGetSessionApiData,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
+  saveWhatnotInventorySnapshots,
+  saveWhatnotInventorySnapshotsFromExtension,
   saveWhatnotInventoryEditCategories,
   saveWhatnotShippingProfiles,
   saveWhatnotLivestreamTagDirectDescendants,

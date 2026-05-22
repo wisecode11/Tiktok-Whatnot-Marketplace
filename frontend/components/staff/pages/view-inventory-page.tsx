@@ -41,6 +41,7 @@ import {
   getClerkErrorMessage,
   getWhatnotInventoryCreateFormOptions,
   getWhatnotInventoryLive,
+  syncWhatnotInventoryLive,
   type WhatnotInventoryLiveResponse,
   waitForSessionToken,
 } from "@/lib/auth"
@@ -113,11 +114,11 @@ function toInventoryRows(payload: WhatnotInventoryLiveResponse | null): Inventor
   return edges
     .map((edge) => {
       const node = edge?.node
-      if (!node || !node.id) {
+      if (!node || (!node.id && !node.uuid)) {
         return null
       }
 
-      const normalizedId = String(node.id)
+      const normalizedId = String(node.id || node.uuid)
       const trimmedTitle = typeof node.title === "string" && node.title.trim() ? node.title.trim() : "Untitled product"
       const subtitle =
         typeof node.subtitle === "string" && node.subtitle.trim()
@@ -200,7 +201,21 @@ export function ViewInventoryPage() {
 
         setError(null)
         const token = await waitForSessionToken(getTokenRef.current)
-        const result = await getWhatnotInventoryLive(token, "ACTIVE")
+        if (isManualRefresh) {
+          const synced = await syncWhatnotInventoryLive(token, "ACTIVE", { forceRefresh: true })
+          setRows(toInventoryRows(synced))
+          setLastUpdated(synced.syncedAt ? new Date(synced.syncedAt) : null)
+          return
+        }
+
+        const cached = await getWhatnotInventoryLive(token, "ACTIVE")
+        if (cached.syncedAt) {
+          setRows(toInventoryRows(cached))
+          setLastUpdated(cached.syncedAt ? new Date(cached.syncedAt) : null)
+          return
+        }
+
+        const result = await syncWhatnotInventoryLive(token, "ACTIVE", { forceRefresh: true })
         setRows(toInventoryRows(result))
         setLastUpdated(result.syncedAt ? new Date(result.syncedAt) : null)
       } catch (loadError) {
