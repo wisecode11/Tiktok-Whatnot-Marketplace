@@ -1,6 +1,6 @@
 const User = require("../models/Users");
-const SellerWorkspace = require("../models/SellerWorkspace");
 const WorkspaceMembership = require("../models/WorkspaceMembership");
+const { resolveActiveSellerWorkspaceForSeller } = require("./authService");
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -38,25 +38,7 @@ async function findAuthenticatedSeller(clerkUserId) {
 }
 
 async function ensureSellerWorkspace(seller) {
-  const existingWorkspace = await SellerWorkspace.findOne({ owner_user_id: seller._id });
-
-  if (existingWorkspace) {
-    return existingWorkspace;
-  }
-
-  const now = new Date();
-  const workspace = new SellerWorkspace({
-    owner_user_id: seller._id,
-    business_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    billing_email: seller.email,
-    billing_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    status: "trial",
-    created_at: now,
-    updated_at: now,
-  });
-
-  await workspace.save();
-  return workspace;
+  return resolveActiveSellerWorkspaceForSeller(seller);
 }
 
 function normalizeModules(modules) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useAuth } from "@clerk/nextjs"
+import { useAuth, useOrganization } from "@clerk/nextjs"
 import { Building, CalendarDays, DollarSign, Loader2, Lock, Plus } from "lucide-react"
 
 import { AccessControlModal } from "@/components/staff/access-control-modal"
@@ -64,9 +64,21 @@ function formatDate(value: string | null) {
   }).format(new Date(value))
 }
 
+function getStaffDisplayName(member: StaffMember) {
+  const fullName = [member.firstName, member.lastName].filter(Boolean).join(" ").trim()
+  if (fullName) {
+    return fullName
+  }
+  if (member.username) {
+    return member.username
+  }
+  return member.email.split("@")[0] || member.email
+}
+
 export default function ManageStaffPage() {
   const router = useRouter()
   const { getToken, isLoaded } = useAuth()
+  const { organization } = useOrganization()
   const { toast } = useToast()
 
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([])
@@ -134,7 +146,7 @@ export default function ManageStaffPage() {
     return () => {
       cancelled = true
     }
-  }, [getToken, isLoaded])
+  }, [getToken, isLoaded, organization?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -400,35 +412,42 @@ export default function ManageStaffPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {staffMembers.map((member) => (
-                  <TableRow key={member.id}>
-                    <TableCell className="font-medium">{member.username || "-"}</TableCell>
-                    <TableCell>{member.email}</TableCell>
-                    <TableCell className="capitalize">{member.role}</TableCell>
-                    <TableCell className="capitalize">{member.status}</TableCell>
-                    <TableCell>{formatDate(member.createdAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenAttendance(member.id)}
-                      >
-                        <CalendarDays className="mr-1.5 size-3.5" />
-                        Attendance
-                      </Button>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenAccessControl(member.id, member.username || member.email)}
-                      >
-                        <Lock className="mr-1.5 size-3.5" />
-                        Allow Access
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {staffMembers.map((member) => {
+                  const isPendingInvite = member.status === "invited" || !member.clerkUserId
+                  const displayName = getStaffDisplayName(member)
+
+                  return (
+                    <TableRow key={member.id}>
+                      <TableCell className="font-medium">{displayName}</TableCell>
+                      <TableCell>{member.email}</TableCell>
+                      <TableCell className="capitalize">{member.role}</TableCell>
+                      <TableCell className="capitalize">{member.status}</TableCell>
+                      <TableCell>{formatDate(member.createdAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isPendingInvite}
+                          onClick={() => handleOpenAttendance(member.id)}
+                        >
+                          <CalendarDays className="mr-1.5 size-3.5" />
+                          Attendance
+                        </Button>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isPendingInvite}
+                          onClick={() => handleOpenAccessControl(member.id, displayName)}
+                        >
+                          <Lock className="mr-1.5 size-3.5" />
+                          Allow Access
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           )}

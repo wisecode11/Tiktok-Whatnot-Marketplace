@@ -66,7 +66,7 @@ export function CreateOrganizationForm({
           id="create-org-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="My Seller Brand"
+          placeholder="My Organization Name"
           required
         />
       </div>

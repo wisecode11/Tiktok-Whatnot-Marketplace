@@ -6,6 +6,10 @@ const WorkspaceMembership = require("../models/WorkspaceMembership");
 const WhatnotLiveStatsSnapshot = require("../models/WhatnotLiveStatsSnapshot");
 const WhatnotShipmentDetail = require("../models/WhatnotShipmentDetail");
 const { getEmailDeliveryErrorMessage, sendStaffWelcomeEmail } = require("./emailService");
+const {
+  resolveActiveSellerWorkspaceForSeller,
+  syncSellerOrganizationMembers,
+} = require("./authService");
 
 function createHttpError(status, message, details) {
   const error = new Error(message);
@@ -130,25 +134,23 @@ async function findAuthenticatedSeller(clerkUserId) {
 }
 
 async function ensureSellerWorkspace(seller) {
-  const existingWorkspace = await SellerWorkspace.findOne({ owner_user_id: seller._id });
+  return resolveActiveSellerWorkspaceForSeller(seller);
+}
 
-  if (existingWorkspace) {
-    return existingWorkspace;
+async function syncWorkspaceOrganizationMembers({ clerkUserId, workspace }) {
+  const organizationId =
+    workspace && typeof workspace.clerk_organization_id === "string"
+      ? workspace.clerk_organization_id.trim()
+      : "";
+
+  if (!organizationId) {
+    return;
   }
 
-  const now = new Date();
-  const workspace = new SellerWorkspace({
-    owner_user_id: seller._id,
-    business_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    billing_email: seller.email,
-    billing_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    status: "trial",
-    created_at: now,
-    updated_at: now,
+  await syncSellerOrganizationMembers({
+    clerkUserId,
+    clerkOrganizationId: organizationId,
   });
-
-  await workspace.save();
-  return workspace;
 }
 
 function formatStaffDisplayName(user) {
@@ -215,12 +217,41 @@ function serializeStaffMember({ user, membership }) {
     firstName: user.first_name || "",
     lastName: user.last_name || "",
     role: "staff",
-    status: user.status,
+    status: membership && membership.status ? membership.status : user.status,
     streamerUserId: user.parent_seller_user_id || null,
     workspaceId: membership ? membership.workspace_id : null,
     modules,
     joinedAt: membership && membership.joined_at ? membership.joined_at : null,
     createdAt: user.created_at || null,
+    source: permissions.source || null,
+  };
+}
+
+function serializeInvitedStaffMember({ membership }) {
+  const permissions = membership && membership.permissions_json ? membership.permissions_json : {};
+  const email =
+    (typeof permissions.email === "string" && permissions.email.trim()) ||
+    "pending-invite@unknown.local";
+  const username =
+    (typeof permissions.username === "string" && permissions.username.trim()) ||
+    email.split("@")[0] ||
+    null;
+
+  return {
+    id: String(membership._id),
+    clerkUserId: null,
+    username,
+    email,
+    firstName: "",
+    lastName: "",
+    role: "staff",
+    status: membership.status || "invited",
+    streamerUserId: null,
+    workspaceId: membership.workspace_id || null,
+    modules: Array.isArray(permissions.modules) ? permissions.modules : [],
+    joinedAt: membership.joined_at || null,
+    createdAt: membership.created_at || null,
+    source: permissions.source || "clerk-organization-invite",
   };
 }
 
@@ -228,6 +259,7 @@ async function listStaffMembers({ clerkUserId }) {
   const seller = await findAuthenticatedSeller(clerkUserId);
   const workspace = await ensureSellerWorkspace(seller);
 
+  await syncWorkspaceOrganizationMembers({ clerkUserId, workspace });
   await getActiveStaffWithUsers(workspace._id, { revokeOrphanMemberships: true });
 
   const memberships = await WorkspaceMembership.find({
@@ -240,15 +272,26 @@ async function listStaffMembers({ clerkUserId }) {
   const users = await User.find({ _id: { $in: userIds } });
   const userMap = new Map(users.map((user) => [user._id, user]));
 
+  const ownerUserId = workspace.owner_user_id ? String(workspace.owner_user_id) : null;
+
   return {
     staff: memberships
       .map((membership) => {
-        const user = userMap.get(membership.user_id);
-        if (!user) {
-          return null;
+        const user = membership.user_id ? userMap.get(membership.user_id) : null;
+
+        if (user) {
+          if (ownerUserId && String(user._id) === ownerUserId) {
+            return null;
+          }
+
+          return serializeStaffMember({ user, membership });
         }
 
-        return serializeStaffMember({ user, membership });
+        if (membership.status === "invited") {
+          return serializeInvitedStaffMember({ membership });
+        }
+
+        return null;
       })
       .filter(Boolean),
   };

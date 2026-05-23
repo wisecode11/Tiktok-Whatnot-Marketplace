@@ -1,6 +1,6 @@
 "use client"
 
-import { useOrganization, useUser } from "@clerk/nextjs"
+import { useAuth, useOrganization, useUser } from "@clerk/nextjs"
 import { Loader2, Mail, Plus, Search, UserMinus } from "lucide-react"
 import { useMemo, useState } from "react"
 
@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { getClerkErrorMessage } from "@/lib/auth"
+import { getClerkErrorMessage, syncSellerOrganizationMembers, waitForSessionToken } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
 function formatJoinedDate(value: Date | number | string | null | undefined) {
@@ -64,6 +64,7 @@ function getMemberDisplayName(member: {
 }
 
 export function OrganizationMembersPanel() {
+  const { getToken } = useAuth()
   const { user } = useUser()
   const { organization, memberships, invitations } = useOrganization({
     memberships: {
@@ -117,6 +118,19 @@ export function OrganizationMembersPanel() {
     })
   }, [invitationRows, search])
 
+  async function syncMembersToManageStaff() {
+    if (!organization?.id) {
+      return
+    }
+
+    try {
+      const token = await waitForSessionToken(getToken)
+      await syncSellerOrganizationMembers(token, organization.id)
+    } catch {
+      // Manage Staff also syncs on load; ignore transient errors here.
+    }
+  }
+
   async function handleInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!organization) {
@@ -141,6 +155,7 @@ export function OrganizationMembersPanel() {
       setInviteOpen(false)
       setSuccessMessage("Invitation sent successfully.")
       await invitations?.revalidate?.()
+      await syncMembersToManageStaff()
     } catch (error) {
       setErrorMessage(getClerkErrorMessage(error))
     } finally {
@@ -164,6 +179,7 @@ export function OrganizationMembersPanel() {
       await organization.removeMember(userId)
       setSuccessMessage("Member removed.")
       await memberships?.revalidate?.()
+      await syncMembersToManageStaff()
     } catch (error) {
       setErrorMessage(getClerkErrorMessage(error))
     } finally {

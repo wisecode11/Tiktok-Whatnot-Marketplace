@@ -358,6 +358,8 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
   let syncedUsers = 0;
   let syncedMemberships = 0;
 
+  const ownerUserId = workspace.owner_user_id ? String(workspace.owner_user_id) : null;
+
   for (const membership of membershipEntries) {
     const memberClerkUserId = getMembershipUserId(membership);
     const fallbackEmail = getMembershipEmail(membership);
@@ -409,11 +411,14 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
       memberUser.last_name = lastName.trim();
     }
 
-    if (!memberUser.user_type) {
-      memberUser.user_type = memberUser._id === workspace.owner_user_id ? "seller" : "staff";
-    }
+    const isWorkspaceOwner =
+      ownerUserId && memberUser._id && String(memberUser._id) === ownerUserId;
 
-    if (memberUser.user_type === "staff") {
+    if (isWorkspaceOwner) {
+      memberUser.user_type = "seller";
+      memberUser.parent_seller_user_id = null;
+    } else {
+      memberUser.user_type = "staff";
       memberUser.parent_seller_user_id = workspace.owner_user_id || memberUser.parent_seller_user_id || null;
     }
 
@@ -428,8 +433,89 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
     await ensureWorkspaceMembershipForUser({
       user: memberUser,
       workspace,
-      clerkRole: membership && membership.role ? membership.role : null,
+      clerkRole: isWorkspaceOwner ? membership && membership.role : "org:member",
     });
+    syncedMemberships += 1;
+  }
+
+  const invitationsPage = await clerkClient.organizations
+    .getOrganizationInvitationList({
+      organizationId: normalizedOrgId,
+      status: ["pending"],
+      limit: 100,
+    })
+    .catch(() => ({ data: [] }));
+
+  const invitationEntries =
+    invitationsPage && Array.isArray(invitationsPage.data) ? invitationsPage.data : [];
+
+  for (const invitation of invitationEntries) {
+    const invitedEmail =
+      invitation && typeof invitation.emailAddress === "string"
+        ? invitation.emailAddress.trim().toLowerCase()
+        : "";
+
+    if (!invitedEmail) {
+      continue;
+    }
+
+    const invitedUser = await User.findOne({ email: invitedEmail });
+    if (invitedUser && ownerUserId && String(invitedUser._id) === ownerUserId) {
+      continue;
+    }
+
+    if (invitedUser) {
+      invitedUser.user_type = "staff";
+      invitedUser.parent_seller_user_id = workspace.owner_user_id || invitedUser.parent_seller_user_id || null;
+      invitedUser.updated_at = now;
+      await invitedUser.save();
+    }
+
+    const invitationId =
+      invitation && typeof invitation.id === "string" ? invitation.id.trim() : null;
+
+    const membershipLookup = {
+      workspace_id: workspace._id,
+      role: "staff",
+      $or: [
+        ...(invitationId ? [{ "permissions_json.invitationId": invitationId }] : []),
+        { "permissions_json.email": invitedEmail },
+        ...(invitedUser ? [{ user_id: invitedUser._id }] : []),
+      ],
+    };
+
+    let pendingMembership = await WorkspaceMembership.findOne(membershipLookup);
+
+    if (!pendingMembership) {
+      pendingMembership = new WorkspaceMembership({
+        workspace_id: workspace._id,
+        user_id: invitedUser ? invitedUser._id : null,
+        role: "staff",
+        permissions_json: {
+          email: invitedEmail,
+          invitationId,
+          source: "clerk-organization-invite",
+        },
+        status: "invited",
+        created_at: now,
+        updated_at: now,
+      });
+      await pendingMembership.save();
+      syncedMemberships += 1;
+      continue;
+    }
+
+    pendingMembership.user_id = invitedUser ? invitedUser._id : pendingMembership.user_id;
+    pendingMembership.status = "invited";
+    pendingMembership.role = "staff";
+    pendingMembership.permissions_json = {
+      ...(pendingMembership.permissions_json || {}),
+      email: invitedEmail,
+      invitationId,
+      source: "clerk-organization-invite",
+    };
+    pendingMembership.updated_at = now;
+    await pendingMembership.save();
     syncedMemberships += 1;
   }
 
@@ -448,6 +534,50 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
 
 async function listSellerWorkspacesForUser(userId) {
   return SellerWorkspace.find({ owner_user_id: userId }).sort({ created_at: 1, _id: 1 });
+}
+
+async function resolveActiveSellerWorkspaceForSeller(seller) {
+  if (!seller || seller.user_type !== "seller") {
+    throw createHttpError(403, "Only seller accounts have workspaces.");
+  }
+
+  if (seller.active_workspace_id) {
+    const activeWorkspace = await SellerWorkspace.findOne({
+      _id: seller.active_workspace_id,
+      owner_user_id: seller._id,
+    });
+
+    if (activeWorkspace) {
+      return activeWorkspace;
+    }
+  }
+
+  const workspaces = await listSellerWorkspacesForUser(seller._id);
+  if (workspaces.length > 0) {
+    const fallbackWorkspace = workspaces[0];
+    seller.active_workspace_id = fallbackWorkspace._id;
+    seller.updated_at = new Date();
+    await seller.save();
+    return fallbackWorkspace;
+  }
+
+  const now = new Date();
+  const workspace = new SellerWorkspace({
+    owner_user_id: seller._id,
+    business_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
+    billing_email: seller.email,
+    billing_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
+    status: "trial",
+    created_at: now,
+    updated_at: now,
+  });
+
+  await workspace.save();
+  seller.active_workspace_id = workspace._id;
+  seller.updated_at = now;
+  await seller.save();
+
+  return workspace;
 }
 
 async function loadUserByClerkId(clerkUserId) {
@@ -1120,6 +1250,7 @@ module.exports = {
   listSellerOrganizations,
   loginWithRole,
   normalizeRole,
+  resolveActiveSellerWorkspaceForSeller,
   syncSellerOrganizationMembers,
   syncSellerActiveOrganization,
   upsertUserFromClerk,

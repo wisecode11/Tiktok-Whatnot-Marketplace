@@ -184,7 +184,7 @@ export function OrganizationWorkspacesSection() {
           <form onSubmit={(event) => void handleCreateOrganization(event)}>
             <DialogHeader>
               <DialogTitle>Create organization</DialogTitle>
-              <DialogDescription>Add another workspace for a separate brand or team.</DialogDescription>
+              <DialogDescription>Add another workspace for a separate team.</DialogDescription>
             </DialogHeader>
             <div className="space-y-2 py-2">
               <Label htmlFor="new-org-name">Organization name</Label>
@@ -192,7 +192,7 @@ export function OrganizationWorkspacesSection() {
                 id="new-org-name"
                 value={newOrgName}
                 onChange={(event) => setNewOrgName(event.target.value)}
-                placeholder="My Seller Brand"
+                placeholder="My Organization Name"
                 required
               />
             </div>

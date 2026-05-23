@@ -16,6 +16,7 @@ export interface StaffMember {
   modules?: string[]
   joinedAt: string | null
   createdAt: string | null
+  source?: string | null
 }
 
 export interface StaffMembersResponse {
