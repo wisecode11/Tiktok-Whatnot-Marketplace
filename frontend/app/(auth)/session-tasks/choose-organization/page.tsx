@@ -64,7 +64,7 @@ function ChooseOrganizationContent() {
     <div className="w-full max-w-md">
       <h1 className="mb-2 text-center text-2xl font-semibold text-foreground">Choose your workspace</h1>
       <p className="mb-6 text-center text-sm text-muted-foreground">
-        Select or create your seller organization to continue.
+        Select your seller organization to continue.
       </p>
       <TaskChooseOrganization redirectUrlComplete={redirectUrlComplete} />
     </div>

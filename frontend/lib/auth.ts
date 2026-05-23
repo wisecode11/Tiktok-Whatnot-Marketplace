@@ -1213,10 +1213,14 @@ export function getDashboardPath(role: AppRole) {
   return "/seller"
 }
 
-/** Post-sign-up destination (mirrors backend getSignupRedirect). Prefer routing via /auth-complete. */
+/** Post-sign-up destination (mirrors backend getSignupRedirectForUser). Prefer routing via /auth-complete. */
 export function getSignupRedirectPath(role: AppRole) {
   if (role === "staff") {
     return getDashboardPath(role)
+  }
+
+  if (role === "streamer") {
+    return "/seller/setup-organization"
   }
 
   return `/launch-pad?role=${role}`

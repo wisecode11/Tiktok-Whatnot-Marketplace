@@ -69,12 +69,28 @@ function getLaunchPadPath(role) {
   return `/launch-pad?role=${role}`;
 }
 
-function getSignupRedirect(role) {
+async function getSignupRedirectForUser(user) {
+  const role = FRONTEND_ROLE_MAP[user.user_type];
+
   if (role === "staff") {
     return getDashboardPath(role);
   }
 
   if (role === "streamer") {
+    const organizations = await listSellerWorkspacesForUser(user._id);
+
+    if (organizations.length === 0) {
+      return "/seller/setup-organization";
+    }
+
+    const hasActiveWorkspace =
+      user.active_workspace_id &&
+      organizations.some((workspace) => String(workspace._id) === String(user.active_workspace_id));
+
+    if (!hasActiveWorkspace) {
+      return "/seller/select-organization";
+    }
+
     return getLaunchPadPath("streamer");
   }
 
@@ -951,7 +967,7 @@ async function upsertUserFromClerk({ clerkUserId, role }) {
 
   return {
     user: serializeUser(user),
-    redirectTo: getSignupRedirect(normalizedRole),
+    redirectTo: await getSignupRedirectForUser(user),
   };
 }
 

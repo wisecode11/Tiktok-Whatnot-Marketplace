@@ -64,7 +64,10 @@ export default function SellerSetupOrganizationPage() {
         }
 
         if (result.hasOrganizations) {
-          router.replace("/seller/select-organization")
+          const hasActiveOrganization = result.organizations.some((org) => org.isActive)
+          router.replace(
+            hasActiveOrganization ? "/launch-pad?role=streamer" : "/seller/select-organization",
+          )
           return
         }
 
