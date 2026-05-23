@@ -68,8 +68,16 @@ export function RoleGate({ allowedRoles, unauthenticatedPath, children }: RoleGa
           redirectTo !== user.dashboardPath
 
         const isLaunchPadRoute = typeof pathname === "string" && pathname.startsWith("/launch-pad")
+        const isSellerPortalRoute =
+          typeof pathname === "string" && (pathname === "/seller" || pathname.startsWith("/seller/"))
 
-        if (shouldForceSellerOrganizationStep && !isLaunchPadRoute && pathname !== redirectTo) {
+        // Do not kick sellers out of the dashboard when they switch organizations in-app.
+        if (
+          shouldForceSellerOrganizationStep &&
+          !isLaunchPadRoute &&
+          !isSellerPortalRoute &&
+          pathname !== redirectTo
+        ) {
           router.replace(redirectTo)
           return
         }

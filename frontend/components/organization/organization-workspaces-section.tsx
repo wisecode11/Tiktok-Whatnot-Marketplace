@@ -19,10 +19,10 @@ import {
   createSellerOrganization,
   getClerkErrorMessage,
   getSellerOrganizations,
-  syncSellerActiveOrganization,
   type SellerOrganization,
   waitForSessionToken,
 } from "@/lib/auth"
+import { switchSellerOrganization } from "@/lib/seller-organization"
 import { cn } from "@/lib/utils"
 
 export function OrganizationWorkspacesSection() {
@@ -71,9 +71,11 @@ export function OrganizationWorkspacesSection() {
     try {
       setIsSwitchingId(workspace.id)
       setErrorMessage("")
-      await setActive({ organization: workspace.clerkOrganizationId })
-      const token = await waitForSessionToken(getToken)
-      await syncSellerActiveOrganization(token, workspace.clerkOrganizationId)
+      await switchSellerOrganization({
+        clerkOrganizationId: workspace.clerkOrganizationId,
+        getToken,
+        setActive,
+      })
       await loadOrganizations()
     } catch (error) {
       setErrorMessage(getClerkErrorMessage(error))
@@ -102,8 +104,11 @@ export function OrganizationWorkspacesSection() {
       const result = await createSellerOrganization(token, { name: trimmedName })
 
       if (result.organization.clerkOrganizationId) {
-        await setActive({ organization: result.organization.clerkOrganizationId })
-        await syncSellerActiveOrganization(token, result.organization.clerkOrganizationId)
+        await switchSellerOrganization({
+          clerkOrganizationId: result.organization.clerkOrganizationId,
+          getToken,
+          setActive,
+        })
       }
 
       setNewOrgName("")

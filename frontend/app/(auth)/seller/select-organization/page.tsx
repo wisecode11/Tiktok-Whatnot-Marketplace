@@ -59,7 +59,10 @@ export default function SellerSelectOrganizationPage() {
     try {
       setIsSelecting(true)
       setErrorMessage("")
-      await setActive({ organization: organizationId })
+      await setActive({
+        organization: organizationId,
+        redirectUrl: "/seller/select-organization",
+      })
     } catch (error) {
       setErrorMessage(getClerkErrorMessage(error))
     } finally {

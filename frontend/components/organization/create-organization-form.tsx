@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createSellerOrganization, getClerkErrorMessage, waitForSessionToken } from "@/lib/auth"
+import { switchSellerOrganization } from "@/lib/seller-organization"
 
 type CreateOrganizationFormProps = {
   defaultName?: string
@@ -47,7 +48,11 @@ export function CreateOrganizationForm({
       const result = await createSellerOrganization(token, { name: trimmedName })
 
       if (result.organization.clerkOrganizationId && setActive) {
-        await setActive({ organization: result.organization.clerkOrganizationId })
+        await switchSellerOrganization({
+          clerkOrganizationId: result.organization.clerkOrganizationId,
+          getToken,
+          setActive,
+        })
       }
 
       onCreated?.()
