@@ -438,8 +438,8 @@ export function SellerSubscriptionManager() {
       toast({
         title: selectedPlan.isFree ? "Plan changed" : "Subscription updated",
         description: selectedPlan.isFree
-          ? `Your workspace has been moved to ${selectedPlan.name}.`
-          : `${selectedPlan.name} is now the active billing plan for this workspace.`,
+          ? `Your account has been moved to ${selectedPlan.name}.`
+          : `${selectedPlan.name} is now active for your seller account and all organizations.`,
       })
     } catch (error) {
       toast({
@@ -523,7 +523,7 @@ export function SellerSubscriptionManager() {
       <div className="space-y-6">
         <PageHeader
           title="Subscription"
-          description="Manage live Stripe-backed subscriptions, saved cards, and invoice history for your seller workspace."
+          description="Manage your seller subscription, saved cards, and invoices. One subscription covers every organization on your account."
         />
         <Card className="border-destructive/30 bg-destructive/5">
           <CardHeader>
@@ -542,7 +542,7 @@ export function SellerSubscriptionManager() {
     <div className="space-y-6">
       <PageHeader
         title="Subscription"
-        description="Manage live Stripe-backed subscriptions, saved cards, and invoice history for your seller workspace."
+        description="Manage your seller subscription, saved cards, and invoices. One subscription covers every organization on your account."
       >
         <Button variant="outline" onClick={() => void loadOverview(false)} disabled={isRefreshing}>
           {isRefreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}

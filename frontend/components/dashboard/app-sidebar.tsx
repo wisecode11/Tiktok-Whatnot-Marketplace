@@ -223,7 +223,7 @@ export function AppSidebar({
           <DialogHeader>
             <DialogTitle>Subscription required</DialogTitle>
             <DialogDescription>
-              Please get a subscription to access this feature.
+              Get a seller subscription once — it applies to every organization on your account.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -53,7 +53,7 @@ export function SellerSubscriptionGate({
           </div>
           <CardTitle>Subscription required</CardTitle>
           <CardDescription>
-            Please get a subscription to access this feature.
+            Get a seller subscription once — it applies to every organization on your account.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">

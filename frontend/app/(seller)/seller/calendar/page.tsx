@@ -1,6 +1,6 @@
 "use client"
 
-import { useAuth } from "@clerk/nextjs"
+import { useAuth, useOrganization } from "@clerk/nextjs"
 import { EllipsisVertical, Loader2, RefreshCw, CalendarDays, CalendarRange, ListFilter } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
@@ -147,7 +147,7 @@ function normalizeEvents(shows: WhatnotLiveShowItem[]): CalendarEvent[] {
   }
 
   return events
-    .filter((event) => event.status === "upcoming")
+    .filter((event) => event.status === "upcoming" || event.status === "live")
     .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
 }
 
@@ -198,6 +198,7 @@ function getPlatformBadgeClassName(platform: SupportedPlatform) {
 
 export default function SellerCalendarPage() {
   const { getToken, isLoaded } = useAuth()
+  const { organization } = useOrganization()
 
   const [view, setView] = useState<CalendarView>("calendar")
   const [scale, setScale] = useState<CalendarScale>("month")
@@ -248,7 +249,7 @@ export default function SellerCalendarPage() {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [getToken, isLoaded])
+  }, [getToken, isLoaded, organization?.id])
 
   useEffect(() => {
     void loadCalendarData(false)
@@ -356,12 +357,17 @@ export default function SellerCalendarPage() {
   }, [filteredEvents])
 
   const activeConnections = connectedAccounts.filter((account) => account.connected)
+  const isWhatnotConnected = activeConnections.some((account) => account.platform === "whatnot" && account.connected)
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Calendar"
-        description="View upcoming Whatnot shows and assign a staff host from calendar or list view."
+        description={
+          organization?.name
+            ? `Schedule shows for ${organization.name} and assign hosts from your active organization staff.`
+            : "View upcoming Whatnot shows and assign a staff host from calendar or list view."
+        }
       />
 
       <Card>
@@ -445,7 +451,7 @@ export default function SellerCalendarPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="secondary">Upcoming shows only</Badge>
+            <Badge variant="secondary">Upcoming & live shows</Badge>
             <Badge variant="outline">Connected platforms: {activeConnections.length}</Badge>
             {activeConnections.map((account) => (
               <Badge
@@ -473,9 +479,15 @@ export default function SellerCalendarPage() {
             </div>
           ) : null}
 
-          {!isLoading && !errorMessage && filteredEvents.length === 0 ? (
+          {!isLoading && !errorMessage && !isWhatnotConnected ? (
             <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No upcoming shows found with the current filters.
+              Connect Whatnot from Launch Pad to load live and upcoming shows on this calendar.
+            </div>
+          ) : null}
+
+          {!isLoading && !errorMessage && isWhatnotConnected && filteredEvents.length === 0 ? (
+            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+              No upcoming or live shows found with the current filters.
             </div>
           ) : null}
 

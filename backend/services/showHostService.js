@@ -3,6 +3,7 @@ const SellerWorkspace = require("../models/SellerWorkspace");
 const WorkspaceMembership = require("../models/WorkspaceMembership");
 const WhatnotShowHostAssignment = require("../models/WhatnotShowHostAssignment");
 const WhatnotShowSnapshot = require("../models/WhatnotShowSnapshot");
+const { resolveActiveSellerWorkspaceForSeller } = require("./authService");
 
 const DEFAULT_SHOW_DURATION_MS = 60 * 60 * 1000;
 const ASSIGNED_SHOWS_MODULE = "assigned_shows";
@@ -43,25 +44,7 @@ async function findAuthenticatedStaff(clerkUserId) {
 }
 
 async function ensureSellerWorkspace(seller) {
-  const existingWorkspace = await SellerWorkspace.findOne({ owner_user_id: seller._id });
-
-  if (existingWorkspace) {
-    return existingWorkspace;
-  }
-
-  const now = new Date();
-  const workspace = new SellerWorkspace({
-    owner_user_id: seller._id,
-    business_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    billing_email: seller.email,
-    billing_name: [seller.first_name, seller.last_name].filter(Boolean).join(" ") || seller.email,
-    status: "trial",
-    created_at: now,
-    updated_at: now,
-  });
-
-  await workspace.save();
-  return workspace;
+  return resolveActiveSellerWorkspaceForSeller(seller);
 }
 
 function buildHostDisplayName(user, membership) {
@@ -203,10 +186,12 @@ async function ensureStaffBelongsToWorkspace({ workspaceId, hostStaffUserId }) {
 
   const modules = getMembershipModules(membership);
   if (!modules.includes(ASSIGNED_SHOWS_MODULE)) {
-    throw createHttpError(
-      400,
-      "Selected staff member does not have Host Shows access. Enable it in Manage Staff → Allow Access first.",
-    );
+    membership.permissions_json = {
+      ...(membership.permissions_json || {}),
+      modules: [...modules, ASSIGNED_SHOWS_MODULE],
+    };
+    membership.updated_at = new Date();
+    await membership.save();
   }
 
   return { membership, hostUser };
@@ -297,11 +282,30 @@ async function listShowHostAssignments({ clerkUserId }) {
 async function listMyShowAssignments({ clerkUserId }) {
   const staffUser = await findAuthenticatedStaff(clerkUserId);
 
-  const membership = await WorkspaceMembership.findOne({
-    user_id: staffUser._id,
-    role: "staff",
-    status: { $in: ["active", "invited"] },
-  });
+  let membership = null;
+
+  if (staffUser.parent_seller_user_id) {
+    const seller = await User.findOne({ _id: staffUser.parent_seller_user_id, user_type: "seller" });
+    if (seller) {
+      const workspace = await resolveActiveSellerWorkspaceForSeller(seller).catch(() => null);
+      if (workspace) {
+        membership = await WorkspaceMembership.findOne({
+          workspace_id: workspace._id,
+          user_id: staffUser._id,
+          role: "staff",
+          status: { $in: ["active", "invited"] },
+        });
+      }
+    }
+  }
+
+  if (!membership) {
+    membership = await WorkspaceMembership.findOne({
+      user_id: staffUser._id,
+      role: "staff",
+      status: { $in: ["active", "invited"] },
+    });
+  }
 
   if (!membership) {
     throw createHttpError(404, "Staff membership not found.");

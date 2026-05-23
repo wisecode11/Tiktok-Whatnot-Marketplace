@@ -334,17 +334,55 @@ async function findSellerUser(clerkUserId) {
   return user;
 }
 
-async function ensureWorkspaceForSeller(user) {
+const SELLER_SUBSCRIPTION_ACTIVE_STATUSES = ["active", "trialing", "past_due", "incomplete"];
+
+function resolveSellerOwnerUserId(user) {
   const ownerUserId = user.user_type === "staff" ? user.parent_seller_user_id : user._id;
 
   if (!ownerUserId) {
     throw createHttpError(400, "This staff account is not attached to a seller workspace.");
   }
 
-  const existing = await SellerWorkspace.findOne({ owner_user_id: ownerUserId });
+  return ownerUserId;
+}
 
-  if (existing) {
-    return existing;
+async function listWorkspacesForSellerOwner(ownerUserId) {
+  return SellerWorkspace.find({ owner_user_id: ownerUserId }).sort({ created_at: 1, _id: 1 });
+}
+
+async function listWorkspaceIdsForSellerOwner(ownerUserId) {
+  const workspaces = await listWorkspacesForSellerOwner(ownerUserId);
+  return workspaces.map((workspace) => workspace._id);
+}
+
+/** Billing is per seller account — one Stripe customer + subscription covers every organization. */
+async function resolveBillingWorkspaceForSeller(user) {
+  const ownerUserId = resolveSellerOwnerUserId(user);
+  const workspaces = await listWorkspacesForSellerOwner(ownerUserId);
+
+  if (workspaces.length > 0) {
+    const workspaceIds = workspaces.map((workspace) => workspace._id);
+    const subscribedWorkspaceIds = await WorkspaceSubscription.find({
+      workspace_id: { $in: workspaceIds },
+      stripe_subscription_id: { $nin: [null, ""] },
+      status: { $in: SELLER_SUBSCRIPTION_ACTIVE_STATUSES },
+    })
+      .sort({ updated_at: -1, created_at: -1 })
+      .distinct("workspace_id");
+
+    if (subscribedWorkspaceIds.length > 0) {
+      const billingWorkspace = workspaces.find((workspace) => workspace._id === subscribedWorkspaceIds[0]);
+      if (billingWorkspace) {
+        return billingWorkspace;
+      }
+    }
+
+    const workspaceWithCustomer = workspaces.find((workspace) => workspace.stripe_customer_id);
+    if (workspaceWithCustomer) {
+      return workspaceWithCustomer;
+    }
+
+    return workspaces[0];
   }
 
   if (user.user_type === "staff") {
@@ -364,6 +402,10 @@ async function ensureWorkspaceForSeller(user) {
 
   await workspace.save();
   return workspace;
+}
+
+async function ensureWorkspaceForSeller(user) {
+  return resolveBillingWorkspaceForSeller(user);
 }
 
 async function ensureStripeCustomer({ workspace, user }) {
@@ -555,22 +597,46 @@ async function syncInvoiceFromStripe(invoice, workspaceSubscriptionId) {
   return localInvoice;
 }
 
+function mapSubscriptionStatusToWorkspaceStatus(subscriptionStatus) {
+  if (subscriptionStatus === "active" || subscriptionStatus === "trialing") {
+    return "active";
+  }
+
+  if (subscriptionStatus === "cancelled" || subscriptionStatus === "incomplete_expired") {
+    return "cancelled";
+  }
+
+  if (!subscriptionStatus || subscriptionStatus === "free") {
+    return "trial";
+  }
+
+  return null;
+}
+
 async function syncWorkspaceStatus(workspaceId, subscriptionStatus) {
   const workspace = await SellerWorkspace.findById(workspaceId);
   if (!workspace) {
     return;
   }
 
-  if (subscriptionStatus === "active" || subscriptionStatus === "trialing") {
-    workspace.status = "active";
-  } else if (subscriptionStatus === "cancelled" || subscriptionStatus === "incomplete_expired") {
-    workspace.status = "cancelled";
-  } else if (!subscriptionStatus || subscriptionStatus === "free") {
-    workspace.status = "trial";
+  const nextStatus = mapSubscriptionStatusToWorkspaceStatus(subscriptionStatus);
+  if (!nextStatus) {
+    return;
   }
 
-  workspace.updated_at = new Date();
-  await workspace.save();
+  const ownerUserId = workspace.owner_user_id;
+  const workspaces = ownerUserId
+    ? await SellerWorkspace.find({ owner_user_id: ownerUserId })
+    : [workspace];
+  const now = new Date();
+
+  await Promise.all(
+    workspaces.map(async (sellerWorkspace) => {
+      sellerWorkspace.status = nextStatus;
+      sellerWorkspace.updated_at = now;
+      await sellerWorkspace.save();
+    }),
+  );
 }
 
 async function syncWorkspaceSubscriptionFromStripe(subscription, explicitPlanId) {
@@ -688,11 +754,7 @@ function serializePlan(plan) {
   };
 }
 
-async function loadCurrentWorkspaceSubscription(workspace) {
-  const current = await WorkspaceSubscription.findOne({ workspace_id: workspace._id })
-    .sort({ updated_at: -1, created_at: -1 })
-    .populate("plan_id");
-
+async function refreshWorkspaceSubscriptionFromStripe(current) {
   if (!current) {
     return null;
   }
@@ -711,6 +773,49 @@ async function loadCurrentWorkspaceSubscription(workspace) {
   }
 
   return current;
+}
+
+/** Seller-level subscription: any active plan on one org applies to all organizations. */
+async function loadCurrentSellerSubscription(ownerUserId) {
+  const workspaceIds = await listWorkspaceIdsForSellerOwner(ownerUserId);
+
+  if (workspaceIds.length === 0) {
+    return null;
+  }
+
+  let current = await WorkspaceSubscription.findOne({
+    workspace_id: { $in: workspaceIds },
+    status: { $in: SELLER_SUBSCRIPTION_ACTIVE_STATUSES },
+    stripe_subscription_id: { $nin: [null, ""] },
+  })
+    .sort({ updated_at: -1, created_at: -1 })
+    .populate("plan_id");
+
+  if (!current) {
+    current = await WorkspaceSubscription.findOne({
+      workspace_id: { $in: workspaceIds },
+    })
+      .sort({ updated_at: -1, created_at: -1 })
+      .populate("plan_id");
+  }
+
+  return refreshWorkspaceSubscriptionFromStripe(current);
+}
+
+async function loadCurrentWorkspaceSubscription(workspace) {
+  if (!workspace) {
+    return null;
+  }
+
+  if (!workspace.owner_user_id) {
+    const current = await WorkspaceSubscription.findOne({ workspace_id: workspace._id })
+      .sort({ updated_at: -1, created_at: -1 })
+      .populate("plan_id");
+
+    return refreshWorkspaceSubscriptionFromStripe(current);
+  }
+
+  return loadCurrentSellerSubscription(workspace.owner_user_id);
 }
 
 function serializeSubscription(subscription, fallbackPlan) {
@@ -749,9 +854,10 @@ function serializeInvoice(invoice) {
 
 async function getSellerBillingOverview({ clerkUserId }) {
   const user = await findSellerUser(clerkUserId);
-  const workspace = await ensureWorkspaceForSeller(user);
+  const ownerUserId = resolveSellerOwnerUserId(user);
+  const workspace = await resolveBillingWorkspaceForSeller(user);
   const plans = await syncPlansFromStripe();
-  const currentSubscription = await loadCurrentWorkspaceSubscription(workspace);
+  const currentSubscription = await loadCurrentSellerSubscription(ownerUserId);
   const defaultPaymentMethodId = await getCustomerDefaultPaymentMethodId(workspace).catch(() => workspace.stripe_default_payment_method_id || null);
   const paymentMethods = await listPaymentMethodsForWorkspace(workspace).catch(() => []);
   const subscriptionId = currentSubscription ? currentSubscription._id : null;
@@ -764,10 +870,11 @@ async function getSellerBillingOverview({ clerkUserId }) {
   return {
     workspace: {
       id: workspace._id,
-      businessName: workspace.business_name || "Seller workspace",
+      businessName: workspace.business_name || "Seller account",
       billingEmail: workspace.billing_email || user.email,
       billingName: workspace.billing_name || workspace.business_name || user.email,
       stripeCustomerId: workspace.stripe_customer_id || null,
+      subscriptionScope: "seller",
     },
     plans: plans.map(serializePlan),
     currentSubscription: serializeSubscription(currentSubscription, null),
@@ -850,8 +957,10 @@ async function removePaymentMethodForSeller({ clerkUserId, paymentMethodId }) {
     },
   });
 
+  const ownerUserId = resolveSellerOwnerUserId(user);
+  const workspaceIds = await listWorkspaceIdsForSellerOwner(ownerUserId);
   const currentSubscription = await WorkspaceSubscription.findOne({
-    workspace_id: workspace._id,
+    workspace_id: { $in: workspaceIds },
     stripe_subscription_id: { $nin: [null, ""] },
     status: { $nin: ["cancelled", "inactive"] },
   }).sort({ updated_at: -1, created_at: -1 });
@@ -924,7 +1033,9 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
   }
 
   const user = await findSellerUser(clerkUserId);
-  const workspace = await ensureWorkspaceForSeller(user);
+  const ownerUserId = resolveSellerOwnerUserId(user);
+  const workspace = await resolveBillingWorkspaceForSeller(user);
+  const workspaceIds = await listWorkspaceIdsForSellerOwner(ownerUserId);
   const plan = await SubscriptionPlan.findOne({ _id: planId, is_active: true });
 
   if (!plan) {
@@ -959,7 +1070,7 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
   await workspace.save();
 
   const existing = await WorkspaceSubscription.findOne({
-    workspace_id: workspace._id,
+    workspace_id: { $in: workspaceIds },
     stripe_subscription_id: { $nin: [null, ""] },
     status: { $nin: ["cancelled", "free", "incomplete_expired"] },
   }).sort({ updated_at: -1, created_at: -1 });
@@ -986,9 +1097,10 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
       default_payment_method: effectivePaymentMethodId,
       metadata: {
         workspace_id: workspace._id,
-        owner_user_id: user._id,
+        owner_user_id: ownerUserId,
         plan_id: plan._id,
         role: "seller",
+        subscription_scope: "seller",
       },
       payment_behavior: "pending_if_incomplete",
       proration_behavior: "create_prorations",
@@ -1007,9 +1119,10 @@ async function createOrUpdateSubscriptionForSeller({ clerkUserId, planId, paymen
       payment_behavior: "default_incomplete",
       metadata: {
         workspace_id: workspace._id,
-        owner_user_id: user._id,
+        owner_user_id: ownerUserId,
         plan_id: plan._id,
         role: "seller",
+        subscription_scope: "seller",
       },
       expand: ["latest_invoice.payment_intent", "items.data.price.product"],
     });

@@ -1,6 +1,6 @@
 "use client"
 
-import { useAuth } from "@clerk/nextjs"
+import { useAuth, useOrganization } from "@clerk/nextjs"
 import { Loader2, UserRound } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
@@ -64,6 +64,7 @@ export function AssignShowHostDialog({
   onAssigned,
 }: AssignShowHostDialogProps) {
   const { getToken, isLoaded } = useAuth()
+  const { organization } = useOrganization()
   const { toast } = useToast()
 
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([])
@@ -89,7 +90,9 @@ export function AssignShowHostDialog({
 
         if (!cancelled) {
           setStaffMembers(
-            result.staff.filter((member) => (member.modules || []).includes("assigned_shows")),
+            result.staff.filter(
+              (member) => member.status === "active" && Boolean(member.clerkUserId),
+            ),
           )
         }
       } catch (error) {
@@ -109,7 +112,7 @@ export function AssignShowHostDialog({
     return () => {
       cancelled = true
     }
-  }, [getToken, isLoaded, open])
+  }, [getToken, isLoaded, open, organization?.id])
 
   useEffect(() => {
     if (!open) {
@@ -185,7 +188,8 @@ export function AssignShowHostDialog({
 
         {!isLoadingStaff && !errorMessage && !hasStaff ? (
           <p className="text-sm text-muted-foreground">
-            No staff with Host Shows access found. Add staff in Manage Staff, then enable Host Shows in Allow Access.
+            No active staff found for this organization. Invite members from the Organization tab or add staff in
+            Manage Staff.
           </p>
         ) : null}
 

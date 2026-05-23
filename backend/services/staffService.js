@@ -151,6 +151,8 @@ async function syncWorkspaceOrganizationMembers({ clerkUserId, workspace }) {
     clerkUserId,
     clerkOrganizationId: organizationId,
   });
+
+  await consolidateStaffMembershipsForWorkspace(workspace._id);
 }
 
 function formatStaffDisplayName(user) {
@@ -227,6 +229,136 @@ function serializeStaffMember({ user, membership }) {
   };
 }
 
+function scoreStaffMembershipEntry({ membership, user }) {
+  let score = 0;
+
+  if (user && membership.user_id) {
+    score += 10;
+  }
+
+  if (membership.status === "active") {
+    score += 5;
+  }
+
+  if (membership.joined_at) {
+    score += 1;
+  }
+
+  return score;
+}
+
+async function consolidateStaffMembershipsForWorkspace(workspaceId) {
+  const memberships = await WorkspaceMembership.find({
+    workspace_id: workspaceId,
+    role: "staff",
+    status: { $in: ["active", "invited"] },
+  });
+
+  if (memberships.length <= 1) {
+    return;
+  }
+
+  const userIds = memberships.map((membership) => membership.user_id).filter(Boolean);
+  const users = await User.find({ _id: { $in: userIds } });
+  const userById = new Map(users.map((user) => [String(user._id), user]));
+
+  const groupsByEmail = new Map();
+
+  for (const membership of memberships) {
+    const user = membership.user_id ? userById.get(String(membership.user_id)) : null;
+    const email = (user && user.email ? user.email : membership.permissions_json?.email || "")
+      .trim()
+      .toLowerCase();
+
+    if (!email) {
+      continue;
+    }
+
+    const group = groupsByEmail.get(email) || [];
+    group.push({ membership, user });
+    groupsByEmail.set(email, group);
+  }
+
+  const now = new Date();
+
+  for (const [, group] of groupsByEmail) {
+    if (group.length <= 1) {
+      continue;
+    }
+
+    const sorted = [...group].sort(
+      (a, b) => scoreStaffMembershipEntry(b) - scoreStaffMembershipEntry(a),
+    );
+    const keeper = sorted[0];
+    const revokeIds = sorted.slice(1).map((entry) => entry.membership._id);
+
+    if (keeper.user) {
+      keeper.membership.user_id = keeper.user._id;
+      keeper.membership.status = "active";
+      keeper.membership.role = "staff";
+      keeper.membership.joined_at = keeper.membership.joined_at || now;
+      keeper.membership.permissions_json = {
+        ...(keeper.membership.permissions_json || {}),
+        email: keeper.user.email.toLowerCase(),
+      };
+      keeper.membership.updated_at = now;
+      await keeper.membership.save();
+    }
+
+    if (revokeIds.length > 0) {
+      await WorkspaceMembership.updateMany(
+        { _id: { $in: revokeIds } },
+        { $set: { status: "revoked", updated_at: now } },
+      );
+    }
+  }
+}
+
+function dedupeStaffMembersByEmail(staffMembers) {
+  const byEmail = new Map();
+
+  for (const member of staffMembers) {
+    const email = typeof member.email === "string" ? member.email.trim().toLowerCase() : "";
+
+    if (!email) {
+      continue;
+    }
+
+    const existing = byEmail.get(email);
+
+    if (!existing) {
+      byEmail.set(email, member);
+      continue;
+    }
+
+    const score = (entry) => {
+      let value = 0;
+      if (entry.clerkUserId) {
+        value += 4;
+      }
+      if (entry.status === "active") {
+        value += 2;
+      }
+      return value;
+    };
+
+    if (score(member) >= score(existing)) {
+      byEmail.set(email, member);
+    }
+  }
+
+  const dedupedEmails = new Set(byEmail.keys());
+
+  return staffMembers.filter((member) => {
+    const email = typeof member.email === "string" ? member.email.trim().toLowerCase() : "";
+    if (!email) {
+      return true;
+    }
+
+    return dedupedEmails.has(email) && byEmail.get(email) === member;
+  });
+}
+
 function serializeInvitedStaffMember({ membership }) {
   const permissions = membership && membership.permissions_json ? membership.permissions_json : {};
   const email =
@@ -274,26 +406,28 @@ async function listStaffMembers({ clerkUserId }) {
 
   const ownerUserId = workspace.owner_user_id ? String(workspace.owner_user_id) : null;
 
+  const staff = memberships
+    .map((membership) => {
+      const user = membership.user_id ? userMap.get(membership.user_id) : null;
+
+      if (user) {
+        if (ownerUserId && String(user._id) === ownerUserId) {
+          return null;
+        }
+
+        return serializeStaffMember({ user, membership });
+      }
+
+      if (membership.status === "invited") {
+        return serializeInvitedStaffMember({ membership });
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+
   return {
-    staff: memberships
-      .map((membership) => {
-        const user = membership.user_id ? userMap.get(membership.user_id) : null;
-
-        if (user) {
-          if (ownerUserId && String(user._id) === ownerUserId) {
-            return null;
-          }
-
-          return serializeStaffMember({ user, membership });
-        }
-
-        if (membership.status === "invited") {
-          return serializeInvitedStaffMember({ membership });
-        }
-
-        return null;
-      })
-      .filter(Boolean),
+    staff: dedupeStaffMembersByEmail(staff),
   };
 }
 

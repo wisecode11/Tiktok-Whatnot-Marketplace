@@ -4,6 +4,7 @@ const User = require("../models/Users");
 const ConnectedAccount = require("../models/ConnectedAccount");
 const SellerWorkspace = require("../models/SellerWorkspace");
 const WorkspaceMembership = require("../models/WorkspaceMembership");
+const WorkspaceSubscription = require("../models/WorkspaceSubscription");
 
 const ROLE_MAP = {
   streamer: "seller",
@@ -222,25 +223,72 @@ async function getClerkOrganizationMembershipWorkspaces(clerkUserId) {
   return resolved;
 }
 
+async function revokeDuplicateStaffMemberships({ workspaceId, keepMembershipId, userId, email }) {
+  const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+  const duplicateFilters = [];
+
+  if (userId) {
+    duplicateFilters.push({ user_id: userId });
+  }
+
+  if (normalizedEmail) {
+    duplicateFilters.push({ "permissions_json.email": normalizedEmail });
+  }
+
+  if (duplicateFilters.length === 0) {
+    return;
+  }
+
+  await WorkspaceMembership.updateMany(
+    {
+      workspace_id: workspaceId,
+      role: "staff",
+      _id: { $ne: keepMembershipId },
+      status: { $in: ["invited", "active"] },
+      $or: duplicateFilters,
+    },
+    {
+      $set: {
+        status: "revoked",
+        updated_at: new Date(),
+      },
+    },
+  );
+}
+
 async function ensureWorkspaceMembershipForUser({ user, workspace, clerkRole }) {
   if (!user || !workspace) {
     return null;
   }
 
   const now = new Date();
-  const existingMembership = await WorkspaceMembership.findOne({
+  const normalizedEmail = typeof user.email === "string" ? user.email.trim().toLowerCase() : "";
+
+  let existingMembership = await WorkspaceMembership.findOne({
     workspace_id: workspace._id,
     user_id: user._id,
+    status: { $ne: "revoked" },
   });
 
+  if (!existingMembership && normalizedEmail) {
+    existingMembership = await WorkspaceMembership.findOne({
+      workspace_id: workspace._id,
+      role: "staff",
+      status: { $in: ["invited", "active"] },
+      "permissions_json.email": normalizedEmail,
+    });
+  }
+
   const membershipRole = mapClerkMembershipRoleToWorkspaceRole(clerkRole);
+  const resolvedRole = membershipRole === "admin" ? "admin" : "staff";
 
   if (!existingMembership) {
     const created = new WorkspaceMembership({
       workspace_id: workspace._id,
       user_id: user._id,
-      role: membershipRole,
+      role: resolvedRole,
       permissions_json: {
+        ...(normalizedEmail ? { email: normalizedEmail } : {}),
         source: "clerk-organization",
       },
       status: "active",
@@ -250,18 +298,33 @@ async function ensureWorkspaceMembershipForUser({ user, workspace, clerkRole }) 
     });
 
     await created.save();
+    await revokeDuplicateStaffMemberships({
+      workspaceId: workspace._id,
+      keepMembershipId: created._id,
+      userId: user._id,
+      email: normalizedEmail,
+    });
     return created;
   }
 
-  existingMembership.role = membershipRole;
+  existingMembership.user_id = user._id;
+  existingMembership.role = resolvedRole;
   existingMembership.status = "active";
   existingMembership.joined_at = existingMembership.joined_at || now;
   existingMembership.updated_at = now;
   existingMembership.permissions_json = {
     ...(existingMembership.permissions_json || {}),
+    ...(normalizedEmail ? { email: normalizedEmail } : {}),
     source: "clerk-organization",
   };
   await existingMembership.save();
+
+  await revokeDuplicateStaffMemberships({
+    workspaceId: workspace._id,
+    keepMembershipId: existingMembership._id,
+    userId: user._id,
+    email: normalizedEmail,
+  });
 
   return existingMembership;
 }
@@ -335,6 +398,8 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
   });
 
   if (!workspace) {
+    const initialStatus = await resolveInitialWorkspaceStatusForOwner(user._id);
+
     workspace = new SellerWorkspace({
       owner_user_id: user._id,
       clerk_organization_id: normalizedOrgId,
@@ -342,7 +407,7 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
       business_name: organization.name || "Seller Organization",
       billing_email: user.email,
       billing_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email,
-      status: "trial",
+      status: initialStatus,
       created_at: now,
       updated_at: now,
     });
@@ -469,6 +534,27 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
       invitedUser.parent_seller_user_id = workspace.owner_user_id || invitedUser.parent_seller_user_id || null;
       invitedUser.updated_at = now;
       await invitedUser.save();
+
+      const activeMembership = await WorkspaceMembership.findOne({
+        workspace_id: workspace._id,
+        user_id: invitedUser._id,
+        role: "staff",
+        status: "active",
+      });
+
+      if (activeMembership) {
+        await WorkspaceMembership.updateMany(
+          {
+            workspace_id: workspace._id,
+            role: "staff",
+            status: "invited",
+            _id: { $ne: activeMembership._id },
+            $or: [{ user_id: invitedUser._id }, { "permissions_json.email": invitedEmail }],
+          },
+          { $set: { status: "revoked", updated_at: now } },
+        );
+        continue;
+      }
     }
 
     const invitationId =
@@ -477,6 +563,7 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
     const membershipLookup = {
       workspace_id: workspace._id,
       role: "staff",
+      status: { $ne: "revoked" },
       $or: [
         ...(invitationId ? [{ "permissions_json.invitationId": invitationId }] : []),
         { "permissions_json.email": invitedEmail },
@@ -505,9 +592,14 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
       continue;
     }
 
+    if (pendingMembership.status === "active" && pendingMembership.user_id) {
+      continue;
+    }
+
     pendingMembership.user_id = invitedUser ? invitedUser._id : pendingMembership.user_id;
-    pendingMembership.status = "invited";
+    pendingMembership.status = invitedUser && pendingMembership.user_id ? "active" : "invited";
     pendingMembership.role = "staff";
+    pendingMembership.joined_at = pendingMembership.joined_at || (pendingMembership.status === "active" ? now : null);
     pendingMembership.permissions_json = {
       ...(pendingMembership.permissions_json || {}),
       email: invitedEmail,
@@ -516,6 +608,16 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
     };
     pendingMembership.updated_at = now;
     await pendingMembership.save();
+
+    if (pendingMembership.user_id) {
+      await revokeDuplicateStaffMemberships({
+        workspaceId: workspace._id,
+        keepMembershipId: pendingMembership._id,
+        userId: pendingMembership.user_id,
+        email: invitedEmail,
+      });
+    }
+
     syncedMemberships += 1;
   }
 
@@ -534,6 +636,26 @@ async function syncSellerOrganizationMembers({ clerkUserId, clerkOrganizationId 
 
 async function listSellerWorkspacesForUser(userId) {
   return SellerWorkspace.find({ owner_user_id: userId }).sort({ created_at: 1, _id: 1 });
+}
+
+async function resolveInitialWorkspaceStatusForOwner(ownerUserId) {
+  const workspaces = await listSellerWorkspacesForUser(ownerUserId);
+
+  if (workspaces.some((workspace) => workspace.status === "active")) {
+    return "active";
+  }
+
+  const workspaceIds = workspaces.map((workspace) => workspace._id);
+  if (workspaceIds.length === 0) {
+    return "trial";
+  }
+
+  const activeSubscription = await WorkspaceSubscription.findOne({
+    workspace_id: { $in: workspaceIds },
+    status: { $in: ["active", "trialing", "past_due", "incomplete"] },
+  }).sort({ updated_at: -1, created_at: -1 });
+
+  return activeSubscription ? "active" : "trial";
 }
 
 async function resolveActiveSellerWorkspaceForSeller(seller) {
@@ -772,6 +894,7 @@ async function createSellerOrganization({ clerkUserId, name, slug }) {
       createdBy: clerkUserId,
     });
 
+    const initialStatus = await resolveInitialWorkspaceStatusForOwner(user._id);
     const workspace = new SellerWorkspace({
       owner_user_id: user._id,
       clerk_organization_id: createdOrganization.id,
@@ -779,7 +902,7 @@ async function createSellerOrganization({ clerkUserId, name, slug }) {
       business_name: normalizedName,
       billing_email: user.email,
       billing_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email,
-      status: "trial",
+      status: initialStatus,
       created_at: now,
       updated_at: now,
     });
@@ -902,6 +1025,8 @@ async function syncSellerActiveOrganization({ clerkUserId, clerkOrganizationId }
   });
 
   if (!workspace) {
+    const initialStatus = await resolveInitialWorkspaceStatusForOwner(user._id);
+
     workspace = new SellerWorkspace({
       owner_user_id: user._id,
       clerk_organization_id: normalizedOrgId,
@@ -909,7 +1034,7 @@ async function syncSellerActiveOrganization({ clerkUserId, clerkOrganizationId }
       business_name: organization.name || "Seller Organization",
       billing_email: user.email,
       billing_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email,
-      status: "trial",
+      status: initialStatus,
       created_at: now,
       updated_at: now,
     });
