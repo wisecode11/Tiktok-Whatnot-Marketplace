@@ -1,15 +1,9 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import {
-  CreateOrganization,
-  OrganizationProfile,
-  OrganizationSwitcher,
-  useAuth,
-  useOrganization,
-} from "@clerk/nextjs"
-import { Loader2 } from "lucide-react"
+import { useAuth, useOrganization } from "@clerk/nextjs"
 
+import { SellerOrganizationPanel } from "@/components/organization/seller-organization-panel"
 import {
   getClerkErrorMessage,
   syncSellerActiveOrganization,
@@ -89,83 +83,6 @@ export default function SellerOrganizationPage() {
   }, [getToken, organization?.id])
 
   return (
-    <div className="seller-org-fullscreen w-full space-y-4">
-      {/* <div>
-        <h1 className="text-2xl font-semibold text-foreground">Organization</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Create your organization, manage members, and assign roles using Clerk organization settings.
-        </p>
-      </div> */}
-
-      {/* <div className="w-full">
-        <OrganizationSwitcher
-          hidePersonal
-          afterSelectOrganizationUrl="/seller/organization"
-          afterCreateOrganizationUrl="/seller/organization"
-        />
-      </div> */}
-
-      {!organization ? (
-        <div className="w-full">
-          <CreateOrganization
-            routing="path"
-            path="/seller/organization"
-            afterCreateOrganizationUrl="/seller/organization"
-            appearance={{
-              elements: {
-                rootBox: "w-full",
-                cardBox: "w-full",
-                card: "w-full max-w-none shadow-none border-0 rounded-none bg-transparent",
-              },
-            }}
-          />
-        </div>
-      ) : (
-        <div className="w-full">
-          <OrganizationProfile
-            routing="hash"
-            appearance={{
-              elements: {
-                rootBox: "w-full",
-                cardBox: "w-full",
-                card: "w-full max-w-none shadow-none border-0 rounded-none bg-transparent",
-              },
-            }}
-          />
-        </div>
-      )}
-
-      {isSyncing ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Syncing organization and team members with workspace...
-        </div>
-      ) : null}
-
-      {errorMessage ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      <style jsx global>{`
-        .seller-org-fullscreen .cl-rootBox,
-        .seller-org-fullscreen .cl-cardBox,
-        .seller-org-fullscreen .cl-card,
-        .seller-org-fullscreen .cl-organizationProfile-root,
-        .seller-org-fullscreen .cl-createOrganization-root {
-          width: 100% !important;
-          max-width: none !important;
-        }
-
-        .seller-org-fullscreen .cl-card {
-          border: 0 !important;
-          border-radius: 0 !important;
-          box-shadow: none !important;
-          background: transparent !important;
-          min-height: calc(100vh - 220px);
-        }
-      `}</style>
-    </div>
+    <SellerOrganizationPanel isSyncing={isSyncing} errorMessage={errorMessage} />
   )
 }

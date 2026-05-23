@@ -1,0 +1,19 @@
+/* Create organization — minimal card */
+.seller-org-shell .cl-rootBox,
+.seller-org-shell .cl-cardBox,
+.seller-org-shell .cl-card,
+.seller-org-shell .cl-createOrganization-root {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.seller-org-shell .cl-card {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.seller-org-shell .cl-headerTitle,
+.seller-org-shell .cl-headerSubtitle {
+  display: none !important;
+}
