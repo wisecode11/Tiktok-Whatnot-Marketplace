@@ -17,15 +17,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getClerkErrorMessage } from "@/lib/auth"
 
-function buildSlug(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64)
-}
-
 export function OrganizationGeneralSettings() {
   const { organization } = useOrganization()
 
@@ -34,14 +25,12 @@ export function OrganizationGeneralSettings() {
   const [errorMessage, setErrorMessage] = useState("")
 
   const [name, setName] = useState("")
-  const [slug, setSlug] = useState("")
 
   useEffect(() => {
     if (!organization) {
       return
     }
     setName(organization.name)
-    setSlug(organization.slug || "")
   }, [organization])
 
   if (!organization) {
@@ -60,7 +49,6 @@ export function OrganizationGeneralSettings() {
       setErrorMessage("")
       await organization.update({
         name: trimmedName,
-        slug: slug.trim() ? buildSlug(slug) : undefined,
       })
       setIsEditOpen(false)
     } catch (error) {
@@ -104,9 +92,7 @@ export function OrganizationGeneralSettings() {
           )}
           <div>
             <p className="font-medium text-foreground">{organization.name}</p>
-            <p className="text-sm text-muted-foreground">
-              {organization.slug ? `@${organization.slug}` : "No slug set"}
-            </p>
+            <p className="text-sm text-muted-foreground">Active workspace</p>
           </div>
         </div>
         <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setIsEditOpen(true)}>
@@ -121,7 +107,7 @@ export function OrganizationGeneralSettings() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit organization</DialogTitle>
-            <DialogDescription>Update your workspace name, slug, or logo.</DialogDescription>
+            <DialogDescription>Update your workspace name or logo.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -131,15 +117,6 @@ export function OrganizationGeneralSettings() {
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Organization name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="org-edit-slug">Slug</Label>
-              <Input
-                id="org-edit-slug"
-                value={slug}
-                onChange={(event) => setSlug(buildSlug(event.target.value))}
-                placeholder="my-organization"
               />
             </div>
             <div className="space-y-2">

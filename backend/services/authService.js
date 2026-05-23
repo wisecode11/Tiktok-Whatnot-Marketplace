@@ -625,7 +625,7 @@ async function createSellerOrganization({ clerkUserId, name, slug }) {
   assertSellerRole(user);
 
   const normalizedName = normalizeOrganizationName(name);
-  const normalizedSlug = normalizeOrganizationSlug(slug);
+  const normalizedSlug = normalizeOrganizationSlug(slug) || null;
 
   if (!normalizedName) {
     throw createHttpError(400, "Organization name is required.");
@@ -645,7 +645,7 @@ async function createSellerOrganization({ clerkUserId, name, slug }) {
     const workspace = new SellerWorkspace({
       owner_user_id: user._id,
       clerk_organization_id: createdOrganization.id,
-      slug: normalizedSlug || null,
+      slug: normalizedSlug || createdOrganization.slug || null,
       business_name: normalizedName,
       billing_email: user.email,
       billing_name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email,

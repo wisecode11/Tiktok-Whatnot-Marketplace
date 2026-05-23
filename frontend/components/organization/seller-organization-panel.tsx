@@ -1,16 +1,16 @@
 "use client"
 
-import { CreateOrganization, useOrganization } from "@clerk/nextjs"
+import { useOrganization } from "@clerk/nextjs"
 import { Building2, Loader2 } from "lucide-react"
 import { useState } from "react"
 
+import { CreateOrganizationForm } from "@/components/organization/create-organization-form"
 import { OrganizationGeneralSettings } from "@/components/organization/organization-general-settings"
 import { OrganizationMembersPanel } from "@/components/organization/organization-members-panel"
+import { OrganizationWorkspacesSection } from "@/components/organization/organization-workspaces-section"
 import { PageHeader } from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { sellerClerkCreateOrganizationAppearance } from "@/lib/clerk-organization-appearance"
-
 import "./seller-organization-styles.css"
 
 type SellerOrganizationPanelProps = {
@@ -53,17 +53,13 @@ export function SellerOrganizationPanel({ isSyncing, errorMessage }: SellerOrgan
               Set up your agency workspace before inviting staff or connecting platforms.
             </CardDescription>
           </CardHeader>
-          <CardContent className="seller-org-shell pt-0">
-            <CreateOrganization
-              routing="path"
-              path="/seller/organization"
-              afterCreateOrganizationUrl="/seller/organization"
-              appearance={sellerClerkCreateOrganizationAppearance}
-            />
+          <CardContent className="pt-0">
+            <CreateOrganizationForm />
           </CardContent>
         </Card>
       ) : (
         <Card className="border-border/60 shadow-sm">
+          <OrganizationWorkspacesSection />
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="border-b border-border/60 px-5 pt-4 md:px-6">
               <TabsList className="h-auto w-full justify-start gap-1 rounded-none bg-transparent p-0">
