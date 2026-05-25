@@ -16,7 +16,7 @@ import {
   Receipt,
   RefreshCcw,
   ShieldCheck,
-  Zap,
+  Star,
 } from "lucide-react"
 import Link from "next/link"
 import { startTransition, useEffect, useMemo, useState } from "react"
@@ -43,8 +43,10 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { StatusBadge } from "@/components/ui/status-badge"
+import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 import { waitForSessionToken } from "@/lib/auth"
+import { cn } from "@/lib/utils"
 import {
   changeSellerSubscription,
   createSellerSetupIntent,
@@ -110,6 +112,18 @@ function getSubscriptionVariant(status: string | null | undefined) {
 
 function formatCardLabel(paymentMethod: BillingPaymentMethod) {
   return `${toTitleCase(paymentMethod.brand)} ending in ${paymentMethod.last4 || "----"}`
+}
+
+function billingIntervalDisplay(interval: string) {
+  if (interval === "year") return "year"
+  if (interval === "month") return "month"
+  return interval
+}
+
+function isFeaturedBillingPlan(plan: BillingPlan, plans: BillingPlan[]) {
+  if (plans.length < 2) return false
+  const middleIndex = Math.floor(plans.length / 2)
+  return plans[middleIndex]?.id === plan.id
 }
 
 function NewPaymentMethodFields({
@@ -251,8 +265,22 @@ export function SellerSubscriptionManager() {
   const [isPreparingSetupIntent, setIsPreparingSetupIntent] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deletingPaymentMethodId, setDeletingPaymentMethodId] = useState<string | null>(null)
+  const [billingPeriodView, setBillingPeriodView] = useState<"month" | "year">("month")
+  const [billingPeriodInitialized, setBillingPeriodInitialized] = useState(false)
 
   const sortedPlans = useMemo(() => overview?.plans || [], [overview?.plans])
+  const { hasBothBillingIntervals, visiblePlans } = useMemo(() => {
+    const monthlyPlans = sortedPlans.filter((plan) => plan.billingInterval === "month")
+    const yearlyPlans = sortedPlans.filter((plan) => plan.billingInterval === "year")
+    const hasBothBillingIntervals = monthlyPlans.length > 0 && yearlyPlans.length > 0
+    const visiblePlans = hasBothBillingIntervals
+      ? billingPeriodView === "year"
+        ? yearlyPlans
+        : monthlyPlans
+      : sortedPlans
+
+    return { hasBothBillingIntervals, visiblePlans }
+  }, [billingPeriodView, sortedPlans])
   const primaryPlan = sortedPlans[0] || null
   const currentPlanId = overview?.currentSubscription?.plan?.id || null
   const hasActiveSubscription = Boolean(
@@ -328,6 +356,18 @@ export function SellerSubscriptionManager() {
   useEffect(() => {
     void loadOverview()
   }, [isLoaded])
+
+  useEffect(() => {
+    if (billingPeriodInitialized) {
+      return
+    }
+
+    const interval = overview?.currentSubscription?.plan?.billingInterval
+    if (interval === "year" || interval === "month") {
+      setBillingPeriodView(interval)
+      setBillingPeriodInitialized(true)
+    }
+  }, [billingPeriodInitialized, overview?.currentSubscription?.plan?.billingInterval])
 
   useEffect(() => {
     if (!dialogOpen || !useNewPaymentMethod) {
@@ -484,11 +524,11 @@ export function SellerSubscriptionManager() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-6xl space-y-8 pb-8">
         <PageHeader title="Subscription" description="Manage your subscription and billing" />
-        <div className="flex min-h-[40vh] items-center justify-center">
+        <div className="flex min-h-[50vh] items-center justify-center rounded-3xl bg-muted/30">
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
+            <Loader2 className="size-5 animate-spin text-primary" />
             Loading subscription details...
           </div>
         </div>
@@ -538,146 +578,269 @@ export function SellerSubscriptionManager() {
     )
   }
 
+  const isYearlyView = billingPeriodView === "year"
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full  space-y-10 pb-8">
       <PageHeader
         title="Subscription"
-        description="Manage your seller subscription, saved cards, and invoices. One subscription covers every organization on your account."
+        description="One subscription covers every organization on your account. Manage plans, payment methods, and invoices."
+        className="border-b border-border/60 pb-6"
       >
-        <Button variant="outline" onClick={() => void loadOverview(false)} disabled={isRefreshing}>
+        <Button variant="outline" className="rounded-full" onClick={() => void loadOverview(false)} disabled={isRefreshing}>
           {isRefreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
           Refresh
         </Button>
       </PageHeader>
 
       {errorMessage ? (
-        <Card className="border-amber-500/30 bg-amber-500/5">
-          <CardContent className="flex items-start justify-between gap-4 py-4">
-            <div>
-              <p className="font-medium">Billing sync needs attention</p>
-              <p className="text-sm text-muted-foreground">{errorMessage}</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => void loadOverview(false)}>
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-medium">Billing sync needs attention</p>
+            <p className="text-sm text-muted-foreground">{errorMessage}</p>
+          </div>
+          <Button variant="outline" size="sm" className="rounded-full shrink-0" onClick={() => void loadOverview(false)}>
+            Retry
+          </Button>
+        </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        <Card className="border-primary/20 bg-gradient-to-br from-primary/12 via-primary/5 to-transparent">
-          <CardHeader>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-2">
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <Zap className="size-5 text-primary" />
-                  {currentSubscription?.plan?.name || "No active subscription"}
-                </CardTitle>
-                <CardDescription>
-                  Billing for {overview.workspace.businessName}. Renewals and invoices are synchronized from Stripe.
-                </CardDescription>
-              </div>
-              <StatusBadge variant={getSubscriptionVariant(currentSubscription?.status)} dot pulse>
-                {toTitleCase(currentSubscription?.status || "free")}
-              </StatusBadge>
+      {hasActiveSubscription && currentSubscription?.plan ? (
+        <div className="flex flex-col gap-4 rounded-2xl border border-border/80 bg-card px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Your active plan</p>
+            <p className="truncate text-lg font-semibold">{currentSubscription.plan.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {currentSubscription.currentPeriodEnd
+                ? `Renews ${formatDate(currentSubscription.currentPeriodEnd)}`
+                : "Billing synced with Stripe"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-2xl font-bold tabular-nums">
+              {formatMoney(currentSubscription.plan.price, currentSubscription.plan.currency)}
+              <span className="text-base font-normal text-muted-foreground">
+                /{billingIntervalDisplay(currentSubscription.plan.billingInterval)}
+              </span>
+            </p>
+            <StatusBadge variant={getSubscriptionVariant(currentSubscription.status)} dot pulse>
+              {toTitleCase(currentSubscription.status)}
+            </StatusBadge>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="rounded-3xl bg-muted/40 px-4 py-10 sm:px-8 sm:py-12">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            Choose your <span className="text-primary">plan</span>
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+            Pick the subscription that fits your seller workspace. Changes are billed securely through Stripe.
+          </p>
+
+          {hasBothBillingIntervals ? (
+            <div className="mt-8 flex items-center justify-center gap-3">
+              <span
+                className={cn(
+                  "text-sm font-medium transition-colors",
+                  !isYearlyView ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                Monthly
+              </span>
+              <Switch
+                checked={isYearlyView}
+                onCheckedChange={(checked) => setBillingPeriodView(checked ? "year" : "month")}
+                aria-label="Toggle yearly billing"
+              />
+              <span
+                className={cn(
+                  "text-sm font-medium transition-colors",
+                  isYearlyView ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                Yearly
+              </span>
             </div>
-          </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-4">
-              <div>
-                <div className="text-3xl font-bold">
-                  {currentSubscription?.plan
-                    ? formatMoney(
-                        currentSubscription.plan.price || 0,
-                        currentSubscription.plan.currency || "usd",
-                      )
-                    : "Not subscribed"}
-                  {currentSubscription?.plan ? (
-                    <span className="ml-1 text-lg font-normal text-muted-foreground">
-                      /{currentSubscription.plan.billingInterval || "month"}
-                    </span>
+          ) : null}
+        </div>
+
+        {visiblePlans.length === 0 ? (
+          <p className="mt-12 text-center text-sm text-muted-foreground">
+            No {isYearlyView ? "yearly" : "monthly"} plans are available right now.
+          </p>
+        ) : (
+          <div
+            className={cn(
+              "mt-10 grid gap-6",
+              visiblePlans.length === 1
+                ? "mx-auto max-w-md"
+                : visiblePlans.length === 2
+                  ? "mx-auto max-w-4xl lg:grid-cols-2"
+                  : "lg:grid-cols-3",
+            )}
+          >
+            {visiblePlans.map((plan) => {
+              const isCurrentPlan = currentPlanId === plan.id && hasActiveSubscription
+              const featured = !isCurrentPlan && isFeaturedBillingPlan(plan, visiblePlans)
+              const interval = billingIntervalDisplay(plan.billingInterval)
+
+              return (
+                <div
+                  key={plan.id}
+                  className={cn(
+                    "relative flex flex-col rounded-2xl border bg-card p-8 shadow-sm transition-shadow hover:shadow-md",
+                    isCurrentPlan
+                      ? "border-primary/50 ring-1 ring-primary/25"
+                      : featured
+                        ? "border-primary/40 shadow-md shadow-primary/10"
+                        : "border-border",
+                  )}
+                >
+                  {isCurrentPlan ? (
+                    <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-primary-foreground">
+                      Current plan
+                    </div>
+                  ) : featured ? (
+                    <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
+                      <Star className="size-3 fill-current" />
+                      Most Popular
+                    </div>
                   ) : null}
+
+                  <h3 className="text-xl font-bold text-foreground">{plan.name}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {plan.description || "Full seller workspace access on the marketplace."}
+                  </p>
+
+                  <div className="mt-6 flex items-baseline gap-1">
+                    <span className="text-4xl font-bold tabular-nums text-foreground">
+                      {formatMoney(plan.price, plan.currency)}
+                    </span>
+                    <span className="text-muted-foreground">/{interval}</span>
+                  </div>
+
+                  {isCurrentPlan ? (
+                    <Button className="mt-6 w-full rounded-xl" variant="outline" disabled>
+                      Current subscription
+                    </Button>
+                  ) : (
+                    <Button
+                      className={cn("mt-6 w-full rounded-xl", !featured && "bg-card")}
+                      variant={featured ? "default" : "outline"}
+                      onClick={() => openPlanDialog(plan)}
+                    >
+                      {featured ? "Choose plan" : "Get started"}
+                    </Button>
+                  )}
+
+                  {plan.features.length > 0 ? (
+                    <ul className="mt-8 flex flex-1 flex-col gap-3">
+                      {plan.features.map((feature) => (
+                        <li
+                          key={`${plan.id}-${feature}`}
+                          className="flex items-start gap-3 text-sm text-muted-foreground"
+                        >
+                          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                            <Check className="size-3 text-primary" aria-hidden />
+                          </span>
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-8 text-sm text-muted-foreground">Full platform access included.</p>
+                  )}
                 </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {currentSubscription?.currentPeriodEnd
-                    ? `Next billing date: ${formatDate(currentSubscription.currentPeriodEnd)}`
-                    : "No active Stripe subscription has been created yet."}
-                </p>
-              </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={openPaymentMethodDialog}>
-                  <CreditCard className="size-4" />
-                  Manage payment method
-                </Button>
-                {overview.invoices[0]?.hostedInvoiceUrl ? (
-                  <Button asChild variant="outline">
-                    <Link href={overview.invoices[0].hostedInvoiceUrl} target="_blank">
-                      <Receipt className="size-4" />
-                      Latest invoice
-                    </Link>
-                  </Button>
-                ) : null}
-              </div>
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold">Billing & account</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Workspace billing for {overview.workspace.businessName}
+              </p>
             </div>
+            <StatusBadge variant={getSubscriptionVariant(currentSubscription?.status)}>
+              {toTitleCase(currentSubscription?.status || "free")}
+            </StatusBadge>
+          </div>
 
-            <div className="space-y-4 rounded-2xl border border-border/60 bg-background/80 p-4">
-              <div>
-                <p className="text-sm font-medium">Billing contact</p>
-                <p className="text-sm text-muted-foreground">{overview.workspace.billingName}</p>
-                <p className="text-sm text-muted-foreground">{overview.workspace.billingEmail}</p>
-              </div>
-
-              <div>
-                <p className="text-sm font-medium">Payment status</p>
-                <p className="text-sm text-muted-foreground">
-                  {toTitleCase(currentSubscription?.latestPaymentStatus || "No pending payment")}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm font-medium">Stripe customer</p>
-                <p className="truncate text-sm text-muted-foreground">
-                  {overview.workspace.stripeCustomerId || "Created when the first paid billing action runs."}
-                </p>
-              </div>
+          <dl className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-xl bg-muted/30 px-4 py-3">
+              <dt className="text-xs font-medium text-muted-foreground">Billing contact</dt>
+              <dd className="mt-1 text-sm font-medium">{overview.workspace.billingName}</dd>
+              <dd className="text-sm text-muted-foreground">{overview.workspace.billingEmail}</dd>
             </div>
-          </CardContent>
-        </Card>
+            <div className="rounded-xl bg-muted/30 px-4 py-3">
+              <dt className="text-xs font-medium text-muted-foreground">Payment status</dt>
+              <dd className="mt-1 text-sm font-medium">
+                {toTitleCase(currentSubscription?.latestPaymentStatus || "No pending payment")}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-muted/30 px-4 py-3 sm:col-span-2">
+              <dt className="text-xs font-medium text-muted-foreground">Stripe customer</dt>
+              <dd className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                {overview.workspace.stripeCustomerId || "Created on first paid billing action"}
+              </dd>
+            </div>
+          </dl>
 
-        <Card className="border-border/60 bg-card/60">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <CreditCard className="size-5" />
-              Saved payment methods
-            </CardTitle>
-            <CardDescription>
-              Cards are stored in Stripe and available for subscription renewals and plan changes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button variant="outline" className="rounded-full" onClick={openPaymentMethodDialog}>
+              <CreditCard className="size-4" />
+              Manage payment method
+            </Button>
+            {overview.invoices[0]?.hostedInvoiceUrl ? (
+              <Button asChild variant="outline" className="rounded-full">
+                <Link href={overview.invoices[0].hostedInvoiceUrl} target="_blank">
+                  <Receipt className="size-4" />
+                  Latest invoice
+                </Link>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <h3 className="text-base font-semibold">Saved payment methods</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Cards stored in Stripe for renewals and plan changes.
+          </p>
+
+          <div className="mt-5 space-y-3">
             {overview.paymentMethods.length ? (
               overview.paymentMethods.map((paymentMethod) => (
                 <div
                   key={paymentMethod.id}
-                  className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 p-4"
+                  className="flex flex-col gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 font-medium">
-                      <span>{formatCardLabel(paymentMethod)}</span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 font-medium">
+                      <CreditCard className="size-4 text-muted-foreground" />
+                      {formatCardLabel(paymentMethod)}
                       {paymentMethod.isDefault ? <StatusBadge variant="info">Default</StatusBadge> : null}
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Expires {String(paymentMethod.expMonth || "--").padStart(2, "0")}/{paymentMethod.expYear || "----"}
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Expires {String(paymentMethod.expMonth || "--").padStart(2, "0")}/
+                      {paymentMethod.expYear || "----"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={openPaymentMethodDialog}>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={openPaymentMethodDialog}>
                       Update
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
+                      className="text-destructive hover:text-destructive"
                       onClick={() => void handleDeletePaymentMethod(paymentMethod.id)}
                       disabled={deletingPaymentMethodId === paymentMethod.id}
                     >
@@ -686,139 +849,81 @@ export function SellerSubscriptionManager() {
                       ) : (
                         <Trash2 className="size-4" />
                       )}
-                      Delete
                     </Button>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                No card is saved yet. Add one during checkout or from the payment method manager.
+              <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                No card on file. Add one when you choose a paid plan or update payment method.
               </div>
             )}
 
             {!stripePublishableKey ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">
-                Add-card checkout requires NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in the frontend environment.
-              </div>
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-muted-foreground">
+                Card checkout requires NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in the frontend environment.
+              </p>
             ) : null}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div>
-        <h2 className="mb-4 text-lg font-semibold">Subscription plans</h2>
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {sortedPlans.map((plan) => (
-            <Card
-              key={plan.id}
-              className="relative flex h-full min-h-0 flex-col overflow-hidden border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent gap-0 py-0 shadow-sm"
-            >
-              {currentPlanId === plan.id && hasActiveSubscription ? (
-                <div className="absolute right-4 top-4 z-10">
-                  <StatusBadge variant="info">Current</StatusBadge>
-                </div>
-              ) : null}
-              <CardHeader className="shrink-0 space-y-0 border-0 px-6 pb-0 pt-6">
-                <div className="pr-14">
-                  <h3 className="line-clamp-2 min-h-[3.25rem] text-2xl font-semibold leading-tight tracking-tight">
-                    {plan.name}
-                  </h3>
-                </div>
-                <p className="mt-2 line-clamp-2 min-h-[2.75rem] text-sm leading-snug text-muted-foreground">
-                  {plan.description || "Stripe-managed seller subscription plan."}
-                </p>
-                <div className="mt-4 flex min-h-[3rem] items-baseline gap-1">
-                  <span className="text-4xl font-bold tabular-nums">
-                    {formatMoney(plan.price, plan.currency)}
-                  </span>
-                  <span className="text-muted-foreground">/{plan.billingInterval}</span>
-                </div>
-              </CardHeader>
-              <CardContent className="flex min-h-0 flex-1 flex-col gap-0 px-6 pb-0 pt-5">
-                <ul className="flex min-h-[7.5rem] flex-1 list-none flex-col gap-3 overflow-y-auto pr-0.5">
-                  {plan.features.length ? (
-                    plan.features.map((feature) => (
-                      <li key={`${plan.id}-${feature}`} className="flex items-start gap-2 text-sm leading-snug">
-                        <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                        <span>{feature}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <li className="text-sm text-muted-foreground">No features listed for this plan.</li>
-                  )}
-                </ul>
-                <div className="mt-5 shrink-0 rounded-xl border border-border/60 bg-background/70 p-4 text-sm leading-snug text-muted-foreground">
-                  Choose plan to bill this workspace in Stripe. You can use a saved card or add a new one when
-                  prompted.
-                </div>
-              </CardContent>
-              <CardFooter className="mt-auto shrink-0 border-0 px-6 pb-6 pt-5">
-                {currentPlanId === plan.id && hasActiveSubscription ? (
-                  <Button className="w-full min-h-10" variant="outline" disabled>
-                    Current subscription
-                  </Button>
-                ) : (
-                  <Button className="w-full min-h-10" onClick={() => openPlanDialog(plan)}>
-                    Choose plan
-                  </Button>
-                )}
-              </CardFooter>
-            </Card>
-          ))}
+          </div>
         </div>
-      </div>
+      </section>
 
-      <Card className="border-border/60 bg-card/60">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Receipt className="size-5" />
-            Invoice history
-          </CardTitle>
-          <CardDescription>Invoice state is synchronized from Stripe webhooks.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {overview.invoices.length ? (
-            overview.invoices.map((invoice) => (
-              <div
+      <section className="rounded-2xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border/80 px-6 py-5">
+          <h3 className="text-base font-semibold">Invoice history</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Issued and paid invoices from Stripe.</p>
+        </div>
+
+        {overview.invoices.length ? (
+          <ul className="divide-y divide-border/80">
+            {overview.invoices.map((invoice) => (
+              <li
                 key={invoice.id}
-                className="flex flex-col gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 font-medium">
-                    <span>{formatAmountFromCents(invoice.amountPaidCents || invoice.amountDueCents, invoice.currency)}</span>
-                    <StatusBadge variant={getSubscriptionVariant(invoice.status)}>{toTitleCase(invoice.status)}</StatusBadge>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold tabular-nums">
+                      {formatAmountFromCents(
+                        invoice.amountPaidCents || invoice.amountDueCents,
+                        invoice.currency,
+                      )}
+                    </span>
+                    <StatusBadge variant={getSubscriptionVariant(invoice.status)}>
+                      {toTitleCase(invoice.status)}
+                    </StatusBadge>
                   </div>
-                  <p className="text-sm text-muted-foreground">Issued {formatDate(invoice.createdAt)}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    Issued {formatDate(invoice.createdAt)}
+                  </p>
                 </div>
-
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {invoice.hostedInvoiceUrl ? (
-                    <Button asChild size="sm" variant="outline">
+                    <Button asChild size="sm" variant="outline" className="rounded-full">
                       <Link href={invoice.hostedInvoiceUrl} target="_blank">
-                        View hosted invoice
-                        <ExternalLink className="size-4" />
+                        View invoice
+                        <ExternalLink className="size-3.5" />
                       </Link>
                     </Button>
                   ) : null}
                   {invoice.invoicePdfUrl ? (
-                    <Button asChild size="sm" variant="outline">
+                    <Button asChild size="sm" variant="outline" className="rounded-full">
                       <Link href={invoice.invoicePdfUrl} target="_blank">
                         PDF
-                        <ExternalLink className="size-4" />
+                        <ExternalLink className="size-3.5" />
                       </Link>
                     </Button>
                   ) : null}
                 </div>
-              </div>
-            ))
-          ) : (
-            <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-              No invoices have been generated yet.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+            No invoices yet. They appear here after your first billing cycle.
+          </p>
+        )}
+      </section>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : resetDialogState())}>
         <DialogContent className="max-w-2xl">
