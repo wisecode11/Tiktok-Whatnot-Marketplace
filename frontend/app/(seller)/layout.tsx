@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/marketplace-hub-context"
 import { SellerSubscriptionAccessProvider } from "@/components/dashboard/seller-subscription-access"
 import { Topbar } from "@/components/dashboard/topbar"
+import { ChatNotificationsProvider } from "@/components/notifications/chat-notifications-provider"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import {
   BarChart3,
@@ -193,6 +194,7 @@ export default function SellerLayout({
   return (
     <RoleGate allowedRoles={["streamer"]} unauthenticatedPath="/login">
       <SellerSubscriptionAccessProvider>
+        <ChatNotificationsProvider>
         <MarketplaceHubContext.Provider value={{ hub, setHub, options: SELLER_MARKETPLACE_HUB_OPTIONS }}>
           <SidebarProvider>
             <AppSidebar
@@ -213,6 +215,7 @@ export default function SellerLayout({
             </SidebarInset>
           </SidebarProvider>
         </MarketplaceHubContext.Provider>
+        </ChatNotificationsProvider>
       </SellerSubscriptionAccessProvider>
     </RoleGate>
   )

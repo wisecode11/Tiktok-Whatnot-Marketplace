@@ -1264,6 +1264,7 @@ export function getClerkErrorMessage(error: unknown) {
 export async function waitForSessionToken(
   getToken: () => Promise<string | null>,
   maxAttempts = 8,
+  delayMs = 200,
 ) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const token = await getToken()
@@ -1272,7 +1273,7 @@ export async function waitForSessionToken(
       return token
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
   }
 
   throw new Error("Unable to establish an authenticated session.")

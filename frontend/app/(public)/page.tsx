@@ -31,6 +31,7 @@ import {
 
 import whyChooseImage from "./images/three.png"
 import firefly from "./images/firefly.png"
+import { AnalyticsSalesChart } from "@/components/public/analytics-sales-chart"
 import { LandingConfidenceCta } from "@/components/public/landing-confidence-cta"
 import { LandingPricingSection } from "@/components/public/landing-pricing"
 import { PartnerLogos } from "@/components/public/partner-logos"
@@ -68,76 +69,94 @@ const features = [
   {
     title: "Advanced Analytics",
     description:
-      "Track your stream performance, engagement metrics, and revenue in real-time with our comprehensive dashboard.",
+      "Track stream performance, engagement, and revenue in real time with dashboards built for live sellers.",
     icon: BarChart3,
     iconBg: "bg-gradient-to-br from-blue-500 to-blue-600",
-    highlight: false,
+    tag: "Insights",
+    gridClass: "lg:col-span-3 lg:row-span-2 lg:col-start-1 lg:row-start-1",
+    featured: true,
   },
   {
     title: "Moderator Marketplace",
-    description:
-      "Find and hire verified professional moderators to help manage your live streams and boost engagement.",
+    description: "Hire verified moderators by skills, ratings, and availability.",
     icon: Users,
     iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
-    highlight: false,
+    tag: "Team",
+    gridClass: "lg:col-start-4 lg:row-start-1",
+    compact: true,
+    featured: false,
   },
   {
     title: "Smart Scheduling",
-    description:
-      "Plan and schedule your streams across multiple platforms with our intelligent calendar system.",
+    description: "Plan streams across TikTok, Whatnot, and more.",
     icon: Calendar,
     iconBg: "bg-gradient-to-br from-emerald-400 to-teal-500",
-    highlight: false,
-  },
-  {
-    title: "Secure Payments",
-    description:
-      "Built-in payment processing with fraud protection. Get paid fast with weekly payouts.",
-    icon: CreditCard,
-    iconBg: "bg-gradient-to-br from-orange-400 to-orange-500",
-    highlight: true,
-  },
-  {
-    title: "Multi-Platform Support",
-    description:
-      "Connect TikTok Shop, Whatnot, and more. Manage all your live commerce from one place.",
-    icon: Layers,
-    iconBg: "bg-gradient-to-br from-pink-400 to-rose-500",
-    highlight: false,
+    tag: "Planning",
+    gridClass: "lg:col-start-5 lg:row-start-1",
+    compact: true,
+    featured: false,
   },
   {
     title: "AI-Powered Tools",
-    description:
-      "Leverage AI to optimize your content, generate product descriptions, and analyze trends.",
+    description: "Generate listings, spot trends, and optimize with AI.",
     icon: Sparkles,
     iconBg: "bg-gradient-to-br from-sky-400 to-blue-500",
-    highlight: false,
+    tag: "AI",
+    gridClass: "lg:col-span-2 lg:col-start-4 lg:row-start-2",
+    compact: true,
+    featured: false,
+  },
+  {
+    title: "Secure Payments",
+    description: "Checkout with fraud protection and fast payouts.",
+    icon: CreditCard,
+    iconBg: "bg-gradient-to-br from-orange-400 to-orange-500",
+    tag: "Payments",
+    gridClass: "lg:col-start-1 lg:row-start-3",
+    compact: true,
+    featured: false,
+  },
+  {
+    title: "Multi-Platform Support",
+    description: "TikTok Shop, Whatnot, and more in one hub.",
+    icon: Layers,
+    iconBg: "bg-gradient-to-br from-pink-400 to-rose-500",
+    tag: "Channels",
+    gridClass: "lg:col-start-2 lg:row-start-3",
+    compact: true,
+    featured: false,
   },
   {
     title: "Inventory Management",
-    description:
-      "Sync inventory across all your stores in real-time. Never oversell again.",
+    description: "Sync stock in real time — never oversell on live.",
     icon: Box,
     iconBg: "bg-gradient-to-br from-violet-500 to-purple-600",
-    highlight: false,
+    tag: "Inventory",
+    gridClass: "lg:col-start-3 lg:row-start-3",
+    compact: true,
+    featured: false,
   },
   {
     title: "Finance & Payroll",
-    description:
-      "Track expenses, manage staff payments, and integrate with QuickBooks for seamless accounting.",
+    description: "Expenses, staff pay, and QuickBooks in one place.",
     icon: Wallet,
     iconBg: "bg-gradient-to-br from-teal-400 to-cyan-500",
-    highlight: false,
+    tag: "Finance",
+    gridClass: "lg:col-start-4 lg:row-start-3",
+    compact: true,
+    featured: false,
   },
   {
     title: "Team Collaboration",
-    description:
-      "Invite team members, assign roles, and collaborate seamlessly with real-time activity feeds.",
+    description: "Roles, invites, and live-session coordination.",
     icon: UserPlus,
     iconBg: "bg-gradient-to-br from-orange-400 to-amber-500",
-    highlight: false,
+    tag: "Collaboration",
+    gridClass: "lg:col-start-5 lg:row-start-3",
+    compact: true,
+    featured: false,
   },
-]
+] as const
 
 const steps = [
   {
@@ -279,19 +298,102 @@ const benefits = [
 function FeatureIcon({
   icon: Icon,
   className,
+  large = false,
+  compact = false,
 }: {
   icon: LucideIcon
   className: string
+  large?: boolean
+  compact?: boolean
 }) {
   return (
     <div
       className={cn(
-        "flex h-11 w-11 items-center justify-center rounded-xl text-white shadow-sm",
+        "flex items-center justify-center rounded-xl text-white shadow-md shadow-black/10 transition-transform duration-300 group-hover:scale-110",
+        large ? "h-14 w-14 rounded-2xl" : compact ? "h-9 w-9" : "h-12 w-12",
         className,
       )}
     >
-      <Icon className="h-5 w-5" />
+      <Icon className={large ? "h-7 w-7" : compact ? "h-4 w-4" : "h-6 w-6"} />
     </div>
+  )
+}
+
+function LandingFeatureCard({
+  feature,
+}: {
+  feature: (typeof features)[number]
+}) {
+  const isLarge = feature.gridClass.includes("row-span-2")
+  const isCompact = "compact" in feature && feature.compact
+
+  return (
+    <article
+      className={cn(
+        "group relative flex h-full flex-col overflow-hidden rounded-2xl border transition-all duration-300",
+        "bg-card/90 backdrop-blur-sm",
+        "hover:-translate-y-1 hover:border-primary/25 hover:shadow-xl hover:shadow-primary/10",
+        isCompact ? "p-4" : "p-6 md:p-7",
+        feature.gridClass,
+        feature.featured
+          ? "border-primary/20 bg-gradient-to-br from-primary/[0.07] via-card to-card"
+          : "border-border/60",
+      )}
+    >
+      <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-primary/10 blur-2xl opacity-0 transition-opacity group-hover:opacity-100" />
+
+      <div className={cn("flex items-start justify-between gap-2", isCompact && "gap-1.5")}>
+        <FeatureIcon
+          icon={feature.icon}
+          className={feature.iconBg}
+          large={isLarge}
+          compact={isCompact}
+        />
+        <span
+          className={cn(
+            "shrink-0 rounded-full border border-border/80 bg-muted/50 font-semibold uppercase tracking-wide text-muted-foreground",
+            isCompact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-0.5 text-[11px]",
+          )}
+        >
+          {feature.tag}
+        </span>
+      </div>
+
+      <h3
+        className={cn(
+          "font-semibold tracking-tight text-foreground",
+          isLarge && "mt-5 text-xl md:text-2xl",
+          isCompact && "mt-3 text-sm leading-snug",
+          !isLarge && !isCompact && "mt-5 text-lg",
+        )}
+      >
+        {feature.title}
+      </h3>
+      <p
+        className={cn(
+          "leading-relaxed text-muted-foreground",
+          isLarge && "mt-2 text-sm md:text-base",
+          isCompact && "mt-1.5 flex-1 text-xs leading-relaxed",
+          !isLarge && !isCompact && "mt-2 flex-1 text-sm",
+        )}
+      >
+        {feature.description}
+      </p>
+
+      {feature.title === "Advanced Analytics" && <AnalyticsSalesChart />}
+
+      {!isCompact && (
+        <div
+          className={cn(
+            "flex items-center gap-1.5 text-sm font-medium text-primary opacity-0 transition-opacity duration-300 group-hover:opacity-100",
+            isLarge ? "mt-4" : "mt-5",
+          )}
+        >
+          Explore
+          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -302,16 +404,17 @@ export default function HomePage() {
       <section className="hero-checker-bg relative overflow-hidden py-16 md:py-24">
         <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-4xl text-center">
-            <div className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <Sparkles className="h-4 w-4 text-primary" />
-              The Future of Live Commerce
-            </div>
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#e53775] px-4 py-2 text-sm font-medium text-[#e53775]">
+  <Sparkles className="h-4 w-4 text-[#e53775]" />
+  The Future of Live Commerce
+</div>
             <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground sm:text-5xl md:text-6xl lg:text-7xl">
               Scale Your Live{" "}
               <span className="text-[#6d11e8]">Commerce</span>
               <br />
               <span className="text-[#6d11e8]">Business</span>
             </h1>
+           
             <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg text-muted-foreground md:text-xl">
               The all-in-one platform for TikTok Shop and Whatnot sellers.
               Manage your streams, hire professional moderators, and grow your
@@ -338,7 +441,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="mx-auto mt-16 grid max-w-4xl grid-cols-2 gap-6 md:grid-cols-4 md:gap-8">
+          {/* <div className="mx-auto mt-16 grid max-w-4xl grid-cols-2 gap-6 md:grid-cols-4 md:gap-8">
             {heroStats.map((stat) => (
               <div key={stat.label} className="flex flex-col items-center text-center">
                 <div
@@ -357,7 +460,7 @@ export default function HomePage() {
                 </div>
               </div>
             ))}
-          </div>
+          </div> */}
         </div>
       </section>
 
@@ -382,7 +485,10 @@ export default function HomePage() {
 
               {/* Heading */}
               <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground leading-tight">
-                Scale Your Live Commerce Empire Across TikTok, Whatnot & QuickBooks
+                Scale Your Live Commerce Empire Across{" "}
+                <span className="text-[#e53775]">
+                  TikTok, Whatnot & QuickBooks
+                </span>
               </h2>
 
               {/* Description */}
@@ -399,7 +505,7 @@ export default function HomePage() {
               <ul className="space-y-4 pt-2">
                 {whyChooseFeatures.map((feature, index) => (
                   <li key={index} className="flex items-start gap-3">
-                    <CheckCircle className="w-6 h-6 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                    <CheckCircle className="w-6 h-6 text-[#775fff] flex-shrink-0 mt-0.5" />
                     <span className="text-foreground">{feature}</span>
                   </li>
                 ))}
@@ -487,44 +593,54 @@ export default function HomePage() {
 
 
 
-      {/* Features */}
-      <section id="features" className="relative py-20 md:py-28">
+      {/* Features — bento grid */}
+      <section id="features" className="relative overflow-hidden bg-muted/30 py-20 md:py-28">
         <div className="pointer-events-none absolute -left-32 top-0 h-96 w-96 rounded-full bg-primary/15 blur-3xl dark:bg-primary/10" />
         <div className="pointer-events-none absolute -right-32 bottom-0 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/5" />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.25] dark:opacity-[0.12]"
+          style={{
+            backgroundImage: `radial-gradient(circle at 1px 1px, hsl(var(--border)) 1px, transparent 0)`,
+            backgroundSize: "28px 28px",
+          }}
+        />
 
-        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-2xl text-center">
+        <div className="relative mx-auto w-full max-w-[min(100%,90rem)] px-4 sm:px-6 lg:px-10 xl:px-12">
+          <div className="mx-auto max-w-3xl text-center">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
+              <Zap className="h-3.5 w-3.5" />
+              All-in-one toolkit
+            </div>
             <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl md:text-5xl">
               Everything You Need to{" "}
-              <span className="bg-gradient-to-r from-primary to-sky-400 bg-clip-text text-transparent">
+              <span className="text-[#e53775]">
                 Succeed
               </span>
             </h2>
-            <p className="mt-4 text-muted-foreground">
-              Powerful tools designed for live commerce professionals
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
+              Powerful tools designed for live commerce professionals — from your first stream to
+              scaling across platforms.
             </p>
           </div>
 
-          <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-14 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:auto-rows-[minmax(9.5rem,auto)] lg:gap-3">
             {features.map((feature) => (
-              <div
-                key={feature.title}
-                className={cn(
-                  "rounded-2xl p-6 transition-shadow",
-                  feature.highlight
-                    ? "bg-primary/10 dark:bg-primary/15"
-                    : "bg-transparent hover:bg-card/80",
-                )}
-              >
-                <FeatureIcon icon={feature.icon} className={feature.iconBg} />
-                <h3 className="mt-4 text-lg font-semibold text-foreground">
-                  {feature.title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  {feature.description}
-                </p>
-              </div>
+              <LandingFeatureCard key={feature.title} feature={feature} />
             ))}
+          </div>
+
+          <div className="mt-12 text-center">
+            <Button
+              asChild
+              size="lg"
+              variant="outline"
+              className="rounded-xl bg-background/80 text-[#e53775] border-[#e53775]"
+            >
+              <Link href="/features">
+                Explore all features
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
           </div>
         </div>
       </section>
@@ -738,40 +854,45 @@ export default function HomePage() {
       </section>
 
       {/* CTA */}
-      <section className="relative overflow-hidden py-20 md:py-28">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,color-mix(in_oklch,var(--primary)_15%,transparent),transparent)] dark:bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,color-mix(in_oklch,var(--primary)_8%,transparent),transparent)]" />
+      <section className="py-20 md:py-24">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="relative overflow-hidden rounded-3xl border border-[#ffe414]/40 bg-gradient-to-br from-[#fffbeb] via-[#fff9db] to-[#fef3c7] p-8 text-center md:p-16 dark:from-[#ffe414]/10 dark:via-[#ffe414]/5 dark:to-background">
+            <div className="pointer-events-none absolute -left-20 -top-20 h-64 w-64 rounded-full bg-[#ffe414]/25 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-20 -right-20 h-64 w-64 rounded-full bg-[#fde047]/20 blur-3xl" />
 
-        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
-          <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Ready to Transform Your Live Commerce Business?
-          </h2>
-          <p className="mt-4 text-muted-foreground">
-            Join thousands of successful sellers using Marketplace Hub to grow
-            their business. Start your free trial today.
-          </p>
-          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Button size="lg" asChild className="h-12 gap-2 rounded-xl px-8">
-              <Link href="/get-started">
-                Get Started Free
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              asChild
-              className="h-12 rounded-xl bg-card px-8"
-            >
-              <Link href="/contact">Book a Demo</Link>
-            </Button>
-          </div>
-          <p className="mt-6 text-sm text-muted-foreground">
-            Free 14-day trial | No credit card required | Cancel anytime
-          </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
-            <span>99.9% Uptime</span>
-            <span>24/7 Support</span>
-            <span>Same-Day Setup</span>
+            <div className="relative mx-auto max-w-3xl">
+              <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                Ready to Transform Your Live Commerce Business?
+              </h2>
+              <p className="mt-4 text-muted-foreground">
+                Join thousands of successful sellers using Marketplace Hub to grow
+                their business. Start your free trial today.
+              </p>
+              <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                <Button size="lg" asChild className="h-12 gap-2 rounded-xl px-8">
+                  <Link href="/get-started">
+                    Get Started Free
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  asChild
+                  className="h-12 rounded-xl bg-card px-8"
+                >
+                  <Link href="/contact">Book a Demo</Link>
+                </Button>
+              </div>
+              <p className="mt-6 text-sm text-muted-foreground">
+                Free 14-day trial | No credit card required | Cancel anytime
+              </p>
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+                <span>99.9% Uptime</span>
+                <span>24/7 Support</span>
+                <span>Same-Day Setup</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>

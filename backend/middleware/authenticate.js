@@ -43,7 +43,7 @@ async function authenticateRequest(req, res, next) {
   try {
     const payload = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY,
-      clockSkewInMs: 15000,
+      clockSkewInMs: 60000,
     });
 
     const user = await User.findOne({ clerk_user_id: payload.sub });
