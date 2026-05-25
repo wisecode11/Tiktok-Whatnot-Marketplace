@@ -4,6 +4,7 @@ import { RoleGate } from "@/components/auth/role-gate"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { Topbar } from "@/components/dashboard/topbar"
+import { ChatNotificationsProvider } from "@/components/notifications/chat-notifications-provider"
 import {
   LayoutDashboard,
   CalendarClock,
@@ -40,6 +41,7 @@ const mockUser = {
 export function ModeratorLayoutShell({ children }: { children: React.ReactNode }) {
   return (
     <RoleGate allowedRoles={["moderator"]} unauthenticatedPath="/login">
+      <ChatNotificationsProvider>
       <SidebarProvider>
         <AppSidebar
           navigation={navigation}
@@ -55,6 +57,7 @@ export function ModeratorLayoutShell({ children }: { children: React.ReactNode }
           </main>
         </SidebarInset>
       </SidebarProvider>
+      </ChatNotificationsProvider>
     </RoleGate>
   )
 }

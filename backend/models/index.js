@@ -41,6 +41,7 @@ module.exports = {
   // Team chat
   ChatThread: require('./ChatThread'),
   ChatMessage: require('./ChatMessage'),
+  Notification: require('./Notification'),
 
   // Admin moderation
   UserReport: require('./UserReport'),

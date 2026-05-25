@@ -31,6 +31,7 @@ function AuthCompleteContent() {
   const [errorTitle, setErrorTitle] = useState("Authentication could not be completed")
   const [hasAccountStatusError, setHasAccountStatusError] = useState(false)
   const [alternateRedirect, setAlternateRedirect] = useState<string | null>(null)
+  const [sessionGraceExpired, setSessionGraceExpired] = useState(false)
   const hasStartedRef = useRef(false)
 
   const flow: Flow = searchParams.get("flow") === "signup" ? "signup" : "login"
@@ -64,7 +65,7 @@ function AuthCompleteContent() {
         throw new Error("No account role was selected. Please choose a role and try again.")
       }
 
-      const token = await waitForSessionToken(getToken)
+      const token = await waitForSessionToken(getToken, 24)
       const result = await completePortalAuthentication(token, flow, effectiveRole)
 
       router.replace(result.redirectTo)
@@ -92,13 +93,24 @@ function AuthCompleteContent() {
     })
   }, [flow, getToken, isLoaded, isSignedIn, metadataRole, requestedRole, router])
 
+  // After SignUp/SignIn redirect, Clerk may need a moment to hydrate the session cookie.
   useEffect(() => {
     if (!isLoaded || isSignedIn) {
+      setSessionGraceExpired(false)
+      return
+    }
+
+    const timer = window.setTimeout(() => setSessionGraceExpired(true), 3000)
+    return () => window.clearTimeout(timer)
+  }, [isLoaded, isSignedIn])
+
+  useEffect(() => {
+    if (!isLoaded || isSignedIn || !sessionGraceExpired) {
       return
     }
 
     router.replace(buildPath(flow === "signup" ? "/signup" : "/login", { role: requestedRole }))
-  }, [flow, isLoaded, isSignedIn, requestedRole, router])
+  }, [flow, isLoaded, isSignedIn, requestedRole, router, sessionGraceExpired])
 
   const fallbackPortal = requestedRole ? getDashboardPath(requestedRole as AppRole) : "/login"
   const signOutRedirectUrl = buildPath(flow === "signup" ? "/signup" : "/login", { role: requestedRole })

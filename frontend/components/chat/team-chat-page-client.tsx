@@ -20,9 +20,15 @@ import {
 } from "@/lib/team-chat"
 
 const SOCKET_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
+const CHAT_SOCKET_PATH = "/socket.io/"
 
 interface TeamChatPageClientProps {
   dashboardRole: "streamer" | "moderator"
+}
+
+function isChatAuthError(message: string) {
+  const normalized = message.toLowerCase()
+  return normalized.includes("session token") || normalized.includes("bearer token")
 }
 
 function formatTime(value: string | null | undefined) {
@@ -41,11 +47,27 @@ function formatTime(value: string | null | undefined) {
 export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
   const { getToken, isLoaded } = useAuth()
   const searchParams = useSearchParams()
+  const getTokenRef = useRef(getToken)
   const socketRef = useRef<Socket | null>(null)
   const activeThreadRef = useRef<string | null>(null)
+  const selectedThreadIdRef = useRef<string | null>(null)
+  const isRefreshingSocketAuthRef = useRef(false)
+
+  async function fetchFreshSessionToken() {
+    return waitForSessionToken(() => getTokenRef.current({ skipCache: true }))
+  }
+
+  async function refreshSocketAuth(socket: Socket) {
+    const token = await fetchFreshSessionToken()
+    socket.auth = { token }
+    return token
+  }
 
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
+
+  getTokenRef.current = getToken
+  selectedThreadIdRef.current = selectedThreadId
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [composer, setComposer] = useState("")
   const [isLoadingThreads, setIsLoadingThreads] = useState(true)
@@ -57,6 +79,19 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
     () => threads.find((thread) => thread.id === selectedThreadId) || null,
     [threads, selectedThreadId],
   )
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    if (selectedThread?.peer.userId) {
+      window.sessionStorage.setItem("activeChatPeerId", String(selectedThread.peer.userId))
+      return
+    }
+
+    window.sessionStorage.removeItem("activeChatPeerId")
+  }, [selectedThread])
 
   function joinThread(socket: Socket, threadId: string) {
     setIsLoadingMessages(true)
@@ -145,7 +180,8 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
         if (!cancelled) {
           setThreads(result.threads)
 
-          if (selectedThreadId && result.threads.some((thread) => thread.id === selectedThreadId)) {
+          const currentSelection = selectedThreadIdRef.current
+          if (currentSelection && result.threads.some((thread) => thread.id === currentSelection)) {
             return
           }
 
@@ -177,7 +213,7 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
     return () => {
       cancelled = true
     }
-  }, [getToken, isLoaded, searchParams, selectedThreadId])
+  }, [getToken, isLoaded, searchParams])
 
   useEffect(() => {
     let cancelled = false
@@ -188,26 +224,60 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
       }
 
       try {
-        const token = await waitForSessionToken(getToken)
+        const token = await fetchFreshSessionToken()
         const socket = io(SOCKET_BASE_URL, {
+          path: CHAT_SOCKET_PATH,
           transports: ["polling", "websocket"],
           auth: { token },
           reconnection: true,
-          reconnectionAttempts: 5,
+          reconnectionAttempts: 12,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 8000,
         })
 
         socketRef.current = socket
 
+        socket.io.on("reconnect_attempt", () => {
+          void refreshSocketAuth(socket).catch(() => {
+            // reconnect will retry; connect_error surfaces a message if all attempts fail
+          })
+        })
+
         socket.on("connect", () => {
           setErrorMessage(null)
+
+          const activeThreadId = activeThreadRef.current
+          if (activeThreadId) {
+            joinThread(socket, activeThreadId)
+          }
         })
 
         socket.on("connect_error", (error) => {
-          const message = error instanceof Error ? error.message : "Unable to connect live chat."
-          const friendlyMessage = message === "websocket error"
-            ? "Live chat connection failed. Check that the backend is running and NEXT_PUBLIC_BACKEND_URL is correct."
-            : message
-          setErrorMessage(friendlyMessage)
+          void (async () => {
+            const message = error instanceof Error ? error.message : "Unable to connect live chat."
+
+            if (isChatAuthError(message) && !isRefreshingSocketAuthRef.current) {
+              isRefreshingSocketAuthRef.current = true
+
+              try {
+                await refreshSocketAuth(socket)
+                socket.connect()
+                return
+              } catch {
+                // Fall through to user-facing error.
+              } finally {
+                isRefreshingSocketAuthRef.current = false
+              }
+            }
+
+            const friendlyMessage = message === "websocket error"
+              ? "Live chat connection failed. Check that the backend is running and NEXT_PUBLIC_BACKEND_URL is correct."
+              : message
+
+            if (!cancelled) {
+              setErrorMessage(friendlyMessage)
+            }
+          })()
         })
 
         socket.on("chat:message", (payload) => {
@@ -216,18 +286,14 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
           }
 
           const nextMessage = payload.message as ChatMessage
-
-          if (activeThreadRef.current !== nextMessage.threadId) {
-            applyIncomingMessage(nextMessage)
-            return
-          }
-
           applyIncomingMessage(nextMessage)
         })
 
-        const activeThreadId = activeThreadRef.current
-        if (activeThreadId) {
-          joinThread(socket, activeThreadId)
+        if (socket.connected) {
+          const activeThreadId = activeThreadRef.current
+          if (activeThreadId) {
+            joinThread(socket, activeThreadId)
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -241,12 +307,36 @@ export function TeamChatPageClient({ dashboardRole }: TeamChatPageClientProps) {
 
     return () => {
       cancelled = true
+      isRefreshingSocketAuthRef.current = false
+
       if (socketRef.current) {
         socketRef.current.disconnect()
         socketRef.current = null
       }
     }
   }, [getToken, isLoaded])
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      const socket = socketRef.current
+
+      if (!socket || !socket.connected) {
+        return
+      }
+
+      void refreshSocketAuth(socket).catch(() => {
+        // Keep the current connection; the next reconnect will fetch a new token.
+      })
+    }, 45_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [isLoaded])
 
   useEffect(() => {
     activeThreadRef.current = selectedThreadId

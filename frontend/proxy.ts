@@ -29,20 +29,26 @@ function getUnauthenticatedLoginUrl(pathname: string) {
   return "/login"
 }
 
-export default clerkMiddleware(async (auth, req) => {
-  const { userId } = await auth()
+export default clerkMiddleware(
+  async (auth, req) => {
+    const { userId } = await auth()
 
-  if (!userId && isAdminRoute(req)) {
-    return NextResponse.redirect(new URL("/admin-login", req.url))
-  }
+    if (!userId && isAdminRoute(req)) {
+      return NextResponse.redirect(new URL("/admin-login", req.url))
+    }
 
-  if (!userId && isProtectedAppRoute(req)) {
-    const loginPath = getUnauthenticatedLoginUrl(req.nextUrl.pathname)
-    return NextResponse.redirect(new URL(loginPath, req.url))
-  }
+    if (!userId && isProtectedAppRoute(req)) {
+      const loginPath = getUnauthenticatedLoginUrl(req.nextUrl.pathname)
+      return NextResponse.redirect(new URL(loginPath, req.url))
+    }
 
-  return NextResponse.next()
-})
+    return NextResponse.next()
+  },
+  {
+    // Windows clocks often drift a few seconds; avoids JWT iat-in-the-future refresh loops.
+    clockSkewInMs: 60_000,
+  },
+)
 
 export const config = {
   matcher: [

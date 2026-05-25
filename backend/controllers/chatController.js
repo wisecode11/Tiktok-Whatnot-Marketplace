@@ -4,6 +4,7 @@ const {
   listMessages,
   sendMessage,
 } = require("../services/chatService");
+const { getChatIo } = require("../socket/chatRealtime");
 
 function sendError(res, error) {
   const status = error.status || 500;
@@ -57,6 +58,15 @@ async function postMessage(req, res) {
       threadId: req.params.threadId,
       body: req.body && req.body.body,
     });
+
+    const io = getChatIo();
+    if (io && result.message) {
+      io.to(`thread:${req.params.threadId}`).emit("chat:message", {
+        threadId: req.params.threadId,
+        message: result.message,
+      });
+    }
+
     return res.status(200).json(result);
   } catch (error) {
     return sendError(res, error);

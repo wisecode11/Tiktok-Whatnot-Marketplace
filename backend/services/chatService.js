@@ -2,6 +2,7 @@ const ChatMessage = require("../models/ChatMessage");
 const ChatThread = require("../models/ChatThread");
 const ModeratorBooking = require("../models/ModeratorBooking");
 const User = require("../models/Users");
+const { createChatMessageNotification } = require("./notificationService");
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -303,8 +304,25 @@ async function sendMessage({ clerkUserId, threadId, body }) {
 
   await access.thread.save();
 
+  const recipientUserId = access.currentRole === "streamer"
+    ? access.thread.moderator_user_id
+    : access.thread.seller_user_id;
+
+  let notification = null;
+
+  if (String(recipientUserId) !== String(user._id)) {
+    notification = await createChatMessageNotification({
+      recipientUserId,
+      senderUser: user,
+      threadId: access.thread._id,
+      messageId: message._id,
+      preview: normalizedBody,
+    });
+  }
+
   return {
     message: serializeMessage(message),
+    notification,
   };
 }
 

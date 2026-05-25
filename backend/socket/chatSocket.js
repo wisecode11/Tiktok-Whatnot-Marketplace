@@ -1,7 +1,9 @@
 const { verifyToken } = require("@clerk/backend");
 const { Server } = require("socket.io");
 
+const User = require("../models/Users");
 const { listMessages, sendMessage } = require("../services/chatService");
+const { setChatIo } = require("./chatRealtime");
 
 function buildSocketError(message) {
   return { ok: false, error: message || "Socket request failed." };
@@ -47,10 +49,32 @@ function buildAllowedSocketOrigins(configuredOrigins) {
   return origins;
 }
 
+async function attachUserRooms(socket, clerkUserId) {
+  const user = await User.findOne({ clerk_user_id: clerkUserId }).select("_id user_type");
+
+  if (!user) {
+    return null;
+  }
+
+  socket.join(`user:${String(user._id)}`);
+
+  socket.data = {
+    ...(socket.data || {}),
+    auth: {
+      ...(socket.data && socket.data.auth ? socket.data.auth : {}),
+      localUserId: String(user._id),
+      userType: user.user_type,
+    },
+  };
+
+  return user;
+}
+
 function initializeChatSocket({ server, allowedOrigins }) {
   const socketOrigins = buildAllowedSocketOrigins(allowedOrigins);
 
   const io = new Server(server, {
+    path: "/socket.io/",
     cors: {
       origin(origin, callback) {
         if (!origin || socketOrigins.has(origin)) {
@@ -89,9 +113,13 @@ function initializeChatSocket({ server, allowedOrigins }) {
     }
   });
 
+  setChatIo(io);
+
   io.on("connection", (socket) => {
     const auth = socket.data && socket.data.auth ? socket.data.auth : null;
     const clerkUserId = auth ? auth.userId : null;
+
+    void attachUserRooms(socket, clerkUserId);
 
     socket.on("chat:join", async (payload, acknowledge) => {
       try {
