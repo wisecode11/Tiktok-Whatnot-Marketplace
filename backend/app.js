@@ -55,12 +55,15 @@ app.post(
 );
 function createJsonMiddleware() {
   const defaultParser = express.json({ limit: "1mb" });
-  const integrationsUploadUrlsParser = express.json({ limit: "25mb" });
+  const largeBodyParser = express.json({ limit: "25mb" });
+  const largeBodyPaths = new Set([
+    "/api/integrations/whatnot/media/upload-urls",
+    "/api/staff/pending-inventory",
+  ]);
   return (req, res, next) => {
     const url = typeof req.originalUrl === "string" ? req.originalUrl.split("?")[0] : "";
-    const isLargeWhatnotUpload =
-      req.method === "POST" && url === "/api/integrations/whatnot/media/upload-urls";
-    return (isLargeWhatnotUpload ? integrationsUploadUrlsParser : defaultParser)(req, res, next);
+    const useLargeBodyParser = req.method === "POST" && largeBodyPaths.has(url);
+    return (useLargeBodyParser ? largeBodyParser : defaultParser)(req, res, next);
   };
 }
 

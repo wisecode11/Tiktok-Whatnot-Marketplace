@@ -8,6 +8,7 @@ import { ImagePlus, Loader2, Plus } from "lucide-react"
 import { StaffLiveSyncBanner } from "@/components/staff/staff-live-sync-banner"
 import { StaffModuleGate } from "@/components/staff/staff-module-gate"
 import { useStaffModules } from "@/components/staff/staff-modules-context"
+import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -152,6 +153,7 @@ function toInventoryRows(payload: WhatnotInventoryLiveResponse | null): Inventor
 
 export function ViewInventoryPage() {
   const router = useRouter()
+  const { toast } = useToast()
   const { marketplaceHub } = useStaffModules()
   const { getToken, isLoaded } = useAuth()
   const getTokenRef = useRef(getToken)
@@ -368,8 +370,20 @@ export function ViewInventoryPage() {
       })
       setCreateDialogOpen(false)
       resetCreateForm()
+      toast({
+        title: "Pending inventory saved",
+        description:
+          "Your product is queued for Whatnot. It appears here after the seller’s extension syncs it to live inventory.",
+      })
+      void loadInventory(true)
     } catch (submitError) {
-      setCreateFormError(getClerkErrorMessage(submitError))
+      const message = getClerkErrorMessage(submitError)
+      const isPayloadTooLarge = /entity too large|payload too large|413/i.test(message)
+      setCreateFormError(
+        isPayloadTooLarge
+          ? "Image file is too large. Use a smaller photo (under ~15 MB) and try again."
+          : message,
+      )
     } finally {
       setIsCreatingPendingInventory(false)
     }
