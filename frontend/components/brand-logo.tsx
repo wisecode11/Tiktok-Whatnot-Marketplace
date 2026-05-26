@@ -1,9 +1,9 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
-import { Zap } from "lucide-react"
 
-import { BRAND_NAME } from "@/lib/brand"
+import { BRAND_LOGO_SRC, BRAND_NAME } from "@/lib/brand"
 import { cn } from "@/lib/utils"
 
 type BrandLogoProps = {
@@ -11,6 +11,8 @@ type BrandLogoProps = {
   text?: string
   showText?: boolean
   className?: string
+  imageClassName?: string
+  /** @deprecated Use imageClassName */
   iconClassName?: string
   textClassName?: string
 }
@@ -18,23 +20,24 @@ type BrandLogoProps = {
 export function BrandLogo({
   href,
   text = BRAND_NAME,
-  showText = true,
+  showText = false,
   className,
+  imageClassName,
   iconClassName,
   textClassName,
 }: BrandLogoProps) {
   const content = (
     <>
-      <div
-        className={cn(
-          "flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary to-accent text-primary-foreground shadow-lg shadow-primary/20",
-          iconClassName,
-        )}
-      >
-        <Zap className="h-5 w-5" />
-      </div>
+      <Image
+        src={BRAND_LOGO_SRC}
+        alt={`${BRAND_NAME} logo`}
+        width={220}
+        height={64}
+        priority
+        className={cn("h-10 w-auto max-w-[200px] object-contain object-left", imageClassName, iconClassName)}
+      />
       {showText ? (
-        <span className={cn("text-lg font-semibold tracking-tight text-foreground")}>
+        <span className={cn("text-lg font-semibold tracking-tight text-foreground", textClassName)}>
           {text}
         </span>
       ) : null}

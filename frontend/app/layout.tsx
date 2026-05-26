@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
 import { Inter, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
-import { BRAND_NAME } from '@/lib/brand'
+import { BRAND_LOGO_SRC, BRAND_NAME } from '@/lib/brand'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
@@ -20,9 +20,9 @@ export const metadata: Metadata = {
   title: `${BRAND_NAME} - Live Commerce Platform`,
   description: 'The premier marketplace for live commerce streamers and moderators. Connect, grow, and monetize your streaming business.',
   icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+    icon: BRAND_LOGO_SRC,
+    shortcut: BRAND_LOGO_SRC,
+    apple: BRAND_LOGO_SRC,
   },
 }
 

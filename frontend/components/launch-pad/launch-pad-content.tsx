@@ -5,7 +5,7 @@ import { useAuth } from "@clerk/nextjs"
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { BRAND_HANDLE_PREFIX, BRAND_NAME } from "@/lib/brand"
+import { BRAND_HANDLE_PREFIX, BRAND_LOGO_SRC, BRAND_NAME, EXTENSION_LOGO_SRC } from "@/lib/brand"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
@@ -665,15 +665,21 @@ export function LaunchPadContent({ forcedRole, embedded = false }: LaunchPadCont
                 />
               </div>
               <ArrowRight className="h-5 w-5 text-muted-foreground" />
-              <div className="flex h-12 min-w-44 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 font-semibold">
+              <div className="flex h-12 min-w-44 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3">
                 <Image
-                  src="/icon.svg"
+                  src={BRAND_LOGO_SRC}
                   alt={`${BRAND_NAME} logo`}
-                  width={20}
-                  height={20}
-                  className="h-5 w-5 object-contain"
+                  width={120}
+                  height={36}
+                  className="h-7 w-auto max-w-[100px] object-contain"
                 />
-                <span>{BRAND_NAME}</span>
+                <Image
+                  src={EXTENSION_LOGO_SRC}
+                  alt={`${BRAND_NAME} extension icon`}
+                  width={36}
+                  height={36}
+                  className="h-9 w-9 shrink-0 object-contain"
+                />
               </div>
             </div>
           </div>

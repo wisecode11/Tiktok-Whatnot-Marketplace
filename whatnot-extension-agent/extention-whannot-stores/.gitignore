@@ -1,0 +1,9 @@
+# Generated from frontend/public at sync/build time (see scripts/sync-extension-logos.ps1)
+extension-logo.png
+extension-icon-16.png
+extension-icon-32.png
+extension-icon-48.png
+seller-hub-logo.png
+node_modules/
+package-lock.json
+whatnot-extension-updated.zip

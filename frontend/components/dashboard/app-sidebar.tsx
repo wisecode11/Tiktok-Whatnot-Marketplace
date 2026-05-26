@@ -294,7 +294,7 @@ export function AppSidebar({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <BrandLogo href={logo?.href || "/"} text={logo?.name || BRAND_NAME} iconClassName="h-8 w-8 rounded-lg" />
+            <BrandLogo href={logo?.href || "/"} imageClassName="h-8 w-auto max-w-[130px]" />
           )}
         </SidebarHeader>
 

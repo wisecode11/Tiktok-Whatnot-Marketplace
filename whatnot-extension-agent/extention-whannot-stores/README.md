@@ -26,13 +26,30 @@
 This implementation keeps auth in-browser. It only sends API response payloads/events outward.  
 Do **not** send raw token/cookie values to your backend.
 
+## Logos (single source of truth)
+
+Assets live in `frontend/public/` only:
+
+- `seller-hub-logo.png` — popup header + main Seller Hub branding
+- `extension-logo.png` — Chrome toolbar / extensions page icon
+
+From repo root, before **Load unpacked** or shipping a zip:
+
+```powershell
+.\scripts\sync-extension-logos.ps1
+.\scripts\build-extension-zip.ps1
+```
+
+Do not commit copied PNGs in this folder (see `.gitignore`).
+
 ## Load extension
 
-1. Open Chrome `chrome://extensions`
-2. Enable Developer Mode
-3. Load unpacked -> select this folder
-4. Open `https://www.whatnot.com/` and login
-5. Open extension popup -> click **Connect Whatnot**
+1. Run `.\scripts\sync-extension-logos.ps1` from the repo root
+2. Open Chrome `chrome://extensions`
+3. Enable Developer Mode
+4. Load unpacked -> select this folder
+5. Open `https://www.whatnot.com/` and login
+6. Open extension popup -> click **Connect Whatnot**
 
 ## Backend integration
 

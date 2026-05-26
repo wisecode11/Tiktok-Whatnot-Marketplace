@@ -25,11 +25,11 @@ export default function AuthLayout({
         />
       </div>
 
-      <header className="relative z-10 flex items-center justify-between px-6 py-6 sm:px-10">
+      <header className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10 sm:py-6">
         <BrandLogo
           href="/"
           className="transition-opacity hover:opacity-80"
-          textClassName="text-sm font-semibold tracking-[0.24em] text-muted-foreground uppercase"
+          imageClassName="h-12 w-auto max-w-[240px] sm:h-14 sm:max-w-[300px]"
         />
 
         <ThemeToggle />

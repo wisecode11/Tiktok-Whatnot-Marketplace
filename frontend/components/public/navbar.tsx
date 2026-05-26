@@ -24,8 +24,11 @@ export function PublicNavbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-      <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <BrandLogo href="/" />
+      <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 lg:h-[5.25rem]">
+        <BrandLogo
+          href="/"
+          imageClassName="h-12 w-auto max-w-[240px] sm:h-14 sm:max-w-[300px]"
+        />
 
         {/* Desktop Navigation */}
         <div className="hidden items-center gap-1 md:flex">
@@ -66,7 +69,10 @@ export function PublicNavbar() {
           <SheetContent side="right" className="w-80">
             <div className="flex flex-col gap-6 pt-6">
               <div className="flex items-center justify-between">
-                <BrandLogo href="/" />
+                <BrandLogo
+                  href="/"
+                  imageClassName="h-12 w-auto max-w-[240px]"
+                />
                 <ThemeToggle className="h-9" />
               </div>
               <div className="flex flex-col gap-1">

@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Whatnot API Connector",
+  "name": "Seller Hub — Whatnot Connector",
   "version": "1.0.0",
-  "description": "Authenticate and proxy Whatnot APIs for platform integration",
+  "description": "Connect Whatnot to Seller Hub for marketplace integration",
+  "icons": {
+    "16": "extension-icon-16.png",
+    "32": "extension-icon-32.png",
+    "48": "extension-icon-48.png",
+    "128": "extension-logo.png"
+  },
   "permissions": [
     "cookies",
     "storage",
@@ -21,27 +27,25 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://www.whatnot.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
+      "matches": ["https://www.whatnot.com/*"],
+      "js": ["content.js"],
       "run_at": "document_start"
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Whatnot Connector"
+    "default_title": "Seller Hub",
+    "default_icon": {
+      "16": "extension-icon-16.png",
+      "32": "extension-icon-32.png",
+      "48": "extension-icon-48.png",
+      "128": "extension-logo.png"
+    }
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "inject.js"
-      ],
-      "matches": [
-        "https://www.whatnot.com/*"
-      ]
+      "resources": ["inject.js"],
+      "matches": ["https://www.whatnot.com/*"]
     }
   ]
 }

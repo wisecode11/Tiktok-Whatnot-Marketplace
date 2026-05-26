@@ -153,7 +153,7 @@ function LoginContent() {
           <BrandLogo
             showText={false}
             className="mb-5"
-            iconClassName="h-14 w-14 rounded-full ring-8 ring-primary/8 dark:ring-primary/12"
+            imageClassName="h-16 w-auto max-w-[280px] sm:h-[4.75rem] sm:max-w-[340px]"
           />
           <h1 className="text-[2rem] font-bold tracking-tight text-foreground">Welcome Back</h1>
           <p className="mt-2 text-sm text-muted-foreground">Sign in to your account</p>
