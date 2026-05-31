@@ -43,12 +43,16 @@ const GET_PRIMARY_SHOW_FORMAT_TAGS_QUERY =
   "query GetPrimaryShowFormatTags($categoryId:ID!){primaryShowFormatTags(categoryId:$categoryId){id name label description canScheduleLive(categoryId:$categoryId)applicationLink __typename}}";
 const SCHEDULE_LIVE_STREAM_MUTATION =
   "mutation ScheduleLiveStream($title:String!$description:String$categories:[String]$startTime:Float$thumbnailKey:String$language:String$trailerUploadId:String$nominatedModerators:[ID]$explicitContent:Boolean$mutedWords:[String!]$tags:[String]$livestreamShippingSettingUpdates:LivestreamShippingSettingUpdates$localPickupSettings:LocalPickupSettingsInput$isUnifiedShopEnabled:Boolean$isHiddenBySeller:Boolean$minEligibleLoyaltyTier:LoyaltyTierLevel$prebidsDisabled:Boolean$auctionNumberingEnabled:Boolean$livestreamAdsSettings:LivestreamAdsSettingsInput$seonSession:String)@attribution(owner:\"commerce\"){addLiveStream(title:$title description:$description categories:$categories startTime:$startTime thumbnailKey:$thumbnailKey language:$language trailerUploadId:$trailerUploadId nominatedModerators:$nominatedModerators explicitContent:$explicitContent mutedWords:$mutedWords tags:$tags livestreamShippingSettingUpdates:$livestreamShippingSettingUpdates localPickupSettings:$localPickupSettings isUnifiedShopEnabled:$isUnifiedShopEnabled isHiddenBySeller:$isHiddenBySeller minEligibleLoyaltyTier:$minEligibleLoyaltyTier prebidsDisabled:$prebidsDisabled auctionNumberingEnabled:$auctionNumberingEnabled livestreamAdsSettings:$livestreamAdsSettings seonSession:$seonSession){id adCampaignMetadata{campaignStateChangeErrorFromShowScheduler{message __typename}__typename}__typename}}";
+const CANCEL_LIVE_MUTATION =
+  "mutation CancelLive($liveId:String!){updateLiveStream(id:$liveId status:\"CANCELLED\"){id title status __typename}}";
 const GENERATE_MEDIA_UPLOAD_URLS_MUTATION =
   "mutation GenerateMediaUploadUrls($media:[GenerateMediaUploadInput!]!){generateMediaUploadURLs(media:$media){uploads{id method url headers{name value __typename} targetKey expiresAt error __typename} error __typename}}";
 const ADD_LISTING_PHOTO_MUTATION =
   "mutation AddListingPhoto($uuid:String$label:String!$uploadKey:String!){addListingPhoto(uuid:$uuid label:$label uploadKey:$uploadKey){image{id url key bucket __typename}success message __typename}}";
 const CREATE_LISTING_MUTATION =
   "mutation CreateListing($uuid:ID!$title:String!$description:String$transactionType:ListingTransactionType!$transactionProps:TransactionPropsInput$price:MoneyInput$catalogProductId:String$productId:ID$salesChannels:[SalesChannelInfoInput]$productAttributeValues:[ProductAttributeValueInput]$quantity:Int$images:[ListingImageInput]$listIndividually:Boolean$categoryId:ID$shippingProfileId:ID$weight:WeightInput$hazmatType:HazmatLabelType$isPartialSave:Boolean$reservedForSalesChannel:ReservedForSalesChannelType$sku:String$costPerItem:MoneyInput$barcode:String$variants:[ListingVariantInput!]$timedListingEvent:TimedListingEventInput$metadata:ListingMetadata$videoIds:[ID!]$isQuickAdd:Boolean){createListing(uuid:$uuid title:$title description:$description transactionType:$transactionType transactionProps:$transactionProps price:$price catalogProductId:$catalogProductId productId:$productId salesChannels:$salesChannels productAttributeValues:$productAttributeValues quantity:$quantity images:$images listIndividually:$listIndividually categoryId:$categoryId shippingProfileId:$shippingProfileId weight:$weight hazmatType:$hazmatType isPartialSave:$isPartialSave reservedForSalesChannel:$reservedForSalesChannel sku:$sku costPerItem:$costPerItem barcode:$barcode variants:$variants timedListingEvent:$timedListingEvent metadata:$metadata videoIds:$videoIds isQuickAdd:$isQuickAdd){listingNode{...CreateListing __typename}error __typename}}fragment CreateListing on ListingNode{id uuid publicStatus status title product{id __typename}__typename}";
+const SELLER_BULK_LISTING_ACTION_MUTATION =
+  "mutation SellerBulkListingAction($ids:[ID!]!$action:String!$arguments:JSONString){sellerBulkListingAction(ids:$ids action:$action arguments:$arguments){listing{id uuid salesChannels{id type __typename}__typename}listingNode{id uuid salesChannels{id type __typename}__typename}error __typename}}";
 
 chrome.runtime.onInstalled.addListener(() => {
   state.backendSocketUrl = BACKEND_SOCKET_URL;
@@ -1206,6 +1210,13 @@ async function handlePlatformAction(payload) {
       await persistState();
     }
     result = await executeScheduleLiveStreamFromPlatform(payload);
+  } else if (payload?.action === "cancel_whatnot_show") {
+    const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
+    if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
+      state.clerkUserId = requestedClerkUserId;
+      await persistState();
+    }
+    result = await executeCancelLiveFromPlatform(payload);
   } else if (payload?.action === "sync_whatnot_reference_cache") {
     const requestedClerkUserId = normalizeClerkUserId(payload?.clerkUserId);
     if (requestedClerkUserId && requestedClerkUserId !== state.clerkUserId) {
@@ -1257,6 +1268,8 @@ async function handlePlatformAction(payload) {
     result = await executeGenerateMediaUploadUrlsFromPlatform(payload);
   } else if (payload?.action === "create_listing") {
     result = await executeCreateListingFromPlatform(payload);
+  } else if (payload?.action === "delete_listing") {
+    result = await executeDeleteListingFromPlatform(payload);
   } else {
     result = await executeApi(state.tabId, payload);
   }
@@ -1630,6 +1643,76 @@ async function executeScheduleLiveStreamFromPlatform(payload) {
     headers: { ...templateHeaders, ...defaultHeaders },
     body: JSON.stringify(requestBody),
   });
+}
+
+async function executeCancelLiveFromPlatform(payload) {
+  const liveId = typeof payload?.liveId === "string" ? payload.liveId.trim() : "";
+  if (!liveId) {
+    return { success: false, error: "liveId is required." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const template = state?.observedGraphqlTemplates?.CancelLive;
+  let requestBody = {
+    operationName: "CancelLive",
+    variables: {
+      liveId,
+    },
+    query: CANCEL_LIVE_MUTATION,
+  };
+
+  if (template?.requestBody && typeof template.requestBody === "object") {
+    requestBody = structuredClone(template.requestBody);
+    requestBody.operationName = "CancelLive";
+    requestBody.query = CANCEL_LIVE_MUTATION;
+    if (!requestBody.variables || typeof requestBody.variables !== "object") {
+      requestBody.variables = {};
+    }
+    requestBody.variables = {
+      ...requestBody.variables,
+      liveId,
+    };
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+
+  const cancelResponse = await executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=CancelLive&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!cancelResponse?.success) {
+    return cancelResponse;
+  }
+
+  return {
+    success: true,
+    status: cancelResponse?.status || 200,
+    data: cancelResponse?.data || null,
+  };
 }
 
 async function executeGetSellerHomeDashboardFromPlatform({ sellerId, upcomingShowsCount = 0 } = {}) {
@@ -2446,6 +2529,83 @@ async function executeCreateListingFromPlatform(payload) {
   };
 }
 
+async function executeDeleteListingFromPlatform(payload) {
+  const normalizedIds = Array.isArray(payload?.ids)
+    ? [...new Set(payload.ids.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    : [];
+
+  if (!normalizedIds.length) {
+    return { success: false, error: "At least one listing id is required." };
+  }
+
+  if (!state.tabId || !state.auth?.csrf_token) {
+    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
+    if (!autoConnected.success) {
+      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  }
+
+  const bulkListingTemplate = state?.observedGraphqlTemplates?.SellerBulkListingAction;
+  let bulkListingRequestBody = {
+    operationName: "SellerBulkListingAction",
+    variables: {
+      action: "delete",
+      ids: normalizedIds,
+    },
+    query: SELLER_BULK_LISTING_ACTION_MUTATION,
+  };
+
+  if (bulkListingTemplate?.requestBody && typeof bulkListingTemplate.requestBody === "object") {
+    bulkListingRequestBody = structuredClone(bulkListingTemplate.requestBody);
+    bulkListingRequestBody.operationName = "SellerBulkListingAction";
+    if (!bulkListingRequestBody.variables || typeof bulkListingRequestBody.variables !== "object") {
+      bulkListingRequestBody.variables = {};
+    }
+    bulkListingRequestBody.variables = {
+      ...bulkListingRequestBody.variables,
+      action: "delete",
+      ids: normalizedIds,
+    };
+    if (typeof bulkListingRequestBody.query !== "string" || !bulkListingRequestBody.query.trim()) {
+      bulkListingRequestBody.query = SELLER_BULK_LISTING_ACTION_MUTATION;
+    }
+  }
+
+  const defaultHeaders = {
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-csrf-token": csrfToken,
+    "x-wn-extension": "1",
+  };
+  const accessToken = String(state?.auth?.access_token || "").trim();
+  if (accessToken) {
+    defaultHeaders.authorization = `Bearer ${accessToken}`;
+  }
+  const templateHeaders = filterAllowedHeaders(bulkListingTemplate?.requestHeaders || {});
+
+  const deleteListingResponse = await executeApi(state.tabId, {
+    url: "https://www.whatnot.com/services/graphql/?operationName=SellerBulkListingAction&ssr=0",
+    method: "POST",
+    headers: { ...templateHeaders, ...defaultHeaders },
+    body: JSON.stringify(bulkListingRequestBody),
+  });
+
+  if (!deleteListingResponse?.success) {
+    return deleteListingResponse;
+  }
+
+  return {
+    success: true,
+    status: deleteListingResponse?.status || 200,
+    data: deleteListingResponse?.data || null,
+  };
+}
+
 async function executeUpdateBioFromPlatform(payload) {
   const bio = String(payload?.bio || "").trim();
   if (!bio) {
@@ -2522,11 +2682,17 @@ function getOperationName(payload) {
   if (payload?.action === "schedule_whatnot_show") {
     return "ScheduleLiveStream";
   }
+  if (payload?.action === "cancel_whatnot_show") {
+    return "CancelLive";
+  }
   if (payload?.action === "fetch_shipments_livestreams") {
     return "GetShipmentsLivestreams";
   }
   if (payload?.action === "fetch_seller_hub_inventory") {
     return "SellerHubInventory";
+  }
+  if (payload?.action === "delete_listing") {
+    return "SellerBulkListingAction";
   }
   try {
     const body = typeof payload?.body === "string" ? JSON.parse(payload.body) : payload?.body;

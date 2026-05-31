@@ -2,9 +2,19 @@
 
 import { useAuth } from "@clerk/nextjs"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChevronDown, ChevronRight, Clock3, ExternalLink, PackageSearch, Radio, RefreshCw } from "lucide-react"
+import { ChevronDown, ChevronRight, Clock3, ExternalLink, Loader2, PackageSearch, Radio, RefreshCw, Trash2 } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -31,9 +41,11 @@ import {
   fetchWhatnotShowTabData,
   fetchWhatnotPrimaryShowFormatTags,
   getWhatnotLivestreamCategoryTree,
+  cancelWhatnotShow,
   scheduleWhatnotShow,
   syncWhatnotReferenceCache,
   waitForSessionToken,
+  getClerkErrorMessage,
   type WhatnotLivestreamMainCategoryItem,
   type WhatnotLiveShowItem,
   type WhatnotPrimaryShowFormatTag,
@@ -69,6 +81,9 @@ export default function SellerWhatnotShowPage() {
   const [isPrimaryShowFormatLoading, setIsPrimaryShowFormatLoading] = useState(false)
   const [scheduleError, setScheduleError] = useState("")
   const [scheduleNotice, setScheduleNotice] = useState("")
+  const [cancelTarget, setCancelTarget] = useState<WhatnotLiveShowItem | null>(null)
+  const [cancelLoading, setCancelLoading] = useState(false)
+  const [cancelNotice, setCancelNotice] = useState("")
   const [referenceCacheSyncing, setReferenceCacheSyncing] = useState(false)
   const [referenceCacheNotice, setReferenceCacheNotice] = useState("")
   const [referenceCacheError, setReferenceCacheError] = useState("")
@@ -371,6 +386,34 @@ export default function SellerWhatnotShowPage() {
     }
   }
 
+  async function handleCancelShow() {
+    if (!isLoaded || !cancelTarget?.id || cancelLoading) return
+
+    const liveId = cancelTarget.id.trim()
+    const title = cancelTarget.title?.trim() || "this show"
+
+    try {
+      setCancelLoading(true)
+      setLoadError("")
+      setCancelNotice("")
+
+      const token = await waitForSessionToken(getToken)
+      const result = await cancelWhatnotShow(token, liveId)
+
+      if (result.success === false) {
+        throw new Error(result.message || "Whatnot show cancel failed.")
+      }
+
+      setShows((prev) => (prev ?? []).filter((row) => String(row.id ?? "").trim() !== liveId))
+      setCancelNotice(`${title} cancelled successfully.`)
+      setCancelTarget(null)
+    } catch (error) {
+      setLoadError(getClerkErrorMessage(error))
+    } finally {
+      setCancelLoading(false)
+    }
+  }
+
   const rows = (shows ?? []).filter(
     (s) => activeFilter === "All" || s.showType === activeFilter,
   )
@@ -421,6 +464,7 @@ export default function SellerWhatnotShowPage() {
         </div>
       </PageHeader>
       {scheduleNotice ? <p className="text-sm text-emerald-600">{scheduleNotice}</p> : null}
+      {cancelNotice ? <p className="text-sm text-emerald-600">{cancelNotice}</p> : null}
       {referenceCacheNotice ? <p className="text-sm text-emerald-600">{referenceCacheNotice}</p> : null}
       {referenceCacheError ? <p className="text-sm text-destructive">{referenceCacheError}</p> : null}
       {loadError ? <p className="text-sm text-destructive">{loadError}</p> : null}
@@ -525,7 +569,7 @@ export default function SellerWhatnotShowPage() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="ml-auto inline-flex rounded-lg border border-border bg-slate-50 p-2">
+                          <div className="ml-auto inline-flex flex-wrap items-center justify-end gap-2 rounded-lg border border-border bg-slate-50 p-2">
                             <Button
                               size="sm"
                               onClick={() => {
@@ -535,6 +579,26 @@ export default function SellerWhatnotShowPage() {
                             >
                               Open show
                             </Button>
+                            {show.showType === "Upcoming" && show.id ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                className="gap-1"
+                                disabled={cancelLoading}
+                                onClick={() => {
+                                  setCancelNotice("")
+                                  setCancelTarget(show)
+                                }}
+                              >
+                                {cancelLoading && cancelTarget?.id === show.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                                )}
+                                Cancel show
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -546,6 +610,46 @@ export default function SellerWhatnotShowPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={Boolean(cancelTarget)}
+        onOpenChange={(open) => {
+          if (!open && !cancelLoading) {
+            setCancelTarget(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel scheduled show?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cancelTarget
+                ? `This will cancel "${cancelTarget.title ?? "Untitled"}" on Whatnot. This action cannot be undone.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelLoading}>Keep show</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={cancelLoading}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleCancelShow()
+              }}
+            >
+              {cancelLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  Cancelling...
+                </>
+              ) : (
+                "Cancel show"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={openScheduleDialog} onOpenChange={setOpenScheduleDialog}>
         <DialogContent className="sm:max-w-3xl">

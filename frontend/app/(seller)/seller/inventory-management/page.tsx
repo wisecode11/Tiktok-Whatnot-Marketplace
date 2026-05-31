@@ -21,6 +21,16 @@ import {
 
 import { MarketplacePlatformSwitch, type MarketplacePlatform } from "../../../../components/marketplace-platform-switch"
 import { PageHeader } from "@/components/page-header"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -46,8 +56,10 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { useMarketplaceHub } from "@/components/dashboard/marketplace-hub-context"
+import { compressImageForUpload } from "@/lib/compress-image"
 import {
   createWhatnotListing,
+  deleteWhatnotInventory,
   getClerkErrorMessage,
   generateWhatnotMediaUploadUrls,
   getWhatnotInventoryCreateFormOptions,
@@ -363,6 +375,9 @@ export default function SellerInventoryManagementPage() {
   const [isRefreshingInventory, setIsRefreshingInventory] = useState(false)
   const [inventoryLastSyncedAt, setInventoryLastSyncedAt] = useState<Date | null>(null)
   const [errorMessage, setErrorMessage] = useState("")
+  const [whatnotDeleteTarget, setWhatnotDeleteTarget] = useState<InventoryItem | null>(null)
+  const [whatnotDeleteLoading, setWhatnotDeleteLoading] = useState(false)
+  const [whatnotDeleteNotice, setWhatnotDeleteNotice] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createFormError, setCreateFormError] = useState("")
   const [subcategoryOptions, setSubcategoryOptions] = useState<SubcategoryOption[]>([])
@@ -493,6 +508,46 @@ export default function SellerInventoryManagementPage() {
       setErrorMessage(getClerkErrorMessage(error))
     } finally {
       setIsRefreshingInventory(false)
+    }
+  }
+
+  async function handleWhatnotDeleteInventory() {
+    if (!isLoaded || !whatnotDeleteTarget?.id || whatnotDeleteLoading) return
+
+    const inventoryId = whatnotDeleteTarget.id.trim()
+    const title = whatnotDeleteTarget.name.trim() || "this listing"
+
+    try {
+      setWhatnotDeleteLoading(true)
+      setErrorMessage("")
+      setWhatnotDeleteNotice("")
+
+      const token = await waitForSessionToken(getToken)
+      const result = await deleteWhatnotInventory(token, {
+        inventoryIds: [inventoryId],
+        status: selectedTab,
+      })
+
+      const actionResults = result.response?.data?.sellerBulkListingAction ?? []
+      const blockingError = actionResults.find(
+        (entry) => typeof entry?.error === "string" && entry.error.trim(),
+      )
+
+      if (blockingError?.error) {
+        throw new Error(blockingError.error)
+      }
+
+      if (result.success === false) {
+        throw new Error(result.message || "Whatnot inventory delete failed.")
+      }
+
+      setInventoryItems((prev) => prev.filter((row) => row.id.trim() !== inventoryId))
+      setWhatnotDeleteNotice(`${title} deleted successfully.`)
+      setWhatnotDeleteTarget(null)
+    } catch (error) {
+      setErrorMessage(getClerkErrorMessage(error))
+    } finally {
+      setWhatnotDeleteLoading(false)
     }
   }
 
@@ -1094,8 +1149,6 @@ export default function SellerInventoryManagementPage() {
       if (selectedImagePreviewUrl) {
         URL.revokeObjectURL(selectedImagePreviewUrl)
       }
-      setSelectedImage(file)
-      setSelectedImagePreviewUrl(URL.createObjectURL(file))
       setCreateFormError("")
       setIsMediaUploaded(false)
       setUploadedImageId("")
@@ -1103,16 +1156,20 @@ export default function SellerInventoryManagementPage() {
       setIsUploadingMedia(true)
       try {
         const token = await waitForSessionToken(getToken)
+        const { file: uploadFile } = await compressImageForUpload(file)
+        setSelectedImage(uploadFile)
+        setSelectedImagePreviewUrl(URL.createObjectURL(uploadFile))
+
         const mediaPayload = [
           {
-            extension: getImageExtension(file),
+            extension: getImageExtension(uploadFile),
             id: crypto.randomUUID(),
           },
         ]
-        const fileBase64 = await readFileAsBase64(file)
+        const fileBase64 = await readFileAsBase64(uploadFile)
         const mediaResponse = await generateWhatnotMediaUploadUrls(token, mediaPayload, {
           fileBase64,
-          fileContentType: file.type || "application/octet-stream",
+          fileContentType: uploadFile.type || "image/jpeg",
         })
         const nextImageId =
           mediaResponse?.data?.addListingPhoto?.image?.id &&
@@ -2751,6 +2808,7 @@ export default function SellerInventoryManagementPage() {
               </TabsList>
             </Tabs>
             {errorMessage ? <p className="mt-3 text-sm text-destructive">{errorMessage}</p> : null}
+            {whatnotDeleteNotice ? <p className="mt-2 text-sm text-emerald-600">{whatnotDeleteNotice}</p> : null}
             {inventoryLastSyncedAt ? (
               <p className="mt-2 text-xs text-muted-foreground">
                 Loaded from database · last synced {inventoryLastSyncedAt.toLocaleString()}
@@ -2864,14 +2922,34 @@ export default function SellerInventoryManagementPage() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{item.featuredIn}</TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8 rounded-lg"
-                            aria-label={`Copy link for ${item.name}`}
-                          >
-                            <Link2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              aria-label={`Copy link for ${item.name}`}
+                            >
+                              <Link2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              disabled={!item.id || whatnotDeleteLoading}
+                              onClick={() => {
+                                setWhatnotDeleteNotice("")
+                                setWhatnotDeleteTarget(item)
+                              }}
+                              aria-label={`Delete ${item.name}`}
+                            >
+                              {whatnotDeleteLoading && whatnotDeleteTarget?.id === item.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                              ) : (
+                                <Trash2 className="h-4 w-4" aria-hidden />
+                              )}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -2901,6 +2979,46 @@ export default function SellerInventoryManagementPage() {
       </Card>
       ) : null}
 
+      <AlertDialog
+        open={Boolean(whatnotDeleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !whatnotDeleteLoading) {
+            setWhatnotDeleteTarget(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete inventory listing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {whatnotDeleteTarget
+                ? `This will permanently delete "${whatnotDeleteTarget.name}" from Whatnot. This action cannot be undone.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={whatnotDeleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={whatnotDeleteLoading}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleWhatnotDeleteInventory()
+              }}
+            >
+              {whatnotDeleteLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -2929,12 +3047,12 @@ export default function SellerInventoryManagementPage() {
                   Click to upload or drag and drop your media
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Choose your product&apos;s main photo first.
+                  Large photos are automatically optimized before upload. JPEG, PNG, or WebP supported.
                 </p>
                 {isUploadingMedia ? (
                   <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Sending image payload to backend and Whatnot...
+                    Optimizing image and uploading to Whatnot...
                   </p>
                 ) : null}
                 <Input

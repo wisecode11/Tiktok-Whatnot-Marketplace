@@ -46,11 +46,13 @@ const {
   syncWhatnotEarlyPayoutBalanceFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
   createWhatnotListingFromPlatform,
+  deleteWhatnotInventoryFromPlatform,
   updateWhatnotBioFromPlatform,
   fetchMyLiveStatsFromExtension,
   fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotPrimaryShowFormatTagsFromExtension,
   scheduleWhatnotShowFromPlatform,
+  cancelWhatnotShowFromPlatform,
   syncWhatnotReferenceCacheFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,
@@ -283,6 +285,26 @@ async function scheduleWhatnotShowData(req, res) {
     const result = await scheduleWhatnotShowFromPlatform({
       clerkUserId: req.auth.userId,
       schedulePayload: body,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function cancelWhatnotShowData(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const liveId =
+      typeof body.liveId === "string"
+        ? body.liveId
+        : typeof body.live_id === "string"
+          ? body.live_id
+          : "";
+
+    const result = await cancelWhatnotShowFromPlatform({
+      clerkUserId: req.auth.userId,
+      liveId,
     });
     return res.status(200).json(result);
   } catch (error) {
@@ -889,6 +911,30 @@ async function publishWhatnotInventory(req, res) {
   }
 }
 
+async function deleteWhatnotInventory(req, res) {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const inventoryIds = Array.isArray(body.inventoryIds)
+      ? body.inventoryIds
+      : Array.isArray(body.inventory_ids)
+        ? body.inventory_ids
+        : typeof body.inventoryId === "string"
+          ? [body.inventoryId]
+          : typeof body.inventory_id === "string"
+            ? [body.inventory_id]
+            : [];
+
+    const result = await deleteWhatnotInventoryFromPlatform({
+      clerkUserId: req.auth.userId,
+      inventoryIds,
+      statusFilter: body.status || body.statusFilter || "ACTIVE",
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 async function tiktokCallback(req, res) {
   const result = await handleTikTokCallback({
     code: req.query.code,
@@ -1016,6 +1062,7 @@ module.exports = {
   fetchWhatnotShowTabData,
   fetchWhatnotPrimaryShowFormatTagsData,
   scheduleWhatnotShowData,
+  cancelWhatnotShowData,
   syncWhatnotReferenceCacheData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
@@ -1030,4 +1077,5 @@ module.exports = {
   updateWhatnotBio,
   generateWhatnotMediaUploadUrls,
   publishWhatnotInventory,
+  deleteWhatnotInventory,
 };

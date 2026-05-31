@@ -3317,6 +3317,80 @@ async function createWhatnotListingFromPlatform({
   return body;
 }
 
+async function deleteWhatnotInventoryFromPlatform({
+  clerkUserId = "",
+  inventoryIds = [],
+  statusFilter = "ACTIVE",
+}) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(401, "Authentication required.");
+  }
+
+  const normalizedIds = Array.isArray(inventoryIds)
+    ? [...new Set(inventoryIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    : [];
+
+  if (!normalizedIds.length) {
+    throw createHttpError(400, "inventoryIds is required.");
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "delete_listing",
+    ids: normalizedIds,
+  });
+  const body = actionResult && actionResult.data ? actionResult.data : {};
+  const hasGraphqlErrors = Array.isArray(body && body.errors) && body.errors.length > 0;
+  const resultArray = Array.isArray(body?.data?.sellerBulkListingAction)
+    ? body.data.sellerBulkListingAction
+    : [];
+  const failedResults = resultArray.filter(
+    (entry) => entry && typeof entry.error === "string" && entry.error.trim(),
+  );
+
+  if (!actionResult || !actionResult.success || hasGraphqlErrors || failedResults.length) {
+    const firstGraphqlErrorMessage =
+      hasGraphqlErrors && body.errors[0] && body.errors[0].message
+        ? String(body.errors[0].message)
+        : "";
+    const firstListingErrorMessage =
+      failedResults[0] && failedResults[0].error
+        ? String(failedResults[0].error).trim()
+        : "";
+    const errorMessage = actionResult && actionResult.error
+      ? actionResult.error
+      : firstListingErrorMessage
+        ? firstListingErrorMessage
+        : firstGraphqlErrorMessage
+          ? `Whatnot SellerBulkListingAction failed: ${firstGraphqlErrorMessage}`
+          : "Whatnot inventory delete failed through extension.";
+
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      errorMessage,
+      body && Object.keys(body).length ? body : actionResult,
+    );
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+  const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
+  const normalizedStatus = normalizeInventoryStatus(statusFilter);
+
+  await WhatnotInventorySnapshot.deleteMany({
+    platform: "whatnot",
+    clerk_user_id: ownerClerkUserId,
+    status_filter: normalizedStatus,
+    inventory_id: { $in: normalizedIds },
+  });
+
+  return {
+    success: true,
+    message: "Whatnot inventory deleted successfully.",
+    deletedIds: normalizedIds,
+    response: body,
+  };
+}
+
 async function saveWhatnotInventorySnapshotsFromExtension({
   clerkUserId = null,
   status = "ACTIVE",
@@ -4447,6 +4521,100 @@ async function scheduleWhatnotShowFromPlatform({ clerkUserId, schedulePayload = 
   };
 }
 
+async function cancelWhatnotShowFromPlatform({ clerkUserId, liveId = "" }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  if (!normalizedClerkUserId) {
+    throw createHttpError(400, "Missing Clerk user id.");
+  }
+
+  const normalizedLiveId = typeof liveId === "string" ? liveId.trim() : "";
+  if (!normalizedLiveId) {
+    throw createHttpError(400, "liveId is required.");
+  }
+
+  await findLocalUser(normalizedClerkUserId);
+
+  const bridgeState = getWhatnotExtensionBridgeState();
+  const authPayload = bridgeState && bridgeState.extensionAuthState
+    ? bridgeState.extensionAuthState.payload
+    : null;
+  const authClerkUserId = authPayload && typeof authPayload.clerkUserId === "string"
+    ? authPayload.clerkUserId.trim()
+    : "";
+
+  if (!bridgeState || !bridgeState.isOnline) {
+    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+  }
+
+  if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    throw createHttpError(
+      403,
+      "Extension is not connected for this seller. Sign in on the extension with the same account.",
+    );
+  }
+
+  const actionResult = await requestWhatnotAction({
+    action: "cancel_whatnot_show",
+    clerkUserId: normalizedClerkUserId,
+    liveId: normalizedLiveId,
+  });
+
+  if (!actionResult || !actionResult.success) {
+    throw createHttpError(
+      (actionResult && actionResult.status) || 502,
+      (actionResult && actionResult.error) || "Failed to cancel Whatnot show through extension.",
+      actionResult || null,
+    );
+  }
+
+  const body = actionResult.data && typeof actionResult.data === "object" ? actionResult.data : {};
+  const gqlErrors = Array.isArray(body.errors) ? body.errors : [];
+  if (gqlErrors.length) {
+    const firstError = gqlErrors[0] && gqlErrors[0].message
+      ? String(gqlErrors[0].message)
+      : "CancelLive GraphQL returned errors.";
+    throw createHttpError(502, firstError, body);
+  }
+
+  const cancelledLive = body?.data?.updateLiveStream;
+  const cancelledLiveId = cancelledLive && cancelledLive.id ? String(cancelledLive.id).trim() : "";
+  if (!cancelledLiveId) {
+    throw createHttpError(502, "CancelLive did not return a cancelled show id.", body);
+  }
+
+  const snapshot = await WhatnotShowSnapshot.findOne({
+    platform: "whatnot",
+    clerk_user_id: normalizedClerkUserId,
+  }).sort({ updated_at: -1 });
+
+  if (snapshot && Array.isArray(snapshot.shows_payload)) {
+    const filteredShows = snapshot.shows_payload.filter(
+      (show) => String(show?.id || "").trim() !== normalizedLiveId,
+    );
+    await WhatnotShowSnapshot.findOneAndUpdate(
+      {
+        platform: "whatnot",
+        clerk_user_id: normalizedClerkUserId,
+      },
+      {
+        $set: {
+          shows_payload: filteredShows,
+          updated_at: new Date(),
+        },
+      },
+    );
+  }
+
+  return {
+    success: true,
+    liveId: normalizedLiveId,
+    cancelledLiveId,
+    status: cancelledLive?.status || "CANCELLED",
+    response: body,
+    message: "Whatnot show cancelled via extension.",
+  };
+}
+
 async function syncWhatnotReferenceCacheFromExtension({ clerkUserId }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -5172,6 +5340,7 @@ module.exports = {
   updateWhatnotBioFromPlatform,
   generateWhatnotMediaUploadUrlsFromPlatform,
   createWhatnotListingFromPlatform,
+  deleteWhatnotInventoryFromPlatform,
   saveGetSessionApiData,
   saveWhatnotOrders,
   saveWhatnotSellerSession,
@@ -5189,6 +5358,7 @@ module.exports = {
   fetchWhatnotShowTabDataFromExtension,
   fetchWhatnotPrimaryShowFormatTagsFromExtension,
   scheduleWhatnotShowFromPlatform,
+  cancelWhatnotShowFromPlatform,
   syncWhatnotReferenceCacheFromExtension,
   fetchWhatnotCurrentLiveIdFromExtension,
   fetchWhatnotShipmentsTable,

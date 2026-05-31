@@ -54,10 +54,12 @@ const {
   updateWhatnotBio,
   generateWhatnotMediaUploadUrls,
   publishWhatnotInventory,
+  deleteWhatnotInventory,
   fetchMyLiveStatsData,
   fetchWhatnotShowTabData,
   fetchWhatnotPrimaryShowFormatTagsData,
   scheduleWhatnotShowData,
+  cancelWhatnotShowData,
   syncWhatnotReferenceCacheData,
   fetchWhatnotShipmentsLivestreamsCurrentData,
   fetchWhatnotShipmentsTableData,
@@ -137,6 +139,7 @@ router.post("/whatnot/my-live-stats", authenticateRequest, fetchMyLiveStatsData)
 router.post("/whatnot/show-tab", authenticateRequest, fetchWhatnotShowTabData);
 router.post("/whatnot/show-tab/primary-show-format-tags", authenticateRequest, fetchWhatnotPrimaryShowFormatTagsData);
 router.post("/whatnot/show-tab/schedule", authenticateRequest, scheduleWhatnotShowData);
+router.post("/whatnot/show-tab/cancel", authenticateRequest, cancelWhatnotShowData);
 router.get(
   "/whatnot/shipments-livestreams/current",
   authenticateRequest,
@@ -174,6 +177,7 @@ router.post("/whatnot/orders", authenticateWhatnotExtension, saveWhatnotOrdersEn
 router.post("/whatnot/profile/bio", authenticateRequest, updateWhatnotBio);
 router.post("/whatnot/media/upload-urls", authenticateRequest, generateWhatnotMediaUploadUrls);
 router.post("/whatnot/inventory/publish", authenticateRequest, publishWhatnotInventory);
+router.post("/whatnot/inventory/delete", authenticateRequest, deleteWhatnotInventory);
 router.delete("/accounts/:platform", authenticateRequest, removeConnection);
 router.get("/stripe/status", authenticateRequest, checkStripeStatus);
 router.get("/tiktok/callback", tiktokCallback);

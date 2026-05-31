@@ -2017,6 +2017,37 @@ export async function scheduleWhatnotShow(token: string, payload: ScheduleWhatno
   )
 }
 
+export interface CancelWhatnotShowResponse {
+  success?: boolean
+  liveId?: string
+  cancelledLiveId?: string
+  status?: string
+  message?: string
+  response?: {
+    data?: {
+      updateLiveStream?: {
+        id?: string | null
+        title?: string | null
+        status?: string | null
+      } | null
+    }
+    errors?: Array<{ message?: string | null }>
+  }
+}
+
+export async function cancelWhatnotShow(token: string, liveId: string) {
+  const normalizedLiveId = typeof liveId === "string" ? liveId.trim() : ""
+  if (!normalizedLiveId) {
+    throw new Error("liveId is required.")
+  }
+
+  return request<CancelWhatnotShowResponse>("/api/integrations/whatnot/show-tab/cancel", {
+    token,
+    method: "POST",
+    body: { liveId: normalizedLiveId },
+  })
+}
+
 export async function fetchWhatnotPrimaryShowFormatTags(token: string, categoryId: string) {
   return request<WhatnotPrimaryShowFormatTagsResponse>("/api/integrations/whatnot/show-tab/primary-show-format-tags", {
     token,
@@ -2121,6 +2152,46 @@ export async function createWhatnotListing(token: string, payload: CreateWhatnot
     token,
     method: "POST",
     body: payload as unknown as Record<string, unknown>,
+  })
+}
+
+export interface DeleteWhatnotInventoryPayload {
+  inventoryIds: string[]
+  status?: "ACTIVE" | "DRAFT" | "INACTIVE" | "SOLD_OUT"
+}
+
+export interface DeleteWhatnotInventoryResponse {
+  success?: boolean
+  message?: string
+  deletedIds?: string[]
+  response?: {
+    data?: {
+      sellerBulkListingAction?: Array<{
+        listing?: { id?: string | null; uuid?: string | null } | null
+        listingNode?: { id?: string | null; uuid?: string | null } | null
+        error?: string | null
+      }>
+    }
+    errors?: Array<{ message?: string | null }>
+  }
+}
+
+export async function deleteWhatnotInventory(token: string, payload: DeleteWhatnotInventoryPayload) {
+  const cleanedIds = Array.isArray(payload.inventoryIds)
+    ? [...new Set(payload.inventoryIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
+    : []
+
+  if (!cleanedIds.length) {
+    throw new Error("inventoryIds is required.")
+  }
+
+  return request<DeleteWhatnotInventoryResponse>("/api/integrations/whatnot/inventory/delete", {
+    token,
+    method: "POST",
+    body: {
+      inventoryIds: cleanedIds,
+      ...(payload.status ? { status: payload.status } : {}),
+    },
   })
 }
 
