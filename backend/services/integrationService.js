@@ -2832,17 +2832,31 @@ async function syncWhatnotOrdersFromExtension({ clerkUserId }) {
     };
   }
 
-  const actionResult = await requestWhatnotAction({
-    action: "fetch_whatnot_orders",
-    clerkUserId: normalizedClerkUserId,
-  });
+  let actionResult = null;
+  try {
+    actionResult = await requestWhatnotAction({
+      action: "fetch_whatnot_orders",
+      clerkUserId: normalizedClerkUserId,
+    });
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : "Failed to sync Whatnot orders.";
+    return {
+      triggered: false,
+      reason: /relogin|invalid token|auth/i.test(message) ? "auth_failed" : "sync_failed",
+      fetchedCount: null,
+      error: message,
+    };
+  }
 
   if (!actionResult || !actionResult.success) {
-    throw createHttpError(
-      (actionResult && actionResult.status) || 502,
-      (actionResult && actionResult.error) || "Failed to sync Whatnot orders through extension.",
-      actionResult || null,
-    );
+    const message =
+      (actionResult && actionResult.error) || "Failed to sync Whatnot orders through extension.";
+    return {
+      triggered: false,
+      reason: /relogin|invalid token|auth/i.test(String(message)) ? "auth_failed" : "sync_failed",
+      fetchedCount: null,
+      error: message,
+    };
   }
 
   try {
@@ -3597,27 +3611,53 @@ async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
     : "";
 
   if (!bridgeState || !bridgeState.isOnline) {
-    throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
+    return {
+      liveId: null,
+      title: null,
+      startTime: null,
+      livestreams: [],
+      reason: "extension_offline",
+    };
   }
 
   if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
-    throw createHttpError(
-      403,
-      "Extension is not connected for this seller. Sign in on the extension with the same account.",
-    );
+    return {
+      liveId: null,
+      title: null,
+      startTime: null,
+      livestreams: [],
+      reason: "extension_not_connected_for_user",
+    };
   }
 
-  const actionResult = await requestWhatnotAction({
-    action: "fetch_shipments_livestreams",
-    clerkUserId: normalizedClerkUserId,
-  });
+  let actionResult = null;
+  try {
+    actionResult = await requestWhatnotAction({
+      action: "fetch_shipments_livestreams",
+      clerkUserId: normalizedClerkUserId,
+    });
+  } catch (error) {
+    return {
+      liveId: null,
+      title: null,
+      startTime: null,
+      livestreams: [],
+      reason: "extension_request_failed",
+      error: error && error.message ? String(error.message) : "unknown",
+    };
+  }
 
   if (!actionResult || !actionResult.success) {
-    throw createHttpError(
-      (actionResult && actionResult.status) || 502,
-      (actionResult && actionResult.error) || "Failed to fetch Whatnot livestreams through extension.",
-      actionResult || null,
-    );
+    return {
+      liveId: null,
+      title: null,
+      startTime: null,
+      livestreams: [],
+      reason: "fetch_failed",
+      error:
+        (actionResult && actionResult.error) ||
+        "Failed to fetch Whatnot livestreams through extension.",
+    };
   }
 
   const body = actionResult.data && typeof actionResult.data === "object" ? actionResult.data : {};
@@ -3625,7 +3665,14 @@ async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
     const firstError = body.errors[0] && body.errors[0].message
       ? String(body.errors[0].message)
       : "GetShipmentsLivestreams GraphQL returned errors.";
-    throw createHttpError(502, firstError, body);
+    return {
+      liveId: null,
+      title: null,
+      startTime: null,
+      livestreams: [],
+      reason: "graphql_errors",
+      error: firstError,
+    };
   }
 
   const edges =
@@ -3652,6 +3699,7 @@ async function fetchWhatnotCurrentLiveIdFromExtension({ clerkUserId }) {
       pendingShippingShipmentsCount:
         n.pendingShippingShipmentsCount != null ? Number(n.pendingShippingShipmentsCount) : 0,
     })),
+    reason: null,
   };
 }
 
@@ -3797,6 +3845,33 @@ async function upsertWhatnotLiveStatsSnapshot({
   );
 }
 
+async function getCachedMyLiveStatsSnapshot({ clerkUserId, liveId }) {
+  const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
+  const normalizedLiveId = typeof liveId === "string" ? liveId.trim() : "";
+  if (!normalizedClerkUserId || !normalizedLiveId) {
+    return null;
+  }
+
+  const ownerClerkUserId = await resolveWhatnotSnapshotOwnerClerkUserId(normalizedClerkUserId);
+  const doc = await WhatnotLiveStatsSnapshot.findOne({
+    platform: "whatnot",
+    clerk_user_id: ownerClerkUserId,
+    live_id: normalizedLiveId,
+  }).sort({ synced_at: -1, updated_at: -1 });
+
+  if (!doc || !doc.statistic_payload || typeof doc.statistic_payload !== "object") {
+    return null;
+  }
+
+  return {
+    liveId: normalizedLiveId,
+    statistic: doc.statistic_payload,
+    raw: doc.raw_payload && typeof doc.raw_payload === "object" ? doc.raw_payload : {},
+    fromCache: true,
+    syncedAt: doc.synced_at || doc.updated_at || null,
+  };
+}
+
 async function fetchMyLiveStatsFromExtension({ clerkUserId, liveId }) {
   const normalizedClerkUserId = typeof clerkUserId === "string" ? clerkUserId.trim() : "";
   if (!normalizedClerkUserId) {
@@ -3819,23 +3894,56 @@ async function fetchMyLiveStatsFromExtension({ clerkUserId, liveId }) {
     : "";
 
   if (!bridgeState || !bridgeState.isOnline) {
+    const cachedOffline = await getCachedMyLiveStatsSnapshot({
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId,
+    });
+    if (cachedOffline) {
+      return cachedOffline;
+    }
     throw createHttpError(503, "Whatnot extension is offline. Open the extension and connect Whatnot.");
   }
 
   if (!authClerkUserId || authClerkUserId !== normalizedClerkUserId) {
+    const cachedMismatch = await getCachedMyLiveStatsSnapshot({
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId,
+    });
+    if (cachedMismatch) {
+      return cachedMismatch;
+    }
     throw createHttpError(
       403,
       "Extension is not connected for this seller. Sign in on the extension with the same account.",
     );
   }
 
-  const actionResult = await requestWhatnotAction({
-    action: "fetch_my_live_stats",
-    clerkUserId: normalizedClerkUserId,
-    liveId: normalizedLiveId,
-  });
+  let actionResult = null;
+  try {
+    actionResult = await requestWhatnotAction({
+      action: "fetch_my_live_stats",
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId,
+    });
+  } catch (error) {
+    const cached = await getCachedMyLiveStatsSnapshot({
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId,
+    });
+    if (cached) {
+      return cached;
+    }
+    throw error;
+  }
 
   if (!actionResult || !actionResult.success) {
+    const cached = await getCachedMyLiveStatsSnapshot({
+      clerkUserId: normalizedClerkUserId,
+      liveId: normalizedLiveId,
+    });
+    if (cached) {
+      return cached;
+    }
     throw createHttpError(
       (actionResult && actionResult.status) || 502,
       (actionResult && actionResult.error) || "Failed to fetch MyLiveStats through extension.",
@@ -5245,12 +5353,37 @@ async function syncWhatnotEarlyPayoutBalanceFromPlatform({ clerkUserId }) {
     throw createHttpError(400, "Missing Clerk user id.");
   }
 
-  const actionResult = await requestWhatnotAction({
-    action: "fetch_early_payout_balance_data",
-    clerkUserId: normalizedClerkUserId,
-  });
+  let actionResult = null;
+  try {
+    actionResult = await requestWhatnotAction({
+      action: "fetch_early_payout_balance_data",
+      clerkUserId: normalizedClerkUserId,
+    });
+  } catch (error) {
+    const message = String((error && error.message) || "").toLowerCase();
+    if (message.includes("relogin") || message.includes("invalid token") || message.includes("auth")) {
+      throw createHttpError(
+        503,
+        "Whatnot session is refreshing. Wait a moment and click Refresh again.",
+        error.details || null,
+      );
+    }
+    throw error;
+  }
 
   if (!actionResult || !actionResult.success) {
+    const errorText = String((actionResult && actionResult.error) || "").toLowerCase();
+    if (
+      errorText.includes("relogin") ||
+      errorText.includes("invalid token") ||
+      errorText.includes("auth refresh")
+    ) {
+      throw createHttpError(
+        503,
+        "Whatnot session is refreshing. Wait a moment and click Refresh again.",
+        actionResult || null,
+      );
+    }
     throw createHttpError(
       (actionResult && actionResult.status) || 502,
       (actionResult && actionResult.error) || "Failed to load Whatnot payout balance. Connect the extension and Whatnot.",

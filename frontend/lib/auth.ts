@@ -500,6 +500,7 @@ export interface WhatnotOrdersSyncResponse {
   triggered: boolean
   reason: string
   fetchedCount: number | null
+  error?: string | null
 }
 
 /** Proxies TikTok Shop Partner API `POST /order/202309/orders/search`. */
@@ -856,6 +857,8 @@ export interface FetchWhatnotMyLiveStatsResponse {
   liveId: string
   statistic: WhatnotMyLiveStatistic | null
   raw: Record<string, unknown>
+  fromCache?: boolean
+  syncedAt?: string | null
 }
 
 export interface WhatnotUpcomingShowSummary {
@@ -1077,6 +1080,38 @@ export class AuthApiError extends Error {
     this.status = status
     this.details = details
     this.code = code
+  }
+}
+
+/** Transient extension/token errors that often clear after auto-refresh or one retry. */
+export function isTransientWhatnotAuthError(error: unknown): boolean {
+  const message =
+    error instanceof AuthApiError
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : String(error || "")
+  const lower = message.toLowerCase()
+  return (
+    lower.includes("relogin") ||
+    lower.includes("invalid token") ||
+    lower.includes("auth refresh") ||
+    lower.includes("auth failed") ||
+    lower.includes("session is refreshing") ||
+    lower.includes("csrf token missing") ||
+    lower.includes("timed out waiting for whatnot extension")
+  )
+}
+
+export async function withWhatnotAuthRetry<T>(fn: () => Promise<T>, delayMs = 1200): Promise<T> {
+  try {
+    return await fn()
+  } catch (error) {
+    if (!isTransientWhatnotAuthError(error)) {
+      throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return fn()
   }
 }
 
@@ -1303,6 +1338,7 @@ async function request<T>(
     },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
+    signal: AbortSignal.timeout(90000),
   })
 
   const payload = await response.json().catch(() => ({}))

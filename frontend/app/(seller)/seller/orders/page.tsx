@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAuth } from "@clerk/nextjs"
 import {
   Activity,
@@ -36,6 +36,8 @@ import {
   getWhatnotOrders,
   searchTikTokShopOrders,
   syncWhatnotOrders,
+  isTransientWhatnotAuthError,
+  withWhatnotAuthRetry,
   type TikTokShopOrdersSearchResponse,
   type WhatnotOrderItem,
   waitForSessionToken,
@@ -601,6 +603,7 @@ export default function SellerOrdersPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [ordersHint, setOrdersHint] = useState<string | null>(null)
   const [tiktokErrorMessage, setTiktokErrorMessage] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<OrderRow | null>(null)
   const [selectedTikTokOrder, setSelectedTikTokOrder] = useState<TikTokOrderRow | null>(null)
@@ -616,113 +619,166 @@ export default function SellerOrdersPage() {
     }
   }, [marketplaceHub?.hub])
 
-  const loadOrders = async (isManualRefresh = false) => {
+  const loadOrders = useCallback(
+    async (isManualRefresh = false) => {
+      if (!isLoaded) {
+        return
+      }
+
+      if (isManualRefresh) {
+        setIsRefreshing(true)
+      } else {
+        setIsLoading(true)
+      }
+
+      try {
+        setErrorMessage(null)
+        setTiktokErrorMessage(null)
+        if (isManualRefresh) {
+          setOrdersHint(null)
+        }
+        const token = await waitForSessionToken(getToken)
+        const isWhatnotHub = marketplaceHub?.hub === "whatnot"
+        const isTikTokHub = marketplaceHub?.hub === "tiktok"
+        const shouldLoadWhatnot = !isTikTokHub
+        const shouldLoadTikTok = !isWhatnotHub
+
+        const whatnotPromise = shouldLoadWhatnot
+          ? getWhatnotOrders(token, { limit: 100 }).catch((error) => ({ error }))
+          : Promise.resolve(null)
+        const tiktokPromise = shouldLoadTikTok
+          ? searchTikTokShopOrders(token, {
+              pageSize: 50,
+              sortOrder: "DESC",
+              sortField: "create_time",
+            }).catch((error) => ({ error }))
+          : Promise.resolve(null)
+
+        const [whatnotOutcome, tiktokOutcome] = await Promise.all([whatnotPromise, tiktokPromise])
+
+        if (!shouldLoadWhatnot) {
+          setOrders([])
+          setOrdersHint(null)
+        } else if (whatnotOutcome && "error" in whatnotOutcome) {
+          const error = whatnotOutcome.error
+          const message =
+            error instanceof AuthApiError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "Unable to load Whatnot orders."
+          setErrorMessage(message)
+          setOrders([])
+        } else {
+          const loaded = whatnotOutcome?.orders ?? []
+          setOrders(loaded)
+          if (!loaded.length && !isManualRefresh) {
+            setOrdersHint("No orders in database yet. Connect the extension and click Refresh to sync from Whatnot.")
+          }
+        }
+
+        if (shouldLoadWhatnot) {
+          const runSync = async () => {
+            try {
+              const syncResult = await withWhatnotAuthRetry(() => syncWhatnotOrders(token))
+              setErrorMessage(null)
+              if (!syncResult.triggered) {
+                if (syncResult.reason === "extension_offline") {
+                  setOrdersHint(
+                    "Showing database orders. Extension is offline — open Whatnot and connect the extension, then Refresh.",
+                  )
+                } else if (syncResult.reason === "extension_not_connected_for_user") {
+                  setOrdersHint(
+                    "Showing database orders. Connect the extension with the same Seller Hub account, then Refresh.",
+                  )
+                } else if (syncResult.reason === "auth_failed" || syncResult.reason === "sync_failed") {
+                  const syncErr = syncResult.error ? String(syncResult.error) : ""
+                  const authLike =
+                    syncResult.reason === "auth_failed" || isTransientWhatnotAuthError(new Error(syncErr))
+                  setOrdersHint(
+                    authLike
+                      ? "Could not sync from Whatnot right now. Keep whatnot.com open, reconnect the extension, then click Refresh."
+                      : syncErr
+                        ? `Could not sync from Whatnot (${syncErr}). Database orders above are unchanged.`
+                        : "Could not sync from Whatnot. Database orders above are unchanged.",
+                  )
+                }
+                return
+              }
+              const refreshed = await getWhatnotOrders(token, { limit: 100 })
+              setOrders(refreshed.orders ?? [])
+              setOrdersHint(null)
+              setErrorMessage(null)
+            } catch (syncError) {
+              const message =
+                syncError instanceof AuthApiError
+                  ? syncError.message
+                  : syncError instanceof Error
+                    ? syncError.message
+                    : "Unable to sync Whatnot orders."
+              setErrorMessage(null)
+              setOrdersHint(
+                isTransientWhatnotAuthError(syncError)
+                  ? `Session is refreshing. Reconnect the extension on whatnot.com, then click Refresh again.`
+                  : `Sync failed: ${message}. Database orders above are unchanged.`,
+              )
+            }
+          }
+          if (isManualRefresh) {
+            await runSync()
+          }
+        }
+
+        if (!shouldLoadTikTok) {
+          setTiktokShop(null)
+        } else if (tiktokOutcome && "error" in tiktokOutcome) {
+          const error = tiktokOutcome.error
+          const message =
+            error instanceof AuthApiError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "Unable to load TikTok Shop orders."
+          setTiktokErrorMessage(message)
+          setTiktokShop(null)
+        } else {
+          setTiktokShop(tiktokOutcome)
+        }
+      } catch (error) {
+        const message =
+          error instanceof AuthApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "Unable to load orders."
+        setErrorMessage(message)
+      } finally {
+        setIsLoading(false)
+        setIsRefreshing(false)
+      }
+    },
+    [getToken, isLoaded, marketplaceHub?.hub],
+  )
+
+  useEffect(() => {
     if (!isLoaded) {
       return
     }
 
-    if (isManualRefresh) {
-      setIsRefreshing(true)
-    } else {
-      setIsLoading(true)
-    }
-
-    try {
-      setErrorMessage(null)
-      setTiktokErrorMessage(null)
-      const token = await waitForSessionToken(getToken)
-      const isWhatnotHub = marketplaceHub?.hub === "whatnot"
-      const isTikTokHub = marketplaceHub?.hub === "tiktok"
-      const shouldLoadWhatnot = !isTikTokHub
-      const shouldLoadTikTok = !isWhatnotHub
-
-      if (shouldLoadWhatnot) {
-        const syncPromise = syncWhatnotOrders(token).catch(() => null)
-        if (isManualRefresh) {
-          await syncPromise
-        } else {
-          void syncPromise
-        }
-      }
-
-      const whatnotPromise = shouldLoadWhatnot
-        ? getWhatnotOrders(token, { limit: 100 }).catch((error) => ({ error }))
-        : Promise.resolve(null)
-      const tiktokPromise = shouldLoadTikTok
-        ? searchTikTokShopOrders(token, {
-            pageSize: 50,
-            sortOrder: "DESC",
-            sortField: "create_time",
-          }).catch((error) => ({ error }))
-        : Promise.resolve(null)
-
-      const [whatnotOutcome, tiktokOutcome] = await Promise.all([whatnotPromise, tiktokPromise])
-
-      if (!shouldLoadWhatnot) {
-        setOrders([])
-      } else if (whatnotOutcome && "error" in whatnotOutcome) {
-        const error = whatnotOutcome.error
-        const message =
-          error instanceof AuthApiError
-            ? error.message
-            : error instanceof Error
-              ? error.message
-              : "Unable to load Whatnot orders."
-        setErrorMessage(message)
-        setOrders([])
-      } else {
-        setOrders(whatnotOutcome?.orders ?? [])
-      }
-
-      if (!shouldLoadTikTok) {
-        setTiktokShop(null)
-      } else if (tiktokOutcome && "error" in tiktokOutcome) {
-        const error = tiktokOutcome.error
-        const message =
-          error instanceof AuthApiError
-            ? error.message
-            : error instanceof Error
-              ? error.message
-              : "Unable to load TikTok Shop orders."
-        setTiktokErrorMessage(message)
-        setTiktokShop(null)
-      } else {
-        setTiktokShop(tiktokOutcome)
-      }
-    } catch (error) {
-      const message =
-        error instanceof AuthApiError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "Unable to load orders."
-      setErrorMessage(message)
-    } finally {
-      setIsLoading(false)
-      setIsRefreshing(false)
-    }
-  }
-
-  useEffect(() => {
     let cancelled = false
 
     const run = async () => {
-      if (cancelled) {
-        return
+      if (!cancelled) {
+        await loadOrders(false)
       }
-      await loadOrders()
     }
 
     void run()
-    const intervalId = window.setInterval(() => {
-      void loadOrders(true)
-    }, 10000)
 
     return () => {
       cancelled = true
-      window.clearInterval(intervalId)
     }
-  }, [getToken, isLoaded, marketplaceHub?.hub])
+  }, [isLoaded, getToken, marketplaceHub?.hub, loadOrders])
 
   const orderRows = useMemo(() => orders.map(mapOrderRow), [orders])
   const tiktokRows = useMemo(() => (tiktokShop?.orders ?? []).map(mapTikTokOrderRow), [tiktokShop])
@@ -830,15 +886,6 @@ export default function SellerOrdersPage() {
     return new Set(tiktokRows.map((row) => row.buyer).filter((value) => value && value !== "N/A")).size
   }, [tiktokRows])
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
-        <Spinner className="h-6 w-6 text-primary" />
-        <p className="text-sm text-muted-foreground">Loading orders…</p>
-      </div>
-    )
-  }
-
   const tiktokDemoMode = Boolean(tiktokShop?.isMockData)
   const tiktokShopLiveConnected = Boolean(
     tiktokShop && (tiktokShop.shopConnected ?? tiktokShop.configured),
@@ -854,9 +901,32 @@ export default function SellerOrdersPage() {
 
   return (
     <div className="space-y-6">
-     
+      <PageHeader title="Orders" description="Whatnot orders from your database, with extension sync for the latest data.">
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={isRefreshing || isLoading}
+          onClick={() => void loadOrders(true)}
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+      </PageHeader>
 
-      
+      {isLoading && orderRows.length === 0 && tiktokRows.length === 0 ? (
+        <div className="flex min-h-[24vh] flex-col items-center justify-center gap-3">
+          <Spinner className="h-6 w-6 text-primary" />
+          <p className="text-sm text-muted-foreground">Loading orders…</p>
+        </div>
+      ) : null}
+
+      {ordersHint ? (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>Whatnot sync</AlertTitle>
+          <AlertDescription>{ordersHint}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {(errorMessage || tiktokErrorMessage) && (
         <div className="grid gap-3 md:grid-cols-2">
@@ -928,7 +998,7 @@ export default function SellerOrdersPage() {
             <EmptyState
               icon={PackageSearch}
               title="No Whatnot orders synced yet"
-              description="Orders sync when this tab opens. Keep the Whatnot extension connected to your seller session."
+              description="Saved orders load from your database. Click Refresh to sync the latest from Whatnot via the extension."
             />
           ) : (
             <Card className="overflow-hidden border-border/60 shadow-sm">

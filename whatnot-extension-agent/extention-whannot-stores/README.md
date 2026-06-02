@@ -19,7 +19,11 @@
 - Backend socket contract stubs in `background.js`:
   - extension -> backend: `auth`, `action_response`, `relogin_required`, `pong`
   - backend -> extension: `action_request`, `heartbeat`, `force_relogin`
-- Retry-on-auth-failure once, then relogin required event.
+- Automatic auth refresh before Whatnot API calls (throttled cookie/session refresh; parallel platform actions allowed).
+- Fresh GraphQL headers via `buildWhatnotGraphqlHeaders` (Bearer from live cookies, not cached state).
+- Per-request cookie refresh in `executeApi`; on `Invalid token` retries session refresh + reconnect before surfacing relogin.
+- Proactive session refresh on backend heartbeat (~15s) while connected.
+- Relogin required only after automatic refresh + reconnect both fail.
 
 ## Important security note
 

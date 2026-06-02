@@ -128,8 +128,10 @@ function initializeWhatnotExtensionBridge({ server }) {
           return;
         }
 
+        // Do not reject unrelated pending requests — parallel Seller Hub calls
+        // (stats + shipments + finance) must not fail because one action hit a transient token error.
         if (type === "relogin_required") {
-          rejectAllPending(createHttpError(401, "Whatnot relogin required in extension.", payload));
+          return;
         }
       } catch (_error) {
         // Ignore malformed messages from extension.
@@ -164,9 +166,34 @@ function getWhatnotExtensionBridgeState() {
   };
 }
 
-async function requestWhatnotAction(payload, timeoutMs = 25000) {
+function isTransientWhatnotAuthMessage(message) {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("relogin") ||
+    text.includes("invalid token") ||
+    text.includes("auth refresh") ||
+    text.includes("csrf token missing") ||
+    text.includes("auth failed")
+  );
+}
+
+function isTransientWhatnotAuthError(error) {
+  const status = Number(error && error.status);
+  if (status === 401 || status === 403) {
+    return true;
+  }
+  return isTransientWhatnotAuthMessage(error && error.message);
+}
+
+function isTransientWhatnotAuthActionResult(result) {
+  if (!result || result.success) {
+    return false;
+  }
+  return isTransientWhatnotAuthMessage(result.error);
+}
+
+async function requestWhatnotActionOnce(payload, timeoutMs) {
   if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
-    // Give extension reconnect loop a short chance before failing request.
     const waitUntil = Date.now() + 3000;
     while (Date.now() < waitUntil) {
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -199,6 +226,40 @@ async function requestWhatnotAction(payload, timeoutMs = 25000) {
       }),
     );
   });
+}
+
+function isExtensionTimeoutError(error) {
+  return Number(error && error.status) === 504;
+}
+
+async function requestWhatnotAction(payload, timeoutMs = 45000) {
+  let lastResult = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+    const attemptTimeout = attempt === 0 ? timeoutMs : Math.max(timeoutMs, 60000);
+    try {
+      lastResult = await requestWhatnotActionOnce(payload, attemptTimeout);
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        isTransientWhatnotAuthError(error) || isExtensionTimeoutError(error);
+      if (!retryable || attempt === 1) {
+        throw error;
+      }
+      continue;
+    }
+    if (!isTransientWhatnotAuthActionResult(lastResult) || attempt === 1) {
+      return lastResult;
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+  return lastResult;
 }
 
 module.exports = {

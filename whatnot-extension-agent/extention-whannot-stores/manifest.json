@@ -10,6 +10,7 @@
     "128": "extension-logo.png"
   },
   "permissions": [
+    "alarms",
     "cookies",
     "storage",
     "tabs",

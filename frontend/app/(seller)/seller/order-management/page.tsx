@@ -24,6 +24,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   AuthApiError,
   fetchWhatnotMyLiveStats,
+  isTransientWhatnotAuthError,
+  withWhatnotAuthRetry,
   fetchWhatnotShipmentsTable,
   getTikTokShopOrderDetail,
   getWhatnotShipmentsLivestreamsCurrentLiveId,
@@ -908,8 +910,9 @@ export default function SellerOrderManagementPage() {
 
       try {
         const token = await waitForSessionToken(getToken)
-        const result = await fetchWhatnotMyLiveStats(token, trimmed)
+        const result = await withWhatnotAuthRetry(() => fetchWhatnotMyLiveStats(token, trimmed))
         setStatistic(result.statistic)
+        setErrorMessage(null)
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(LIVE_ID_STORAGE_KEY, trimmed)
         }
@@ -921,6 +924,10 @@ export default function SellerOrderManagementPage() {
             : error instanceof Error
               ? error.message
               : "Unable to load live stats."
+        if (isTransientWhatnotAuthError(error) && statistic) {
+          setErrorMessage(null)
+          return { statistic }
+        }
         setErrorMessage(message)
         setStatistic(null)
         return null
@@ -972,7 +979,7 @@ export default function SellerOrderManagementPage() {
           body.manifestUrls = urls
         }
 
-        const result = await fetchWhatnotShipmentsTable(token, body)
+        const result = await withWhatnotAuthRetry(() => fetchWhatnotShipmentsTable(token, body))
         setShipmentRows(result.rows || [])
         if (result.hint) {
           setShipmentsHint(result.hint)
@@ -986,14 +993,19 @@ export default function SellerOrderManagementPage() {
             : error instanceof Error
               ? error.message
               : "Unable to load shipments."
-        setShipmentsError(message)
-        setShipmentRows([])
+        if (isTransientWhatnotAuthError(error) && shipmentRows.length > 0) {
+          setShipmentsError(null)
+          setShipmentsHint("Showing cached shipments while Whatnot session refreshes.")
+        } else {
+          setShipmentsError(message)
+          setShipmentRows([])
+        }
       } finally {
         setIsShipmentsLoading(false)
         setIsShipmentsRefreshing(false)
       }
     },
-    [getToken, isLoaded, liveId, statistic],
+    [getToken, isLoaded, liveId, statistic, shipmentRows.length],
   )
 
   const loadTikTokOrders = useCallback(
@@ -1035,57 +1047,119 @@ export default function SellerOrderManagementPage() {
   )
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!isLoaded || marketplaceHub?.hub === "tiktok") {
       return
     }
 
     let cancelled = false
 
-    async function resolveLiveIdAndLoadStats() {
+    async function bootstrapWhatnotOrderManagement() {
+      const storedLiveId =
+        typeof window !== "undefined"
+          ? (window.sessionStorage.getItem(LIVE_ID_STORAGE_KEY) || "").trim()
+          : ""
+
+      if (storedLiveId) {
+        setLiveId(storedLiveId)
+        const statsOutcome = await loadStats(false, storedLiveId)
+        if (cancelled) {
+          return
+        }
+        const manifestUrls =
+          statsOutcome?.statistic && Array.isArray(statsOutcome.statistic.manifestUrls)
+            ? statsOutcome.statistic.manifestUrls
+            : undefined
+        await loadShipments(false, manifestUrls, storedLiveId)
+      } else {
+        await loadShipments(false)
+      }
+
+      if (cancelled) {
+        return
+      }
+
       try {
         const token = await waitForSessionToken(getToken)
-        const resolved = await getWhatnotShipmentsLivestreamsCurrentLiveId(token)
+        const resolved = await withWhatnotAuthRetry(() =>
+          getWhatnotShipmentsLivestreamsCurrentLiveId(token),
+        )
         const id = typeof resolved.liveId === "string" ? resolved.liveId.trim() : ""
         if (!id || cancelled) {
+          if (!storedLiveId && !id) {
+            setErrorMessage(
+              "Connect the Whatnot extension or enter a live show ID, then use Refresh stats.",
+            )
+          }
           return
         }
         setLiveId(id)
         if (typeof window !== "undefined") {
           window.sessionStorage.setItem(LIVE_ID_STORAGE_KEY, id)
         }
+        setErrorMessage(null)
         const statsOutcome = await loadStats(false, id)
+        if (cancelled) {
+          return
+        }
         const manifestUrls =
           statsOutcome?.statistic && Array.isArray(statsOutcome.statistic.manifestUrls)
             ? statsOutcome.statistic.manifestUrls
             : undefined
-        if (!cancelled) {
-          await loadShipments(false, manifestUrls, id)
+        await loadShipments(false, manifestUrls, id)
+      } catch (error) {
+        if (cancelled) {
+          return
         }
-      } catch {
-        /* Extension offline / not connected — seller can paste Live ID and use Load stats */
+        if (!storedLiveId) {
+          const message =
+            error instanceof AuthApiError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "Unable to detect live show. Connect the extension or enter a live ID."
+          setErrorMessage(isTransientWhatnotAuthError(error) ? null : message)
+          if (isTransientWhatnotAuthError(error)) {
+            setShipmentsHint("Session refreshing — use Refresh stats in a moment or enter a live ID.")
+          }
+        }
       }
     }
 
-    void resolveLiveIdAndLoadStats()
+    void bootstrapWhatnotOrderManagement()
 
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on session ready; avoid re-running when loadStats/loadShipments identities change
-  }, [isLoaded, getToken])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once per session/hub; loadStats/loadShipments are stable enough
+  }, [isLoaded, getToken, marketplaceHub?.hub])
 
   useEffect(() => {
     if (!isLoaded || !liveId.trim()) {
       return
     }
 
-    const intervalId = window.setInterval(() => {
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return
+      }
       void loadStats(true).then((out) =>
         void loadShipments(false, out?.statistic?.manifestUrls),
       )
-    }, 15000)
+    }
 
-    return () => window.clearInterval(intervalId)
+    const intervalId = window.setInterval(tick, 15000)
+
+    const onVisibility = () => {
+      if (!document.hidden) {
+        tick()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
   }, [isLoaded, liveId, loadStats, loadShipments])
 
   useEffect(() => {

@@ -72,6 +72,7 @@ import {
   syncWhatnotInventoryLive,
   syncWhatnotReferenceCache,
   waitForSessionToken,
+  withWhatnotAuthRetry,
   type WhatnotInventoryLiveResponse,
   type TikTokGlobalProduct,
   type TikTokGlobalProductGetResponse,
@@ -473,7 +474,9 @@ export default function SellerInventoryManagementPage() {
           return
         }
 
-        const synced = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+        const synced = await withWhatnotAuthRetry(() =>
+          syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true }),
+        )
         if (cancelled) return
         setInventoryItems(mapWhatnotInventoryResponse(synced))
         setInventoryLastSyncedAt(synced.syncedAt ? new Date(synced.syncedAt) : null)
@@ -501,7 +504,9 @@ export default function SellerInventoryManagementPage() {
       setIsRefreshingInventory(true)
       setErrorMessage("")
       const token = await waitForSessionToken(getToken)
-      const synced = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+      const synced = await withWhatnotAuthRetry(() =>
+        syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true }),
+      )
       setInventoryItems(mapWhatnotInventoryResponse(synced))
       setInventoryLastSyncedAt(synced.syncedAt ? new Date(synced.syncedAt) : null)
     } catch (error) {
@@ -748,7 +753,7 @@ export default function SellerInventoryManagementPage() {
       setReferenceCacheNotice("")
 
       const token = await waitForSessionToken(getToken)
-      const result = await syncWhatnotReferenceCache(token)
+      const result = await withWhatnotAuthRetry(() => syncWhatnotReferenceCache(token))
       await loadWhatnotCreateFormOptions()
 
       if (Array.isArray(result.errors) && result.errors.length) {
@@ -1167,10 +1172,12 @@ export default function SellerInventoryManagementPage() {
           },
         ]
         const fileBase64 = await readFileAsBase64(uploadFile)
-        const mediaResponse = await generateWhatnotMediaUploadUrls(token, mediaPayload, {
-          fileBase64,
-          fileContentType: uploadFile.type || "image/jpeg",
-        })
+        const mediaResponse = await withWhatnotAuthRetry(() =>
+          generateWhatnotMediaUploadUrls(token, mediaPayload, {
+            fileBase64,
+            fileContentType: uploadFile.type || "image/jpeg",
+          }),
+        )
         const nextImageId =
           mediaResponse?.data?.addListingPhoto?.image?.id &&
           typeof mediaResponse.data.addListingPhoto.image.id === "string"
@@ -1387,18 +1394,22 @@ export default function SellerInventoryManagementPage() {
       setIsPublishingInventory(true)
       setCreateFormError("")
       const token = await waitForSessionToken(getToken)
-      await createWhatnotListing(token, {
-        title: createForm.title.trim(),
-        description: createForm.description.trim(),
-        quantity: quantityValue,
-        priceUsd: priceValue,
-        subcategoryId: createForm.subcategoryId,
-        shippingProfileId: createForm.shippingProfileId,
-        hazmatType: createForm.hazardousMaterials.trim(),
-        imageId: uploadedImageId.trim(),
-      })
+      await withWhatnotAuthRetry(() =>
+        createWhatnotListing(token, {
+          title: createForm.title.trim(),
+          description: createForm.description.trim(),
+          quantity: quantityValue,
+          priceUsd: priceValue,
+          subcategoryId: createForm.subcategoryId,
+          shippingProfileId: createForm.shippingProfileId,
+          hazmatType: createForm.hazardousMaterials.trim(),
+          imageId: uploadedImageId.trim(),
+        }),
+      )
 
-      const refreshed = await syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true })
+      const refreshed = await withWhatnotAuthRetry(() =>
+        syncWhatnotInventoryLive(token, selectedTab, { forceRefresh: true }),
+      )
       setInventoryItems(mapWhatnotInventoryResponse(refreshed))
       setInventoryLastSyncedAt(refreshed.syncedAt ? new Date(refreshed.syncedAt) : null)
       setCreateDialogOpen(false)

@@ -19,7 +19,9 @@ import {
   getTikTokFinanceWithdrawals,
   getClerkErrorMessage,
   syncWhatnotEarlyPayoutBalance,
+  isTransientWhatnotAuthError,
   waitForSessionToken,
+  withWhatnotAuthRetry,
   type TikTokFinancePaymentItem,
   type TikTokFinancePaymentsResponse,
   type TikTokFinanceStatementItem,
@@ -34,6 +36,7 @@ import {
 } from "@/lib/auth"
 
 const PAGE_SIZE = 5
+const WHATNOT_BALANCE_CACHE_KEY = "seller_whatnot_early_payout_balances"
 type FinancePlatform = "whatnot" | "tiktok"
 type TikTokFinanceSection = "statements" | "payments" | "withdrawals" | "unsettledOrders"
 
@@ -176,6 +179,28 @@ export default function FinanceManagementPage() {
     }
   }, [marketplaceHub?.hub])
 
+  useEffect(() => {
+    if (typeof window === "undefined" || activePlatform !== "whatnot") {
+      return
+    }
+    try {
+      const cached = window.sessionStorage.getItem(WHATNOT_BALANCE_CACHE_KEY)
+      if (!cached) {
+        return
+      }
+      const parsed = JSON.parse(cached) as {
+        account?: string
+        available?: string
+        processing?: string
+      }
+      if (parsed.account) setAccountBalanceDisplay(parsed.account)
+      if (parsed.available) setAvailablePayoutDisplay(parsed.available)
+      if (parsed.processing) setProcessingDisplay(parsed.processing)
+    } catch {
+      /* ignore cache parse errors */
+    }
+  }, [activePlatform])
+
   const loadWhatnotBalance = useCallback(async () => {
     if (!isLoaded) {
       return
@@ -185,16 +210,51 @@ export default function FinanceManagementPage() {
       setIsBalanceLoading(true)
       setBalanceError("")
       const token = await waitForSessionToken(getToken)
-      const result = await syncWhatnotEarlyPayoutBalance(token)
+      const result = await withWhatnotAuthRetry(() => syncWhatnotEarlyPayoutBalance(token))
       const balances = result?.responsePayload?.data?.me?.balances
-      setAccountBalanceDisplay(formatBalanceDisplay(balances?.totalSalesBalance))
-      setAvailablePayoutDisplay(formatBalanceDisplay(balances?.completedSalesBalance))
-      setProcessingDisplay(formatBalanceDisplay(balances?.processingSalesBalance))
+      const account = formatBalanceDisplay(balances?.totalSalesBalance)
+      const available = formatBalanceDisplay(balances?.completedSalesBalance)
+      const processing = formatBalanceDisplay(balances?.processingSalesBalance)
+      setAccountBalanceDisplay(account)
+      setAvailablePayoutDisplay(available)
+      setProcessingDisplay(processing)
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          WHATNOT_BALANCE_CACHE_KEY,
+          JSON.stringify({ account, available, processing }),
+        )
+      }
     } catch (error) {
-      setBalanceError(getClerkErrorMessage(error))
-      setAccountBalanceDisplay("—")
-      setAvailablePayoutDisplay("—")
-      setProcessingDisplay("—")
+      const transient = isTransientWhatnotAuthError(error)
+      if (transient && typeof window !== "undefined") {
+        try {
+          const cached = window.sessionStorage.getItem(WHATNOT_BALANCE_CACHE_KEY)
+          if (cached) {
+            const parsed = JSON.parse(cached) as {
+              account?: string
+              available?: string
+              processing?: string
+            }
+            if (parsed.account) setAccountBalanceDisplay(parsed.account)
+            if (parsed.available) setAvailablePayoutDisplay(parsed.available)
+            if (parsed.processing) setProcessingDisplay(parsed.processing)
+            setBalanceError("")
+            return
+          }
+        } catch {
+          /* ignore cache parse errors */
+        }
+      }
+      setBalanceError(
+        transient
+          ? "Whatnot is refreshing your session. Balances will update in a moment — click Refresh."
+          : getClerkErrorMessage(error),
+      )
+      if (!transient) {
+        setAccountBalanceDisplay("—")
+        setAvailablePayoutDisplay("—")
+        setProcessingDisplay("—")
+      }
     } finally {
       setIsBalanceLoading(false)
     }

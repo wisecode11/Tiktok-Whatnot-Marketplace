@@ -12,6 +12,14 @@ const state = {
 
 let ws = null;
 let stateHydrated = false;
+/** @type {Promise<{success: boolean, tabId?: number, auth?: object, error?: string}>|null} */
+let authRefreshInFlight = null;
+/** When true, a follow-up refresh with includeSession runs after the current one finishes. */
+let authRefreshNeedsSession = false;
+const WHATNOT_AUTH_KEEPALIVE_ALARM = "whatnot-auth-keepalive";
+/** Count in-flight platform actions (used to avoid heartbeat auth refresh during work). */
+let platformActionsInFlight = 0;
+let lastLightAuthRefreshAt = 0;
 const observedGraphqlWaiters = new Map();
 let pendingShowTabRequestContext = null;
 const MARKETPLACE_API_BASE = "http://localhost:5000";
@@ -59,11 +67,45 @@ chrome.runtime.onInstalled.addListener(() => {
   stateHydrated = true;
   void persistState();
   void setBackendSocket(BACKEND_SOCKET_URL);
+  void scheduleWhatnotAuthKeepalive();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void ensureStateHydrated();
+  void scheduleWhatnotAuthKeepalive();
 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== WHATNOT_AUTH_KEEPALIVE_ALARM) {
+    return;
+  }
+  void runWhatnotAuthKeepalive();
+});
+
+async function scheduleWhatnotAuthKeepalive() {
+  try {
+    await chrome.alarms.create(WHATNOT_AUTH_KEEPALIVE_ALARM, {
+      periodInMinutes: 4,
+    });
+  } catch (_error) {
+    // alarms permission missing in dev unpack — ignore
+  }
+}
+
+async function runWhatnotAuthKeepalive() {
+  await ensureStateHydrated();
+  if (!state.clerkUserId) {
+    return;
+  }
+  const accessToken = await readCookieValue("__Secure-access-token");
+  if (!accessToken) {
+    return;
+  }
+  await refreshWhatnotAuthFromBrowser(state.tabId, { includeSession: true, force: true });
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    void setBackendSocket(state.backendSocketUrl || BACKEND_SOCKET_URL);
+  }
+}
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   handleMessage(request)
@@ -362,21 +404,14 @@ async function saveLivestreamTagDirectDescendantsToMarketplace(payload) {
 }
 
 async function fetchSellerHubInventoryEditData(tabId) {
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  const authGate = await requireWhatnotAuth(tabId || state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
 
-  const headers = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    headers.authorization = `Bearer ${accessToken}`;
-  }
+  const headers = await buildWhatnotGraphqlHeaders(
+    state?.observedGraphqlTemplates?.SellerHubInventoryEdit?.requestHeaders || {},
+  );
 
   const template = state?.observedGraphqlTemplates?.SellerHubInventoryEdit;
   let requestBody = {
@@ -410,21 +445,12 @@ async function fetchSellerHubInventoryEditData(tabId) {
 }
 
 async function fetchShippingProfilesData(tabId) {
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  const authGate = await requireWhatnotAuth(tabId || state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
 
-  const headers = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    headers.authorization = `Bearer ${accessToken}`;
-  }
+  const headers = await buildWhatnotGraphqlHeaders();
 
   const attempts = [
     {
@@ -483,21 +509,12 @@ async function fetchShippingProfilesData(tabId) {
 }
 
 async function fetchLivestreamTagDirectDescendantsData(tabId) {
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
+  const authGate = await requireWhatnotAuth(tabId || state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
 
-  const headers = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    headers.authorization = `Bearer ${accessToken}`;
-  }
+  const headers = await buildWhatnotGraphqlHeaders();
 
   const requestBody = {
     operationName: "LivestreamTagDirectDescendants",
@@ -885,28 +902,45 @@ async function sendOrdersToMarketplace(orders, tabId) {
 }
 
 async function fetchWhatnotOrders(tabId) {
-  let targetTabId = tabId || state.tabId;
-  if (!targetTabId || !state.connected || !state.auth) {
-    const connected = await ensureConnectedWhatnotSession(targetTabId);
-    if (!connected.success) {
-      return { success: false, error: connected.error || "Not connected to Whatnot." };
+  const connected = await ensureConnectedWhatnotSession(tabId || state.tabId);
+  if (!connected.success) {
+    return { success: false, error: connected.error || "Not connected to Whatnot." };
+  }
+  const targetTabId = connected.tabId;
+
+  await refreshWhatnotAuthFromBrowser(targetTabId, { includeSession: false });
+
+  const ordersPageUrl = "https://www.whatnot.com/dashboard/orders";
+  const pageRequest = {
+    url: ordersPageUrl,
+    method: "GET",
+    headers: {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+  };
+
+  let sent = await sendWhatnotApiRequest(targetTabId, pageRequest);
+  let response = sent.result;
+  const status = Number(response?.status);
+
+  if (status === 401 || status === 403) {
+    const softRefresh = await refreshWhatnotAuthFromBrowser(sent.tabId, { includeSession: true });
+    if (softRefresh.success) {
+      sent = await sendWhatnotApiRequest(softRefresh.tabId, pageRequest);
+      response = sent.result;
     }
-    targetTabId = connected.tabId;
   }
 
-  const response = await executeApi(targetTabId, {
-    url: "https://www.whatnot.com/en-GB/dashboard/orders",
-    method: "GET"
-  });
+  const html = typeof response?.data === "string" ? response.data : null;
 
-  if (!response?.success || typeof response?.data !== "string") {
+  if (!html) {
     return {
       success: false,
-      error: response?.error || "Failed to fetch Whatnot orders page."
+      error: response?.error || "Failed to fetch Whatnot orders page. Open whatnot.com and sign in.",
     };
   }
 
-  const ssrExtract = extractApolloSSRData(response.data);
+  const ssrExtract = extractApolloSSRData(html);
   let orders = Array.isArray(ssrExtract?.orders) ? ssrExtract.orders : [];
   let fallbackUsed = false;
   let fallbackCount = 0;
@@ -1065,21 +1099,12 @@ async function fetchOrdersFromCapturedGraphqlTemplate(tabId) {
     return [];
   }
 
-  const templateHeaders = filterAllowedHeaders(template.requestHeaders || {});
-  const headers = {
-    ...templateHeaders,
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-wn-extension": "1",
-  };
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (csrfToken && csrfToken !== "-") {
-    headers["x-csrf-token"] = csrfToken;
+  const authGate = await requireWhatnotAuth(tabId || state.tabId);
+  if (!authGate.ok) {
+    return [];
   }
-  if (accessToken) {
-    headers.authorization = `Bearer ${accessToken}`;
-  }
+
+  const headers = await buildWhatnotGraphqlHeaders(template.requestHeaders || {});
 
   const response = await executeApi(tabId, {
     url: template.url || "https://www.whatnot.com/services/graphql/?ssr=0",
@@ -1100,6 +1125,255 @@ async function fetchOrdersFromCapturedGraphqlTemplate(tabId) {
   return extractOrdersFromGraphqlPayload(graphqlData);
 }
 
+/**
+ * Re-read Whatnot cookies (and optionally live session CSRF) into extension state.
+ * Serialized so parallel platform actions do not race session reads.
+ */
+async function refreshWhatnotAuthFromBrowser(tabId, { includeSession = false, force = false } = {}) {
+  const expMs = await readAccessTokenExpirationMs();
+  if (expMs != null && expMs - Date.now() < 10 * 60 * 1000) {
+    includeSession = true;
+    force = true;
+  }
+
+  if (
+    !force &&
+    !includeSession &&
+    Date.now() - lastLightAuthRefreshAt < 4000 &&
+    state.auth?.csrf_token
+  ) {
+    return { success: true, tabId: state.tabId || tabId, auth: state.auth };
+  }
+
+  if (authRefreshInFlight) {
+    if (includeSession) {
+      authRefreshNeedsSession = true;
+    }
+    const result = await authRefreshInFlight;
+    if (authRefreshNeedsSession) {
+      authRefreshNeedsSession = false;
+      return refreshWhatnotAuthFromBrowser(tabId || state.tabId, { includeSession: true, force: true });
+    }
+    return result;
+  }
+
+  const effectiveIncludeSession = includeSession;
+  if (includeSession) {
+    authRefreshNeedsSession = false;
+  }
+
+  const runRefresh = async () => {
+    let resolvedTabId = tabId || state.tabId;
+    if (resolvedTabId != null) {
+      try {
+        const tab = await chrome.tabs.get(resolvedTabId);
+        if (!tab?.url?.includes("whatnot.com")) {
+          resolvedTabId = null;
+        }
+      } catch (_error) {
+        resolvedTabId = null;
+      }
+    }
+    if (!resolvedTabId) {
+      resolvedTabId = await resolveWhatnotTabId(null, false);
+    }
+    if (!resolvedTabId) {
+      return { success: false, error: "No Whatnot tab available for auth refresh." };
+    }
+
+    const [accessToken, cookies] = await Promise.all([
+      readCookieValue("__Secure-access-token"),
+      readCookieState(),
+    ]);
+
+    let csrf_token = state.auth?.csrf_token || null;
+    let session_extension_token = state.auth?.session_extension_token || null;
+
+    if (effectiveIncludeSession) {
+      try {
+        const sessionResult = await chrome.tabs.sendMessage(resolvedTabId, {
+          action: "read_session_tokens",
+        });
+        if (sessionResult?.success && sessionResult.data) {
+          csrf_token = sessionResult.data.csrf_token || csrf_token;
+          session_extension_token =
+            sessionResult.data.session_extension_token || session_extension_token;
+        }
+      } catch (_error) {
+        // Tab may be loading; cookie-only refresh can still recover access token.
+      }
+    }
+
+    state.tabId = resolvedTabId;
+    state.auth = {
+      csrf_token,
+      session_extension_token,
+      access_token: accessToken || null,
+      cookie_state: cookies,
+    };
+    const csrfNormalized = String(csrf_token || "").trim();
+    state.connected = Boolean(accessToken && csrfNormalized && csrfNormalized !== "-");
+    if (!effectiveIncludeSession) {
+      lastLightAuthRefreshAt = Date.now();
+    }
+    await persistState();
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      sendSocketMessage("auth", {
+        auth: state.auth,
+        tabId: resolvedTabId,
+        clerkUserId: state.clerkUserId,
+      });
+    }
+
+    return { success: true, tabId: resolvedTabId, auth: state.auth };
+  };
+
+  authRefreshInFlight = runRefresh().finally(() => {
+    authRefreshInFlight = null;
+    if (authRefreshNeedsSession) {
+      authRefreshNeedsSession = false;
+      void refreshWhatnotAuthFromBrowser(state.tabId, { includeSession: true, force: true });
+    }
+  });
+  return authRefreshInFlight;
+}
+
+/** Refresh auth from browser; reconnect if needed (for handlers that gate on CSRF before executeApi). */
+async function ensureWhatnotAuthReady(tabId) {
+  let refreshed = await refreshWhatnotAuthFromBrowser(tabId || state.tabId, { includeSession: true });
+  if (refreshed.success) {
+    return refreshed;
+  }
+  const connected = await ensureConnectedWhatnotSession(tabId || state.tabId);
+  if (!connected.success) {
+    return connected;
+  }
+  refreshed = await refreshWhatnotAuthFromBrowser(connected.tabId, { includeSession: true });
+  return refreshed;
+}
+
+const WHATNOT_CSRF_MISSING_ERROR =
+  "CSRF token missing. Open whatnot.com and reconnect the extension.";
+
+/** Gate platform handlers: refresh session + cookies, reconnect if needed. */
+async function requireWhatnotAuth(tabId, options = {}) {
+  const onMissingTab = options.onMissingTab && typeof options.onMissingTab === "object" ? options.onMissingTab : {};
+  const onMissingCsrf =
+    options.onMissingCsrf && typeof options.onMissingCsrf === "object" ? options.onMissingCsrf : {};
+
+  const authReady = await ensureWhatnotAuthReady(tabId || state.tabId);
+  if (!authReady.success) {
+    return {
+      ok: false,
+      response: {
+        success: false,
+        error: authReady.error || "No connected Whatnot tab.",
+        ...onMissingTab,
+      },
+    };
+  }
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  if (!csrfToken || csrfToken === "-") {
+    return {
+      ok: false,
+      response: {
+        success: false,
+        error: WHATNOT_CSRF_MISSING_ERROR,
+        ...onMissingCsrf,
+      },
+    };
+  }
+  return {
+    ok: true,
+    csrfToken,
+    tabId: authReady.tabId || state.tabId,
+  };
+}
+
+/** GraphQL headers with fresh Bearer from cookies (not cached state.auth.access_token). */
+async function buildWhatnotGraphqlHeaders(templateHeaders = {}) {
+  const accessToken = await readCookieValue("__Secure-access-token");
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  const headers = {
+    ...filterAllowedHeaders(templateHeaders),
+    "content-type": "application/json",
+    "x-whatnot-app": "whatnot-web",
+    "x-wn-extension": "1",
+  };
+  if (csrfToken && csrfToken !== "-") {
+    headers["x-csrf-token"] = csrfToken;
+  }
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+  return headers;
+}
+
+/** Apply latest cookie/session auth to outgoing Whatnot API headers (never stale cached Bearer). */
+async function applyFreshWhatnotAuthHeaders(options = {}) {
+  const url = typeof options.url === "string" ? options.url : "";
+  if (!url.includes("whatnot.com")) {
+    return options;
+  }
+
+  const isGraphql = url.includes("/services/graphql");
+  if (!isGraphql) {
+    return {
+      ...options,
+      headers: {
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        ...(options.headers && typeof options.headers === "object" ? options.headers : {}),
+      },
+    };
+  }
+
+  const headers = { ...(options.headers || {}) };
+  for (const key of Object.keys(headers)) {
+    const lower = String(key).toLowerCase();
+    if (lower === "authorization" || lower === "x-csrf-token") {
+      delete headers[key];
+    }
+  }
+
+  const csrfToken = String(state?.auth?.csrf_token || "").trim();
+  const accessToken = await readCookieValue("__Secure-access-token");
+
+  if (csrfToken && csrfToken !== "-") {
+    headers["x-csrf-token"] = csrfToken;
+  }
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+
+  return { ...options, headers };
+}
+
+async function sendWhatnotApiRequest(tabId, options) {
+  let targetTabId = tabId;
+  try {
+    const result = await chrome.tabs.sendMessage(targetTabId, {
+      action: "run_whatnot_api",
+      options,
+    });
+    return { tabId: targetTabId, result };
+  } catch (_error) {
+    const connected = await ensureConnectedWhatnotSession(targetTabId);
+    if (!connected.success) {
+      return {
+        tabId: targetTabId,
+        result: { success: false, error: connected.error || "Unable to reconnect Whatnot tab." },
+      };
+    }
+    targetTabId = connected.tabId;
+    const result = await chrome.tabs.sendMessage(targetTabId, {
+      action: "run_whatnot_api",
+      options,
+    });
+    return { tabId: targetTabId, result };
+  }
+}
+
 async function executeApi(tabId, options, behavior = {}) {
   const suppressRelogin = Boolean(behavior?.suppressRelogin);
   let targetTabId = tabId || state.tabId;
@@ -1111,50 +1385,72 @@ async function executeApi(tabId, options, behavior = {}) {
     targetTabId = connected.tabId;
   }
 
-  let result = null;
-  try {
-    result = await chrome.tabs.sendMessage(targetTabId, {
-      action: "run_whatnot_api",
-      options
-    });
-  } catch (_error) {
-    const connected = await ensureConnectedWhatnotSession(targetTabId);
-    if (!connected.success) {
-      return { success: false, error: connected.error || "Unable to reconnect Whatnot tab." };
-    }
-    targetTabId = connected.tabId;
-    result = await chrome.tabs.sendMessage(targetTabId, {
-      action: "run_whatnot_api",
-      options
-    });
+  const isWhatnotRequest = typeof options?.url === "string" && options.url.includes("whatnot.com");
+  if (isWhatnotRequest) {
+    await refreshWhatnotAuthFromBrowser(targetTabId, { includeSession: false });
+    options = await applyFreshWhatnotAuthHeaders(options);
   }
 
-  if (isAuthFailure(result)) {
-    const refreshed = await ensureConnectedWhatnotSession(targetTabId);
-    if (!refreshed.success) {
-      if (!suppressRelogin) {
-        sendSocketMessage("relogin_required", { reason: "auth_refresh_failed" });
-      }
-      return { success: false, error: "Auth refresh failed, relogin needed." };
+  let sent = await sendWhatnotApiRequest(targetTabId, options);
+  targetTabId = sent.tabId;
+  let result = sent.result;
+
+  const requestUrl = typeof options?.url === "string" ? options.url : "";
+
+  if (!isAuthFailure(result, requestUrl)) {
+    return result;
+  }
+
+  const softRefresh = await refreshWhatnotAuthFromBrowser(targetTabId, { includeSession: true });
+  if (softRefresh.success) {
+    targetTabId = softRefresh.tabId;
+    const retryOptions = await applyFreshWhatnotAuthHeaders(options);
+    sent = await sendWhatnotApiRequest(targetTabId, retryOptions);
+    targetTabId = sent.tabId;
+    result = sent.result;
+    if (!isAuthFailure(result, requestUrl)) {
+      return result;
     }
-    const retry = await chrome.tabs.sendMessage(targetTabId, {
-      action: "run_whatnot_api",
-      options
+  }
+
+  const refreshed = await ensureConnectedWhatnotSession(targetTabId);
+  if (!refreshed.success) {
+    return { success: false, error: "Auth refresh failed, relogin needed." };
+  }
+  targetTabId = refreshed.tabId;
+  const reconnectOptions = await applyFreshWhatnotAuthHeaders(options);
+  sent = await sendWhatnotApiRequest(targetTabId, reconnectOptions);
+  result = sent.result;
+
+  if (isAuthFailure(result, requestUrl)) {
+    const forced = await refreshWhatnotAuthFromBrowser(targetTabId, {
+      includeSession: true,
+      force: true,
     });
-    if (isAuthFailure(retry)) {
-      if (!suppressRelogin) {
-        sendSocketMessage("relogin_required", { reason: "retry_failed" });
+    if (forced.success) {
+      const forcedOptions = await applyFreshWhatnotAuthHeaders(options);
+      sent = await sendWhatnotApiRequest(forced.tabId || targetTabId, forcedOptions);
+      result = sent.result;
+      if (!isAuthFailure(result, requestUrl)) {
+        return result;
       }
-      return { success: false, error: "Auth failed after one retry, relogin required." };
     }
-    return retry;
+    if (!suppressRelogin) {
+      return { success: false, error: "Auth failed after automatic refresh, relogin required." };
+    }
+    return {
+      success: false,
+      error: result?.error || "Whatnot session expired. Open whatnot.com and sign in again.",
+    };
   }
 
   return result;
 }
 
 async function handlePlatformAction(payload) {
+  platformActionsInFlight += 1;
   let result = null;
+  try {
   if (payload?.action === "update_bio_from_platform") {
     result = await executeUpdateBioFromPlatform(payload);
   } else if (payload?.action === "fetch_whatnot_orders") {
@@ -1273,6 +1569,9 @@ async function handlePlatformAction(payload) {
   } else {
     result = await executeApi(state.tabId, payload);
   }
+  } finally {
+    platformActionsInFlight = Math.max(0, platformActionsInFlight - 1);
+  }
   sendSocketMessage("action_response", {
     requestId: payload?.requestId || null,
     status: result.success ? "success" : "error",
@@ -1290,18 +1589,10 @@ async function executeSellerHubInventoryFromPlatform(payload) {
     return { success: false, error: "Invalid inventory status." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const defaultPayload = {
     after: null,
     filters: [],
@@ -1338,22 +1629,12 @@ async function executeSellerHubInventoryFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   const result = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=SellerHubInventory&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   });
 
@@ -1378,18 +1659,10 @@ async function executeMyLiveStatsFromPlatform(payload) {
     return { success: false, error: "liveId is required for MyLiveStats." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const variables = { liveId };
   const template = state?.observedGraphqlTemplates?.MyLiveStats;
   let requestBody = {
@@ -1409,39 +1682,21 @@ async function executeMyLiveStatsFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=MyLiveStats&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   });
 }
 
 async function executeGetSellerLiveReadinessFromPlatform() {
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const template = state?.observedGraphqlTemplates?.GetSellerLiveReadiness;
   let requestBody = {
     operationName: "GetSellerLiveReadiness",
@@ -1460,22 +1715,12 @@ async function executeGetSellerLiveReadinessFromPlatform() {
     }
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetSellerLiveReadiness&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   });
 }
@@ -1486,18 +1731,10 @@ async function executeMyLivesFromPlatform(sellerId) {
     return { success: false, error: "sellerId is required for MyLives." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const variables = { sellerId: normalizedSellerId };
   const template = state?.observedGraphqlTemplates?.MyLives;
   let requestBody = {
@@ -1514,22 +1751,12 @@ async function executeMyLivesFromPlatform(sellerId) {
     requestBody.variables = { ...requestBody.variables, sellerId: normalizedSellerId };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=MyLives&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 }
@@ -1540,18 +1767,10 @@ async function executeGetPrimaryShowFormatTagsFromPlatform(payload) {
     return { success: false, error: "categoryId is required for GetPrimaryShowFormatTags." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const variables = { categoryId };
   const template = state?.observedGraphqlTemplates?.GetPrimaryShowFormatTags;
   let requestBody = {
@@ -1572,39 +1791,21 @@ async function executeGetPrimaryShowFormatTagsFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetPrimaryShowFormatTags&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 }
 
 async function executeScheduleLiveStreamFromPlatform(payload) {
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const rawVariables = payload?.variables && typeof payload.variables === "object" ? payload.variables : {};
   const template = state?.observedGraphqlTemplates?.ScheduleLiveStream;
   let requestBody = {
@@ -1625,22 +1826,12 @@ async function executeScheduleLiveStreamFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=ScheduleLiveStream&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 }
@@ -1651,18 +1842,10 @@ async function executeCancelLiveFromPlatform(payload) {
     return { success: false, error: "liveId is required." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const template = state?.observedGraphqlTemplates?.CancelLive;
   let requestBody = {
     operationName: "CancelLive",
@@ -1685,22 +1868,12 @@ async function executeCancelLiveFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   const cancelResponse = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=CancelLive&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 
@@ -1721,18 +1894,10 @@ async function executeGetSellerHomeDashboardFromPlatform({ sellerId, upcomingSho
     return { success: false, error: "sellerID is required for GetSellerHomeDashboard." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   let template = state?.observedGraphqlTemplates?.GetSellerHomeDashboard;
   let observedDashboardPayload = null;
   if (!template?.requestBody || typeof template.requestBody !== "object") {
@@ -1786,22 +1951,12 @@ async function executeGetSellerHomeDashboardFromPlatform({ sellerId, upcomingSho
     upcomingShowsCount: Number.isFinite(Number(upcomingShowsCount)) ? Number(upcomingShowsCount) : 0,
   };
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   const apiResult = await executeApi(state.tabId, {
     url: template.url || "https://www.whatnot.com/services/graphql/?operationName=GetSellerHomeDashboard&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   }, { suppressRelogin: true });
 
@@ -1910,18 +2065,10 @@ async function executeWhatnotShowTabFromPlatform(payload) {
 }
 
 async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const defaultVariables = {
     statuses: ["PLAYING", "STOPPED", "ENDED"],
     categoryType: null,
@@ -1954,39 +2101,24 @@ async function executeGetShipmentsLivestreamsFromPlatform(_payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetShipmentsLivestreams&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   });
 }
 
 async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId, {
+    onMissingTab: { status: 503, data: null },
+    onMissingCsrf: { status: 401, data: null },
+  });
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
-  }
-
   const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
   let requestBody = {
     operationName: "GetEarlyPayoutBalanceData",
@@ -2004,22 +2136,12 @@ async function executeGetEarlyPayoutBalanceDataFromPlatform(_payload) {
     }
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 }
@@ -2030,18 +2152,13 @@ async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
     return { success: false, error: "Missing shipment id.", status: 400, data: null };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId, {
+    onMissingTab: { status: 503, data: null },
+    onMissingCsrf: { status: 401, data: null },
+  });
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
-  }
-
   const variables = { id };
   const template = state?.observedGraphqlTemplates?.GetShipment;
   let requestBody = {
@@ -2061,22 +2178,12 @@ async function executeGetShipmentFromPlatform(shipmentGraphqlId) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetShipment&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody)
   });
 }
@@ -2123,18 +2230,13 @@ async function executeWhatnotShipmentsBatchFromPlatform(payload) {
 }
 
 async function syncWhatnotEarlyPayoutBalanceFromPlatform() {
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab.", status: 503, data: null };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId, {
+    onMissingTab: { status: 503, data: null },
+    onMissingCsrf: { status: 401, data: null },
+  });
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first.", status: 401, data: null };
-  }
-
   const template = state?.observedGraphqlTemplates?.GetEarlyPayoutBalanceData;
   let requestBody = {
     operationName: "GetEarlyPayoutBalanceData",
@@ -2152,22 +2254,12 @@ async function syncWhatnotEarlyPayoutBalanceFromPlatform() {
     }
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GetEarlyPayoutBalanceData&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 }
@@ -2225,18 +2317,10 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
     return { success: false, error: "At least one media item with id and extension is required." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const template = state?.observedGraphqlTemplates?.GenerateMediaUploadUrls;
   let requestBody = {
     operationName: "GenerateMediaUploadUrls",
@@ -2257,22 +2341,12 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
     };
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   const generateResponse = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=GenerateMediaUploadUrls&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(requestBody),
   });
 
@@ -2424,11 +2498,11 @@ async function executeGenerateMediaUploadUrlsFromPlatform(payload) {
     }
   }
 
-  const addListingPhotoHeaders = filterAllowedHeaders(addListingPhotoTemplate?.requestHeaders || {});
+  const addListingPhotoHeaders = await buildWhatnotGraphqlHeaders(addListingPhotoTemplate?.requestHeaders || {});
   const addListingPhotoResponse = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=AddListingPhoto&ssr=0",
     method: "POST",
-    headers: { ...addListingPhotoHeaders, ...defaultHeaders },
+    headers: addListingPhotoHeaders,
     body: JSON.stringify(addListingPhotoRequestBody),
   });
 
@@ -2454,18 +2528,10 @@ async function executeCreateListingFromPlatform(payload) {
     ? structuredClone(payload.createListingPayload)
     : {};
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const createListingTemplate = state?.observedGraphqlTemplates?.CreateListing;
   let createListingRequestBody = {
     operationName: "CreateListing",
@@ -2498,22 +2564,12 @@ async function executeCreateListingFromPlatform(payload) {
       : crypto.randomUUID();
   createListingRequestBody.variables.uuid = requestUuid;
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(createListingTemplate?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(createListingTemplate?.requestHeaders || {});
 
   const createListingResponse = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=CreateListing&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(createListingRequestBody),
   });
 
@@ -2538,18 +2594,10 @@ async function executeDeleteListingFromPlatform(payload) {
     return { success: false, error: "At least one listing id is required." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return { success: false, error: autoConnected.error || "No connected Whatnot tab." };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const bulkListingTemplate = state?.observedGraphqlTemplates?.SellerBulkListingAction;
   let bulkListingRequestBody = {
     operationName: "SellerBulkListingAction",
@@ -2576,22 +2624,12 @@ async function executeDeleteListingFromPlatform(payload) {
     }
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1",
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(bulkListingTemplate?.requestHeaders || {});
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(bulkListingTemplate?.requestHeaders || {});
 
   const deleteListingResponse = await executeApi(state.tabId, {
     url: "https://www.whatnot.com/services/graphql/?operationName=SellerBulkListingAction&ssr=0",
     method: "POST",
-    headers: { ...templateHeaders, ...defaultHeaders },
+    headers: graphqlHeaders,
     body: JSON.stringify(bulkListingRequestBody),
   });
 
@@ -2612,21 +2650,10 @@ async function executeUpdateBioFromPlatform(payload) {
     return { success: false, error: "Bio is required." };
   }
 
-  if (!state.tabId || !state.auth?.csrf_token) {
-    const autoConnected = await ensureConnectedWhatnotSession(state.tabId);
-    if (!autoConnected.success) {
-      return {
-        success: false,
-        error: autoConnected.error || "No connected Whatnot tab. Connect extension first."
-      };
-    }
+  const authGate = await requireWhatnotAuth(state.tabId);
+  if (!authGate.ok) {
+    return authGate.response;
   }
-
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  if (!csrfToken || csrfToken === "-") {
-    return { success: false, error: "CSRF token missing. Reconnect Whatnot first." };
-  }
-
   const template = getUpdateProfileTemplate(state?.observedGraphqlTemplates || {});
   let requestPayload = {
     operationName: "UpdateProfileMutation",
@@ -2639,23 +2666,12 @@ async function executeUpdateBioFromPlatform(payload) {
     injectBioIntoPayload(requestPayload, bio);
   }
 
-  const defaultHeaders = {
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-csrf-token": csrfToken,
-    "x-wn-extension": "1"
-  };
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (accessToken) {
-    defaultHeaders.authorization = `Bearer ${accessToken}`;
-  }
-  const templateHeaders = filterAllowedHeaders(template?.requestHeaders || {});
-  const headers = { ...templateHeaders, ...defaultHeaders };
+  const graphqlHeaders = await buildWhatnotGraphqlHeaders(template?.requestHeaders || {});
 
   return executeApi(state.tabId, {
-    url: "https://www.whatnot.com/services/graphql/?operationName=UpdateProfileMutation&ssr=0",
+    url: template?.url || "https://www.whatnot.com/services/graphql/?operationName=UpdateProfileMutation&ssr=0",
     method: "POST",
-    headers,
+    headers: graphqlHeaders,
     body: JSON.stringify(requestPayload)
   });
 }
@@ -2702,12 +2718,74 @@ function getOperationName(payload) {
   }
 }
 
-function isAuthFailure(result) {
-  if (!result) return true;
-  if (result.status === 401 || result.status === 403) return true;
+function isAuthFailure(result, requestUrl = "") {
+  if (!result) {
+    return true;
+  }
+  const status = Number(result.status);
+  if (status === 401 || status === 403) {
+    return true;
+  }
+
+  const url = typeof requestUrl === "string" ? requestUrl : "";
+  const isGraphql = url.includes("/services/graphql");
+  const isWhatnotHtml =
+    url.includes("whatnot.com") && !isGraphql && !url.includes("/api/");
+
+  if (isWhatnotHtml) {
+    if (result.error) {
+      const err = String(result.error).toLowerCase();
+      if (
+        err.includes("invalid token") ||
+        err.includes("relogin") ||
+        err.includes("session expired")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const fragments = [];
+  if (result.error) {
+    fragments.push(String(result.error));
+  }
+  if (result.data && typeof result.data === "object") {
+    try {
+      fragments.push(JSON.stringify(result.data));
+    } catch (_error) {
+      fragments.push(String(result.data));
+    }
+  } else if (typeof result.data === "string" && result.data.length < 2048) {
+    fragments.push(result.data);
+  }
+  const combined = fragments.join(" ").toLowerCase();
+  if (
+    combined.includes("invalid token") ||
+    combined.includes("token expired") ||
+    combined.includes("session expired") ||
+    combined.includes('"msg":"invalid token"')
+  ) {
+    return true;
+  }
+
+  if (result.data?.msg && String(result.data.msg).toLowerCase().includes("invalid token")) {
+    return true;
+  }
+
   const errors = result.data?.errors;
-  if (!errors) return false;
-  return JSON.stringify(errors).toLowerCase().includes("auth");
+  if (Array.isArray(errors)) {
+    const errorText = JSON.stringify(errors).toLowerCase();
+    if (
+      errorText.includes("invalid token") ||
+      errorText.includes("not authenticated") ||
+      errorText.includes("unauthorized")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function readCookieState() {
@@ -2728,6 +2806,21 @@ async function readCookieValue(name) {
     name
   });
   return cookie?.value || null;
+}
+
+/** Milliseconds since epoch when access token expires, or null if unknown. */
+async function readAccessTokenExpirationMs() {
+  const raw = await readCookieValue("__Secure-access-token-expiration");
+  if (!raw) {
+    return null;
+  }
+  const trimmed = String(raw).trim();
+  const asNumber = Number(trimmed);
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    return asNumber > 1e12 ? asNumber : asNumber * 1000;
+  }
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function recordObservedShipmentGraphqlIds(ids) {
@@ -2938,21 +3031,12 @@ async function fetchShipmentIdsFromCapturedGraphqlTemplate(tabId, liveId) {
     }
   }
 
-  const templateHeaders = filterAllowedHeaders(template.requestHeaders || {});
-  const headers = {
-    ...templateHeaders,
-    "content-type": "application/json",
-    "x-whatnot-app": "whatnot-web",
-    "x-wn-extension": "1",
-  };
-  const csrfToken = String(state?.auth?.csrf_token || "").trim();
-  const accessToken = String(state?.auth?.access_token || "").trim();
-  if (csrfToken && csrfToken !== "-") {
-    headers["x-csrf-token"] = csrfToken;
+  const authGate = await requireWhatnotAuth(tabId || state.tabId);
+  if (!authGate.ok) {
+    return [];
   }
-  if (accessToken) {
-    headers.authorization = `Bearer ${accessToken}`;
-  }
+
+  const headers = await buildWhatnotGraphqlHeaders(template.requestHeaders || {});
 
   const response = await executeApi(tabId, {
     url: template.url || "https://www.whatnot.com/services/graphql/?ssr=0",
@@ -3321,7 +3405,15 @@ function injectBioIntoPayload(payload, bio) {
 }
 
 function filterAllowedHeaders(headers) {
-  const blocked = new Set(["content-length", "host", "origin", "referer", "cookie"]);
+  const blocked = new Set([
+    "content-length",
+    "host",
+    "origin",
+    "referer",
+    "cookie",
+    "authorization",
+    "x-csrf-token",
+  ]);
   const out = {};
   for (const [k, v] of Object.entries(headers || {})) {
     if (!k) continue;
@@ -3363,18 +3455,25 @@ function setBackendSocket(url) {
     return { success: false, error: err.message };
   }
 
-  ws.onopen = () =>
+  ws.onopen = () => {
     sendSocketMessage("auth", {
       status: "extension_online",
       clerkUserId: state.clerkUserId,
       auth: state.auth,
-      tabId: state.tabId
+      tabId: state.tabId,
     });
+    if (state.clerkUserId) {
+      void refreshWhatnotAuthFromBrowser(state.tabId, { includeSession: true, force: true });
+    }
+  };
   ws.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === "heartbeat") {
         sendSocketMessage("pong", { ts: Date.now() });
+        if (state.connected && state.tabId && platformActionsInFlight === 0) {
+          void refreshWhatnotAuthFromBrowser(state.tabId, { includeSession: true });
+        }
         return;
       }
       if (msg.type === "force_relogin") {
@@ -3384,7 +3483,7 @@ function setBackendSocket(url) {
         return;
       }
       if (msg.type === "action_request") {
-        await handlePlatformAction(msg.payload);
+        void handlePlatformAction(msg.payload);
       }
     } catch (_e) {}
   };
@@ -3444,6 +3543,13 @@ async function ensureStateHydrated() {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     setBackendSocket(state.backendSocketUrl || BACKEND_SOCKET_URL);
   }
+
+  const accessToken = await readCookieValue("__Secure-access-token");
+  if (state.clerkUserId && accessToken) {
+    void refreshWhatnotAuthFromBrowser(state.tabId, { includeSession: true, force: true });
+  }
+
+  void scheduleWhatnotAuthKeepalive();
 }
 
 async function persistState() {

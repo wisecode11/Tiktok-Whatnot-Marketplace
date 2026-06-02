@@ -45,6 +45,7 @@ import {
   scheduleWhatnotShow,
   syncWhatnotReferenceCache,
   waitForSessionToken,
+  withWhatnotAuthRetry,
   getClerkErrorMessage,
   type WhatnotLivestreamMainCategoryItem,
   type WhatnotLiveShowItem,
@@ -145,7 +146,9 @@ export default function SellerWhatnotShowPage() {
     setLoadError("")
     try {
       const token = await waitForSessionToken(getToken)
-      const data = await fetchWhatnotShowTabData(token, 0, { forceRefresh: true })
+      const data = await withWhatnotAuthRetry(() =>
+        fetchWhatnotShowTabData(token, 0, { forceRefresh: true }),
+      )
       setShows(data.shows ?? [])
       setLoadError("")
     } catch (error) {
@@ -197,7 +200,7 @@ export default function SellerWhatnotShowPage() {
       setReferenceCacheNotice("")
 
       const token = await waitForSessionToken(getToken)
-      const result = await syncWhatnotReferenceCache(token)
+      const result = await withWhatnotAuthRetry(() => syncWhatnotReferenceCache(token))
       await loadCategoryOptions()
 
       if (Array.isArray(result.errors) && result.errors.length) {
@@ -377,7 +380,7 @@ export default function SellerWhatnotShowPage() {
     }
     try {
       const token = await waitForSessionToken(getToken)
-      await scheduleWhatnotShow(token, schedulePayload)
+      await withWhatnotAuthRetry(() => scheduleWhatnotShow(token, schedulePayload))
       setScheduleError("")
       setScheduleNotice(`Schedule details captured successfully (category id: ${scheduleForm.selectedCategoryId}).`)
       setOpenScheduleDialog(false)
@@ -398,7 +401,7 @@ export default function SellerWhatnotShowPage() {
       setCancelNotice("")
 
       const token = await waitForSessionToken(getToken)
-      const result = await cancelWhatnotShow(token, liveId)
+      const result = await withWhatnotAuthRetry(() => cancelWhatnotShow(token, liveId))
 
       if (result.success === false) {
         throw new Error(result.message || "Whatnot show cancel failed.")
