@@ -117,6 +117,8 @@
     };
   }
 
+  window.postMessage({ source: "wn-page", type: "INJECT_READY" }, "*");
+
   window.addEventListener("message", async (event) => {
     if (event.source !== window || !event.data || event.data.source !== "wn-extension-content") {
       return;

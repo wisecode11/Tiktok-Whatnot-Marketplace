@@ -31,8 +31,15 @@ const configuredOrigins = (process.env.FRONTEND_URL || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const productionFrontendOrigin = "https://sellerhub.wisecodestudio.com";
+
 const allowedOrigins = Array.from(
-  new Set([...configuredOrigins, "http://localhost:3000", "http://localhost:3001"]),
+  new Set([
+    ...configuredOrigins,
+    productionFrontendOrigin,
+    "http://localhost:3000",
+    "http://localhost:3001",
+  ]),
 );
 
 app.use(

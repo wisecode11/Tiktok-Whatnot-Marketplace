@@ -1,3 +1,5 @@
+config.local.js
+
 # Generated from frontend/public at sync/build time (see scripts/sync-extension-logos.ps1)
 extension-logo.png
 extension-icon-16.png

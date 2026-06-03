@@ -46,6 +46,22 @@ From repo root, before **Load unpacked** or shipping a zip:
 
 Do not commit copied PNGs in this folder (see `.gitignore`).
 
+## Production endpoints
+
+Configured in `config.js` (used by `background.js`):
+
+| Setting | Production value |
+|---------|------------------|
+| Seller Hub | `https://sellerhub.wisecodestudio.com` |
+| API / REST | `https://sellerhub-backend.wisecodestudio.com` |
+| WebSocket | `wss://sellerhub-backend.wisecodestudio.com/ws/whatnot-extension` |
+
+Set `WHATNOT_EXTENSION_API_KEY` in `config.js` if your backend defines `WHATNOT_EXTENSION_API_KEY` in env.
+
+For **local dev**, copy `config.local.example.js` → `config.local.js` and point `background.js` import at `./config.local.js` instead of `./config.js`.
+
+After changing config or `manifest.json`, **Reload** the extension in `chrome://extensions`.
+
 ## Load extension
 
 1. Run `.\scripts\sync-extension-logos.ps1` from the repo root
@@ -53,7 +69,7 @@ Do not commit copied PNGs in this folder (see `.gitignore`).
 3. Enable Developer Mode
 4. Load unpacked -> select this folder
 5. Open `https://www.whatnot.com/` and login
-6. Open extension popup -> click **Connect Whatnot**
+6. Open extension popup -> click **Connect Whatnot** (use your Clerk user id from production Seller Hub)
 
 ## Backend integration
 

@@ -1,3 +1,9 @@
+import {
+  MARKETPLACE_API_BASE,
+  BACKEND_SOCKET_URL,
+  WHATNOT_EXTENSION_API_KEY,
+} from "./config.js";
+
 const state = {
   connected: false,
   tabId: null,
@@ -22,9 +28,7 @@ let platformActionsInFlight = 0;
 let lastLightAuthRefreshAt = 0;
 const observedGraphqlWaiters = new Map();
 let pendingShowTabRequestContext = null;
-const MARKETPLACE_API_BASE = "http://localhost:5000";
-const WHATNOT_EXTENSION_API_KEY = "";
-const BACKEND_SOCKET_URL = "ws://localhost:5000/ws/whatnot-extension";
+
 const SELLER_HUB_INVENTORY_QUERY =
   "query SellerHubInventory($first:Int,$after:String,$query:String,$statuses:[ListingStatus],$filters:[FilterInput],$sort:SortInput,$transactionTypes:[ListingTransactionType]){me{id email inventory(first:$first,after:$after,query:$query,statuses:$statuses,filters:$filters,sort:$sort,transactionTypes:$transactionTypes){edges{node{id uuid title subtitle description status publicStatus quantity transactionType price{amount currency amountSafe __typename} transactionProps{isOfferable __typename} product{id category{id label __typename} __typename} images{id url __typename} __typename} __typename} pageInfo{hasPreviousPage hasNextPage startCursor endCursor __typename} totalCount groupedBy __typename} __typename}}";
 const MY_LIVE_STATS_QUERY =
